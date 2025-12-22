@@ -28,7 +28,7 @@ mod wasm_backend;
 
 pub mod zk;
 
-pub use zk::{CircuitType, CodeBundle};
+pub use zk::{CircuitType, CodeBundle, SerializedVK};
 
 pub use crate::backend::{
     Backend, BackendApi, BackendError, BackendResult, GasInfo, Querier, Storage,

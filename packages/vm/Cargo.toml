@@ -73,8 +73,8 @@ tracing = "0.1.32"
 # wasmer = { path = "../../../wasmer/lib/api", default-features = false, features = ["singlepass"] }
 # wasmer-middlewares = { path = "../../../wasmer/lib/middlewares" }
 
-zk-headstash  = { path = "../../../../TERPNETWORK/airdrop/zk-crates/zk-headstash" }
-halo2_proofs  = {version = "0.3.1" ,path = "../../../../TERPNETWORK/airdrop/zk-crates/submodules/halo2/halo2_proofs", default-features = false,features = ["test-dev-graph","gadget-traces", "dev-graph"]}
+zk-headstash  = { git = "https://github.com/hard-nett/airdrop", branch = "airdrop-cycle-2",package = "zk-headstash" }
+halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp",package = "halo2_proofs" }
 pasta_curves = "0.5"
 image = { version = "0.24"  }
 plotters = { version = "0.3.0"  }
