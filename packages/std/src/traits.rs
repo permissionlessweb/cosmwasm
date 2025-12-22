@@ -325,6 +325,19 @@ pub trait Api: Any {
         public_keys: &[&[u8]],
     ) -> Result<bool, VerificationError>;
 
+    /// Verifies a Halo2 zero-knowledge proof with the given proof bytes and instance data.
+    /// The verifying key is automatically loaded from the contract's pinned VK if available.
+    ///
+    /// Returns `Ok(true)` if the proof is valid, `Ok(false)` if invalid, or an error if verification fails.
+    #[allow(unused_variables)]
+    fn halo2_proof_instance_verify(
+        &self,
+        proof: &[u8],
+        instances: &[u8],
+    ) -> Result<bool, VerificationError> {
+        unimplemented!()
+    }
+
     /// Emits a debugging message that is handled depending on the environment (typically printed to console or ignored).
     /// Those messages are not persisted to chain.
     fn debug(&self, message: &str);

@@ -26,6 +26,10 @@ mod static_analysis;
 pub mod testing;
 mod wasm_backend;
 
+pub mod zk;
+
+pub use zk::{CircuitType, CodeBundle};
+
 pub use crate::backend::{
     Backend, BackendApi, BackendError, BackendResult, GasInfo, Querier, Storage,
 };

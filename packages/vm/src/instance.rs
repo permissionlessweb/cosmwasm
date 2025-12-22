@@ -17,8 +17,9 @@ use crate::imports::{
     do_abort, do_addr_canonicalize, do_addr_humanize, do_addr_validate, do_bls12_381_aggregate_g1,
     do_bls12_381_aggregate_g2, do_bls12_381_hash_to_g1, do_bls12_381_hash_to_g2,
     do_bls12_381_pairing_equality, do_db_read, do_db_remove, do_db_write, do_debug,
-    do_ed25519_batch_verify, do_ed25519_verify, do_query_chain, do_secp256k1_recover_pubkey,
-    do_secp256k1_verify, do_secp256r1_recover_pubkey, do_secp256r1_verify,
+    do_ed25519_batch_verify, do_ed25519_verify, do_halo2_proof_instance_verify, do_query_chain,
+    do_secp256k1_recover_pubkey, do_secp256k1_verify, do_secp256r1_recover_pubkey,
+    do_secp256r1_verify,
 };
 #[cfg(feature = "iterator")]
 use crate::imports::{do_db_next, do_db_next_key, do_db_next_value, do_db_scan};
@@ -75,7 +76,7 @@ where
         let engine = make_compiling_engine(memory_limit);
         let module = compile(&engine, code)?;
         let store = Store::new(engine);
-        Instance::from_module(store, &module, backend, options.gas_limit, None, None)
+        Instance::from_module(store, &module, backend, options.gas_limit, None, None, None)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -86,8 +87,12 @@ where
         gas_limit: u64,
         extra_imports: Option<HashMap<&str, Exports>>,
         instantiation_lock: Option<&Mutex<()>>,
+        vk: Option<crate::zk::PinnedVK>,
     ) -> VmResult<Self> {
-        let fe = FunctionEnv::new(&mut store, Environment::new(backend.api, gas_limit));
+        let fe = FunctionEnv::new(
+            &mut store,
+            Environment::new_with_vk(backend.api, gas_limit, vk),
+        );
 
         let mut import_obj = Imports::new();
         let mut env_imports = Exports::new();
@@ -228,6 +233,11 @@ where
         env_imports.insert(
             "ed25519_batch_verify",
             Function::new_typed_with_env(&mut store, &fe, do_ed25519_batch_verify),
+        );
+
+        env_imports.insert(
+            "halo2_proof_instance_verify",
+            Function::new_typed_with_env(&mut store, &fe, do_halo2_proof_instance_verify),
         );
 
         // Allows the contract to emit debug logs that the host can either process or ignore.
@@ -525,7 +535,7 @@ where
     S: Storage + 'static, // 'static is needed here to allow using this in an Environment that is cloned into closures
     Q: Querier + 'static,
 {
-    Instance::from_module(store, module, backend, gas_limit, extra_imports, None)
+    Instance::from_module(store, module, backend, gas_limit, extra_imports, None, None)
 }
 
 #[cfg(test)]
@@ -690,6 +700,7 @@ mod tests {
             backend,
             instance_options.gas_limit,
             Some(extra_imports),
+            None,
             None,
         )
         .unwrap();

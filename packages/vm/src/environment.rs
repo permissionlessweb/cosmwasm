@@ -55,6 +55,8 @@ pub struct GasConfig {
     pub bls12_381_hash_to_g2_cost: u64,
     /// bls12-381 pairing equality check cost
     pub bls12_381_pairing_equality_cost: LinearGasCost,
+    /// halo2 proof verification cost
+    pub halo2_proof_instance_verify_cost: LinearGasCost,
     /// cost for writing memory regions
     pub write_region_cost: LinearGasCost,
     /// cost for reading memory regions <= 8MB
@@ -106,6 +108,10 @@ impl Default for GasConfig {
             bls12_381_pairing_equality_cost: LinearGasCost {
                 base: 2112 * GAS_PER_US,
                 per_item: 163 * GAS_PER_US,
+            },
+            halo2_proof_instance_verify_cost: LinearGasCost {
+                base: 1000,
+                per_item: 163,
             },
             write_region_cost: LinearGasCost {
                 base: 230000,
@@ -215,6 +221,9 @@ pub struct Environment<A, S, Q> {
     pub api: A,
     pub gas_config: GasConfig,
     data: Arc<RwLock<ContextData<S, Q>>>,
+    /// Whether this contract was uploaded with a verifying key
+    /// Pinned verifying key for Halo2 proof verification
+    pub pinned_vk: Option<crate::zk::PinnedVK>,
 }
 
 unsafe impl<A: BackendApi, S: Storage, Q: Querier> Send for Environment<A, S, Q> {}
@@ -228,17 +237,23 @@ impl<A: BackendApi, S: Storage, Q: Querier> Clone for Environment<A, S, Q> {
             api: self.api.clone(),
             gas_config: self.gas_config.clone(),
             data: self.data.clone(),
+            pinned_vk: self.pinned_vk.clone(),
         }
     }
 }
 
 impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
     pub fn new(api: A, gas_limit: u64) -> Self {
+        Self::new_with_vk(api, gas_limit, None)
+    }
+
+    pub fn new_with_vk(api: A, gas_limit: u64, vk: Option<crate::zk::PinnedVK>) -> Self {
         Environment {
             memory: None,
             api,
             gas_config: GasConfig::default(),
             data: Arc::new(RwLock::new(ContextData::new(gas_limit))),
+            pinned_vk: vk,
         }
     }
 
@@ -494,6 +509,10 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
         self.with_context_data_mut(|context_data| {
             (context_data.storage.take(), context_data.querier.take())
         })
+    }
+    /// Returns true if this contract instance supports verifying keys for Halo2 proof verification
+    pub fn supports_verifying_keys(&self) -> bool {
+        self.pinned_vk.is_some()
     }
 }
 

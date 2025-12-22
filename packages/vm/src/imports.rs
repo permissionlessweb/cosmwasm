@@ -30,6 +30,8 @@ use crate::sections::encode_sections;
 use crate::serde::to_vec;
 use crate::GasInfo;
 
+use zk_headstash::{circuit::Instance, Proof};
+
 /// A kibi (kilo binary)
 const KI: usize = 1024;
 /// A mebi (mega binary)
@@ -814,6 +816,57 @@ pub fn do_ed25519_batch_verify<
         },
     };
     Ok(code)
+}
+
+pub fn do_halo2_proof_instance_verify<
+    A: BackendApi + 'static,
+    S: Storage + 'static,
+    Q: Querier + 'static,
+>(
+    mut env: FunctionEnvMut<Environment<A, S, Q>>,
+    proof_ptr: u32,
+    _proof_len: u32,
+    instances_ptr: u32,
+    _instances_len: u32,
+) -> VmResult<u32> {
+    let (data, mut store) = env.data_and_store_mut();
+
+    charge_host_call_gas(data, &mut store)?;
+
+    // Read proof from WASM memory (max 2 MB)
+    const MAX_PROOF_SIZE: usize = 2 * 1024 * 1024;
+    let proof_bytes = read_region(data, &mut store, proof_ptr, MAX_PROOF_SIZE)?;
+
+    // Read instances from WASM memory (max 64 KB)
+    const MAX_INSTANCES_SIZE: usize = 64 * 1024;
+    let instances_bytes = read_region(data, &mut store, instances_ptr, MAX_INSTANCES_SIZE)?;
+
+    // Charge gas
+    let gas_info = GasInfo::with_cost(
+        data.gas_config
+            .halo2_proof_instance_verify_cost
+            .total_cost(1)?,
+    );
+    process_gas_info(data, &mut store, gas_info)?;
+
+    if !data.supports_verifying_keys() {
+        return Ok(0);
+    }
+
+    let vk = data
+        .pinned_vk
+        .as_ref()
+        .ok_or_else(|| VmError::generic_err("VK not available"))?;
+
+    let instances = Instance::from_bytes(instances_bytes);
+
+    let proof = Proof::new(proof_bytes);
+    let result = proof.verify(vk.vk(), &[instances]);
+
+    match result {
+        Ok(_) => Ok(0),
+        Err(_) => Ok(1),
+    }
 }
 
 /// Prints a debug message to console.

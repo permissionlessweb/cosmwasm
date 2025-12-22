@@ -101,6 +101,14 @@ extern "C" {
     /// greater than 1 in case of error.
     fn ed25519_batch_verify(messages_ptr: u32, signatures_ptr: u32, public_keys_ptr: u32) -> u32;
 
+    /// Verifies proof bytes for a set of public instances with the contract halo2 verifying keys.
+    fn halo2_proof_instance_verify(
+        proof_ptr: u32,
+        proof_len: u32,
+        instances_ptr: u32,
+        instances_len: u32,
+    ) -> u32;
+
     /// Writes a debug message (UTF-8 encoded) to the host for debugging purposes.
     /// The host is free to log or process this in any way it considers appropriate.
     /// In production environments it is expected that those messages are discarded.
@@ -702,6 +710,39 @@ impl Api for ExternalApi {
             3 => panic!("InvalidHashFormat must not happen. This is a bug in the VM."),
             4 => Err(VerificationError::InvalidSignatureFormat),
             5 => Err(VerificationError::InvalidPubkeyFormat),
+            10 => Err(VerificationError::GenericErr),
+            error_code => Err(VerificationError::unknown_err(error_code)),
+        }
+    }
+
+    fn halo2_proof_instance_verify(
+        &self,
+        proof: &[u8],
+        instances: &[u8],
+    ) -> Result<bool, VerificationError> {
+        let proof_send = Region::from_slice(proof);
+        let proof_send_ptr = proof_send.as_ptr() as u32;
+        let proof_len = proof.len() as u32;
+
+        let instances_send = Region::from_slice(instances);
+        let instances_send_ptr = instances_send.as_ptr() as u32;
+        let instances_len = instances.len() as u32;
+
+        let result = unsafe {
+            halo2_proof_instance_verify(
+                proof_send_ptr,
+                proof_len,
+                instances_send_ptr,
+                instances_len,
+            )
+        };
+
+        match result {
+            0 => Ok(true),
+            1 => Ok(false),
+            2 => Err(VerificationError::InvalidFormat),
+            3 => Err(VerificationError::InvalidSignatureFormat),
+            4 => Err(VerificationError::InvalidPubkeyFormat),
             10 => Err(VerificationError::GenericErr),
             error_code => Err(VerificationError::unknown_err(error_code)),
         }
