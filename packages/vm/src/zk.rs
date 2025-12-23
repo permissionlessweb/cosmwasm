@@ -4,7 +4,7 @@ use halo2_proofs::plonk::VerifyingKey as Halo2VK;
 use halo2_proofs::poly::commitment::Params;
 use pasta_curves::vesta;
 use sha2::{Digest, Sha256};
-use std::io::{self, Cursor, Read, Write};
+use std::io::{self, Cursor, Read};
 use std::sync::Arc;
 use wasmer::wasmparser::{Parser, Payload};
 

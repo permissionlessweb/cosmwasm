@@ -740,10 +740,6 @@ impl Api for ExternalApi {
         match result {
             0 => Ok(true),
             1 => Ok(false),
-            2 => Err(VerificationError::InvalidFormat),
-            3 => Err(VerificationError::InvalidSignatureFormat),
-            4 => Err(VerificationError::InvalidPubkeyFormat),
-            10 => Err(VerificationError::GenericErr),
             error_code => Err(VerificationError::unknown_err(error_code)),
         }
     }
