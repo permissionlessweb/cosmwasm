@@ -818,6 +818,7 @@ pub fn do_ed25519_batch_verify<
     Ok(code)
 }
 
+/// internal function that retrives vk from pinned memory and performs proof verification on instance & proof bytes
 pub fn do_halo2_proof_instance_verify<
     A: BackendApi + 'static,
     S: Storage + 'static,
@@ -853,6 +854,7 @@ pub fn do_halo2_proof_instance_verify<
         return Ok(0);
     }
 
+    // Retrieve vk from pinned memory, defaults to None.
     let vk = data
         .pinned_vk
         .as_ref()

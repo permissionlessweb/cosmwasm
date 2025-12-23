@@ -127,20 +127,29 @@ impl LoadedVerifyingKey {
     /// Deserialize from raw bytes
     /// Format: [params_len (8 bytes LE)][params bytes][vk bytes]
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
-        let mut reader = Cursor::new(bytes);
+        if bytes.is_empty() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "Vk empty"));
+        }
 
         // Read params length prefix
+        let mut reader = Cursor::new(bytes);
         let mut params_len_bytes = [0u8; 8];
+        let original_size = bytes.len();
+
         reader.read_exact(&mut params_len_bytes)?;
         let params_len = u64::from_le_bytes(params_len_bytes) as usize;
 
         // Read params
         let mut params_bytes = vec![0u8; params_len];
         reader.read_exact(&mut params_bytes)?;
-        let params = Params::<vesta::Affine>::read(&mut Cursor::new(params_bytes))?;
 
-        // Read VK (requires params for domain construction)
-        let vk = Halo2VK::<vesta::Affine>::read::<_, GenericCircuit>(&mut reader, &params)?;
+        // TODO: integrate circuit manifold middleware for marketplace of circuit use
+        // Deserialize the circuit param bytes to be able to deserialize the verifying key from the param struct object.
+        let params = Params::<vesta::Affine>::read(&mut Cursor::new(params_bytes))?;
+        let vk = Halo2VK::<vesta::Affine>::read::<_, zk_headstash::circuit::Circuit>(
+            &mut reader,
+            &params,
+        )?;
 
         Ok(LoadedVerifyingKey(
             zk_headstash::circuit::VerifyingKey::new(vk),
@@ -168,6 +177,9 @@ impl LoadedVerifyingKey {
 
 /// Validates that a VK blob can be deserialized
 /// We use a generic circuit marker to avoid needing the actual circuit at validation time
+
+/// Validates that a combined params+VK blob matches expected structure
+/// This validates the file format written by `build_and_write`
 pub fn validate_vk_bytes(bytes: &[u8]) -> io::Result<()> {
     if bytes.is_empty() {
         return Err(io::Error::new(
@@ -178,34 +190,88 @@ pub fn validate_vk_bytes(bytes: &[u8]) -> io::Result<()> {
 
     let mut reader = Cursor::new(bytes);
 
-    // Validate params section
-    let mut params_len_bytes = [0u8; 8];
-    reader.read_exact(&mut params_len_bytes)?;
-    let params_len = u64::from_le_bytes(params_len_bytes) as usize;
+    // Step 1: Read and validate params
+    let params = Params::<vesta::Affine>::read(&mut reader).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to read params: {:?}", e),
+        )
+    })?;
 
-    if bytes.len() < 8 + params_len {
+    // Validate params k value is reasonable (typically 11-20 for circuits)
+    let k = params.k();
+    if k < 5 || k > 30 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "VK bytes too short for declared params length",
+            format!("Invalid k value: {}. Expected range [5, 30]", k),
         ));
     }
 
-    // Try to read params to validate format
-    let mut params_bytes = vec![0u8; params_len];
-    reader.read_exact(&mut params_bytes)?;
-    let _params = Params::<vesta::Affine>::read(&mut Cursor::new(params_bytes))?;
+    // Step 2: Validate VK structure
+    let current_pos = reader.position();
+    let remaining = bytes.len() as u64 - current_pos;
 
-    // We can't fully validate VK without the circuit type, but we can check
-    // that remaining bytes exist and start with valid version byte
-    if reader.position() < bytes.len() as u64 {
-        let mut version = [0u8; 1];
-        reader.read_exact(&mut version)?;
-        if version[0] != 0x01 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Invalid VK version byte",
-            ));
-        }
+    if remaining == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "No VK data after params",
+        ));
+    }
+
+    // VK starts with version byte (0x01)
+    let mut version = [0u8; 1];
+    reader.read_exact(&mut version)?;
+    if version[0] != 0x01 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Invalid VK version byte: expected 0x01, got 0x{:02x}",
+                version[0]
+            ),
+        ));
+    }
+
+    // Read fixed_commitments count
+    let mut count_bytes = [0u8; 4];
+    reader.read_exact(&mut count_bytes)?;
+    let fixed_commitments_count = u32::from_le_bytes(count_bytes);
+
+    // Sanity check: circuits typically have 1-1000 fixed commitments
+    if fixed_commitments_count > 10000 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Suspicious fixed_commitments count: {}",
+                fixed_commitments_count
+            ),
+        ));
+    }
+
+    // Validate we have enough bytes for commitments
+    // Each vesta::Affine commitment is 32 bytes
+    let expected_commitment_bytes = (fixed_commitments_count as usize) * 32;
+    let remaining_after_count = bytes.len() as u64 - reader.position();
+
+    if remaining_after_count < expected_commitment_bytes as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Not enough bytes for {} commitments",
+                fixed_commitments_count
+            ),
+        ));
+    }
+
+    // Skip past commitments (we've validated the count and size)
+    reader.set_position(reader.position() + expected_commitment_bytes as u64);
+
+    // The permutation structure follows, but its exact size is complex
+    // At minimum, check we haven't exhausted the bytes
+    if reader.position() >= bytes.len() as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Truncated VK: missing permutation data",
+        ));
     }
 
     Ok(())
@@ -312,6 +378,17 @@ impl halo2_proofs::plonk::Circuit<vesta::Scalar> for GenericCircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_empty() {
+        assert!(validate_vk_bytes(&[]).is_err());
+    }
+
+    #[test]
+    fn test_validate_truncated() {
+        // Just a version byte, nothing else
+        assert!(validate_vk_bytes(&[0x01]).is_err());
+    }
 
     #[test]
     fn circuit_type_conversion() {

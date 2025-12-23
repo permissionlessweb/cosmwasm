@@ -341,6 +341,7 @@ where
 
     /// Pin a VK in memory
     fn pin_vk(&self, checksum: &Checksum) -> VmResult<()> {
+        // pick back up cache
         let mut cache = self.inner.lock().unwrap();
         if cache.pinned_vk_cache.contains_key(checksum) {
             return Ok(());
@@ -507,7 +508,7 @@ where
 
         let path = &cache.wasm_path;
 
-        self.remove_vk_from_disk(path, checksum);
+        self.remove_vk_from_disk(path, checksum)?;
         remove_wasm_from_disk(path, checksum)?;
         Ok(())
     }
@@ -583,6 +584,7 @@ where
         {
             cache.stats.hits_fs_cache = cache.stats.hits_fs_cache.saturating_add(1);
             cache.pinned_memory_cache.store(checksum, cached_module)?;
+            
             if self.has_vk(checksum) {
                 drop(cache);
                 self.pin_vk(checksum)?;
