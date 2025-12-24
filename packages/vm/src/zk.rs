@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use std::io::{self, Cursor, Read};
 use std::sync::Arc;
 use wasmer::wasmparser::{Parser, Payload};
+use zk_headstash::circuit::VerifyingKey;
 
 /// Custom section name for embedded verifying keys
 /// Contracts can embed their VK in a WASM custom section with this name
@@ -94,7 +95,7 @@ pub struct SerializedVK {
 /// Deserialized verifying key ready for proof verification
 /// This is what gets cached in memory when a contract needs it
 #[derive(Debug)]
-pub struct LoadedVerifyingKey(pub zk_headstash::circuit::VerifyingKey);
+pub struct LoadedVerifyingKey(pub VerifyingKey);
 /// Thread-safe handle to a pinned verifying key
 pub type PinnedVK = Arc<LoadedVerifyingKey>;
 
@@ -114,7 +115,7 @@ impl LoadedVerifyingKey {
 
     /// Get actual memory footprint by serializing
     /// This is more accurate but requires serialization
-    pub fn vk(&self) -> &zk_headstash::circuit::VerifyingKey {
+    pub fn vk(&self) -> &VerifyingKey {
         &self.0
     }
 
@@ -151,9 +152,7 @@ impl LoadedVerifyingKey {
             &params,
         )?;
 
-        Ok(LoadedVerifyingKey(
-            zk_headstash::circuit::VerifyingKey::new(vk),
-        ))
+        Ok(LoadedVerifyingKey(VerifyingKey::new(vk)))
     }
 
     /// Serialize to bytes for storage
