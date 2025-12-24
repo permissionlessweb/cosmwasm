@@ -73,7 +73,7 @@ tracing = "0.1.32"
 # wasmer = { path = "../../../wasmer/lib/api", default-features = false, features = ["singlepass"] }
 # wasmer-middlewares = { path = "../../../wasmer/lib/middlewares" }
 
-zk-headstash  = { git = "https://github.com/hard-nett/airdrop", branch = "airdrop-cycle-2" }
+zk-headstash  = { git = "https://github.com/hard-nett/airdrop", branch = "airdrop-cycle-2", default-features = false }
 halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp",package = "halo2_proofs" }
 pasta_curves = "0.5"
 image = { version = "0.24"  }
