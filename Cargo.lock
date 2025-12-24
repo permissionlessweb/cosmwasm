@@ -433,7 +433,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -816,7 +816,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -947,7 +947,7 @@ version = "3.0.3-dev"
 [[package]]
 name = "cosmwasm-core"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#bb0c7c6cf1917465a7a9fe19e8d5a8acf1a13636"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#a4f514b6a49ad36630a1d243fc0de404a7c33e06"
 
 [[package]]
 name = "cosmwasm-crypto"
@@ -985,7 +985,7 @@ dependencies = [
 [[package]]
 name = "cosmwasm-crypto"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#bb0c7c6cf1917465a7a9fe19e8d5a8acf1a13636"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#a4f514b6a49ad36630a1d243fc0de404a7c33e06"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -1018,7 +1018,7 @@ dependencies = [
 [[package]]
 name = "cosmwasm-derive"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#bb0c7c6cf1917465a7a9fe19e8d5a8acf1a13636"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#a4f514b6a49ad36630a1d243fc0de404a7c33e06"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1082,7 +1082,7 @@ dependencies = [
 [[package]]
 name = "cosmwasm-std"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#bb0c7c6cf1917465a7a9fe19e8d5a8acf1a13636"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#a4f514b6a49ad36630a1d243fc0de404a7c33e06"
 dependencies = [
  "base64 0.22.1",
  "bech32",
@@ -1342,7 +1342,7 @@ dependencies = [
 [[package]]
 name = "cw-schema"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#bb0c7c6cf1917465a7a9fe19e8d5a8acf1a13636"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#a4f514b6a49ad36630a1d243fc0de404a7c33e06"
 dependencies = [
  "cw-schema-derive 3.0.3-dev (git+https://github.com/permissionlessweb/cosmwasm?branch=mvp)",
  "indexmap 2.12.1",
@@ -1368,7 +1368,7 @@ dependencies = [
 [[package]]
 name = "cw-schema-derive"
 version = "3.0.3-dev"
-source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#bb0c7c6cf1917465a7a9fe19e8d5a8acf1a13636"
+source = "git+https://github.com/permissionlessweb/cosmwasm?branch=mvp#a4f514b6a49ad36630a1d243fc0de404a7c33e06"
 dependencies = [
  "heck",
  "itertools 0.13.0",
@@ -1558,7 +1558,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1784,7 +1784,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2643,7 +2643,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3477,7 +3477,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9120690fafc389a67ba3803df527d0ec9cbbc9cc45e4cc20b332996dfb672425"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -3879,7 +3879,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4392,7 +4392,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5190,7 +5190,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
