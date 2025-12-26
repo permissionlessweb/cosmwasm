@@ -1,17 +1,270 @@
 // packages/vm/src/zk.rs - Zero-knowledge proof support for CosmWasm
 
-use halo2_proofs::plonk::VerifyingKey as Halo2VK;
-use halo2_proofs::poly::commitment::Params;
+use group::ff::PrimeField;
+use halo2_proofs::{
+    arithmetic::Field,
+    circuit::Layouter,
+    plonk::{self, Circuit, ConstraintSystem},
+    poly,
+};
 use pasta_curves::vesta;
 use sha2::{Digest, Sha256};
 use std::io::{self, Cursor, Read};
 use std::sync::Arc;
 use wasmer::wasmparser::{Parser, Payload};
-use zk_headstash::circuit::VerifyingKey;
+
+use crate::VmError;
 
 /// Custom section name for embedded verifying keys
 /// Contracts can embed their VK in a WASM custom section with this name
 pub const VK_CUSTOM_SECTION_NAME: &str = "cosmwasm_zk_vk";
+
+pub type CosmwasmCircuitFp = CosmwasmCircuit<GenericCircuit>;
+
+/// A struct defining a circuit compatible with the zk-wasmvm.
+#[derive(Debug)]
+pub struct CosmwasmCircuit<C> {
+    circuit: C,
+}
+
+impl<C, F> Circuit<F> for CosmwasmCircuit<C>
+where
+    C: Circuit<F>,
+    F: Field,
+{
+    type Config = C::Config;
+    type FloorPlanner = C::FloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        CosmwasmCircuit {
+            circuit: self.circuit.without_witnesses(),
+        }
+    }
+
+    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+        C::configure(meta)
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        layouter: impl Layouter<F>,
+    ) -> Result<(), plonk::Error> {
+        self.circuit.synthesize(config, layouter)
+    }
+}
+
+/// A verifying key implementing the defualt params and vk definitions for a circuit compatible with this vm-layer.
+#[derive(Debug)]
+pub struct VerifyingKey {
+    pub params: poly::commitment::Params<vesta::Affine>,
+    pub vk: plonk::VerifyingKey<vesta::Affine>,
+    pub i: usize,
+}
+
+impl VerifyingKey {
+    /// Builds the verifying key from an existing VK.
+    pub fn new(vk: plonk::VerifyingKey<vesta::Affine>, k: u32, i: usize) -> Self {
+        VerifyingKey {
+            params: poly::commitment::Params::new(k),
+            vk,
+            i,
+        }
+    }
+
+    /// Builds the verifying key from a concrete circuit.
+    pub fn build<C>(c: C, k: u32, i: usize) -> Self
+    where
+        C: Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
+    {
+        let params = halo2_proofs::poly::commitment::Params::new(k);
+        let vk = plonk::keygen_vk(&params, &c).unwrap();
+        VerifyingKey { params, vk, i }
+    }
+}
+
+/// The proving key for the Orchard Action circuit.
+#[derive(Debug)]
+pub struct ProvingKey {
+    params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
+    pk: plonk::ProvingKey<vesta::Affine>,
+}
+
+impl ProvingKey {
+    /// Builds the proving key from a given circuit.
+    pub fn build<C>(k: u32, circuit: C) -> Self
+    where
+        C: Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
+    {
+        let params = halo2_proofs::poly::commitment::Params::new(k);
+        let wrapped_circuit = CosmwasmCircuit { circuit };
+        let vk = plonk::keygen_vk(&params, &wrapped_circuit).unwrap();
+        let pk = plonk::keygen_pk(&params, vk, &wrapped_circuit).unwrap();
+        ProvingKey { params, pk }
+    }
+
+    /// Builds pk & vk, writes to file
+    pub fn build_and_write(
+        path: std::path::PathBuf,
+        k: u32,
+        circuit: impl Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
+    ) -> io::Result<()> {
+        let mut writer = io::BufWriter::new(std::fs::File::create(path)?);
+        let pk = Self::build(k, circuit);
+        pk.params.write(&mut writer)?;
+        pk.pk.get_vk().write(&mut writer)?;
+        io::Write::flush(&mut writer)
+    }
+    /// retrieve a clone of the params
+    pub fn params(&self) -> halo2_proofs::poly::commitment::Params<vesta::Affine> {
+        self.params.clone()
+    }
+}
+
+/// Public inputs to the Headstash Action circuit.
+#[derive(Clone, Debug)]
+pub struct Instance {
+    pub(crate) instances: Vec<vesta::Scalar>,
+    size: usize,
+}
+
+impl Instance {
+    pub fn new(i: Vec<vesta::Scalar>) -> Self {
+        Self {
+            instances: i.to_vec(),
+            size: i.len(),
+        }
+    }
+    pub fn new_from_vm(i: Vec<u8>) -> Result<Self, VmError> {
+        const SCALAR_SIZE: usize = 32;
+        if i.len() % SCALAR_SIZE != 0 {
+            return Err(VmError::generic_err("bytes length must be multiple of 32"));
+        }
+        let instances = i
+            .chunks_exact(SCALAR_SIZE)
+            .map(|chunk| {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(chunk);
+                vesta::Scalar::from_repr(arr).expect("invalid scalar bytes")
+            })
+            .collect::<Vec<_>>();
+        let size = instances.len();
+        Ok(Self { instances, size })
+    }
+}
+/// A proof of the validity of an Orchard [`Bundle`].
+///
+/// [`Bundle`]: crate::bundle::Bundle
+#[derive(Clone)]
+pub struct Proof(Vec<u8>);
+
+impl core::fmt::Debug for Proof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if f.alternate() {
+            f.debug_tuple("Proof").field(&self.0).finish()
+        } else {
+            // By default, only show the proof length, not its contents.
+            f.debug_tuple("Proof")
+                .field(&format_args!("{} bytes", self.0.len()))
+                .finish()
+        }
+    }
+}
+
+impl Proof {
+    /// Constructs a new Proof value.
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Proof(bytes)
+    }
+    /// Creates a proof for the given circuits and instances.
+    pub fn create<C: halo2_proofs::plonk::Circuit<pasta_curves::Fp>>(
+        pk: &ProvingKey,
+        circuits: &[CosmwasmCircuit<C>],
+        instances: &[Instance],
+        mut rng: impl rand::RngCore,
+    ) -> Result<Self, plonk::Error> {
+        for (circuit, instance) in circuits.iter().zip(instances) {
+            // TODO: additional circuit instance validation
+            // let expected_length = circuit.circuit.required_input_length();
+            // if instance.instances.len() != expected_length {
+            //     return Err(plonk::Error::InstanceTooLarge {});
+            // }
+        }
+        let converted_columns: Vec<Vec<pasta_curves::Fp>> = instances
+            .iter()
+            .map(|i| {
+                i.instances
+                    .iter()
+                    .map(|&s| Into::<pasta_curves::Fp>::into(s))
+                    .collect()
+            })
+            .collect();
+
+        // Collect slices referencing these vectors.
+        let column_slices: Vec<&[pasta_curves::Fp]> =
+            converted_columns.iter().map(|v| v.as_slice()).collect();
+
+        // Wrap for verify_proof: a single proof, potentially multiple instance columns.
+        let instances_arg: &[&[&[pasta_curves::Fp]]] = &[column_slices.as_slice()];
+
+        let mut transcript =
+            halo2_proofs::transcript::Blake2bWrite::<_, vesta::Affine, _>::init(vec![]);
+        plonk::create_proof(
+            &pk.params,
+            &pk.pk,
+            circuits,
+            instances_arg,
+            &mut rng,
+            &mut transcript,
+        )?;
+        Ok(Proof(transcript.finalize()))
+    }
+
+    /// Verifies this proof with the given instances.
+    pub fn verify(&self, vk: &VerifyingKey, instances: &[Instance]) -> Result<(), plonk::Error> {
+        // Convert each Instance to a vector of pasta_curves::Fp, ensuring ownership.
+        let converted_columns: Vec<Vec<pasta_curves::Fp>> = instances
+            .iter()
+            .map(|i| {
+                i.instances
+                    .iter()
+                    .map(|&s| Into::<pasta_curves::Fp>::into(s))
+                    .collect()
+            })
+            .collect();
+
+        // Collect slices referencing these vectors.
+        let column_slices: Vec<&[pasta_curves::Fp]> =
+            converted_columns.iter().map(|v| v.as_slice()).collect();
+
+        // Wrap for verify_proof: a single proof, potentially multiple instance columns.
+        let instances_arg: &[&[&[pasta_curves::Fp]]] = &[column_slices.as_slice()];
+
+        let strategy = plonk::SingleVerifier::new(&vk.params);
+        let mut transcript = halo2_proofs::transcript::Blake2bRead::init(&self.0[..]);
+        plonk::verify_proof(&vk.params, &vk.vk, strategy, instances_arg, &mut transcript)
+    }
+
+    // /// Adds this proof to the given batch for verification with the given instances.
+    // ///
+    // /// Use this API if you want more control over how proof batches are processed. If you
+    // /// just want to batch-validate Orchard bundles, use [`bundle::BatchValidator`].
+    // ///
+    // /// [`bundle::BatchValidator`]: crate::bundle::BatchValidator
+    // pub fn add_to_batch(&self, batch: &mut BatchVerifier<vesta::Affine>, instances: Vec<Instance>) {
+    //     let instances = instances
+    //         .iter()
+    //         .map(|i| {
+    //             i.to_halo2_instance()
+    //                 .into_iter()
+    //                 .map(|c| c.into_iter().collect())
+    //                 .collect()
+    //         })
+    //         .collect();
+
+    //     batch.add_proof(instances, self.0.clone());
+    // }
+}
 
 /// Circuit type identifier for VK deserialization
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,9 +272,6 @@ pub const VK_CUSTOM_SECTION_NAME: &str = "cosmwasm_zk_vk";
 pub enum CircuitType {
     /// Generic circuit type (works for any circuit)
     Generic = 0,
-    // Future circuit types can be added here:
-    // OrchardAction = 1,
-    // CustomCircuit = 2,
 }
 
 impl CircuitType {
@@ -137,6 +387,9 @@ impl LoadedVerifyingKey {
         let mut params_len_bytes = [0u8; 8];
         let original_size = bytes.len();
 
+        // Read instance lenth compiled in binary
+        let i_len = bytes.len();
+
         reader.read_exact(&mut params_len_bytes)?;
         let params_len = u64::from_le_bytes(params_len_bytes) as usize;
 
@@ -146,23 +399,23 @@ impl LoadedVerifyingKey {
 
         // TODO: integrate circuit manifold middleware for marketplace of circuit use
         // Deserialize the circuit param bytes to be able to deserialize the verifying key from the param struct object.
-        let params = Params::<vesta::Affine>::read(&mut Cursor::new(params_bytes))?;
-        let vk = Halo2VK::<vesta::Affine>::read::<_, zk_headstash::circuit::Circuit>(
+        let params =
+            poly::commitment::Params::<vesta::Affine>::read(&mut Cursor::new(params_bytes))?;
+        let vk = halo2_proofs::plonk::VerifyingKey::<vesta::Affine>::read::<_, CosmwasmCircuitFp>(
             &mut reader,
             &params,
         )?;
 
-        Ok(LoadedVerifyingKey(VerifyingKey::new(vk)))
+        Ok(LoadedVerifyingKey(VerifyingKey::new(vk, params.k(), i_len)))
     }
 
     /// Serialize to bytes for storage
     pub fn to_bytes(&self) -> io::Result<Vec<u8>> {
         let mut output = Vec::new();
-
-        // Serialize params first
         let mut params_buf = Vec::new();
-        self.vk().params.write(&mut params_buf)?;
 
+        // Call the write function for
+        self.vk().params.write(&mut params_buf)?;
         // Write params length prefix
         output.extend_from_slice(&(params_buf.len() as u64).to_le_bytes());
         output.extend_from_slice(&params_buf);
@@ -190,12 +443,13 @@ pub fn validate_vk_bytes(bytes: &[u8]) -> io::Result<()> {
     let mut reader = Cursor::new(bytes);
 
     // Step 1: Read and validate params
-    let params = Params::<vesta::Affine>::read(&mut reader).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Failed to read params: {:?}", e),
-        )
-    })?;
+    let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(&mut reader)
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Failed to read params: {:?}", e),
+            )
+        })?;
 
     // Validate params k value is reasonable (typically 11-20 for circuits)
     let k = params.k();

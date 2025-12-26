@@ -28,9 +28,8 @@ use crate::sections::decode_sections;
 #[allow(unused_imports)]
 use crate::sections::encode_sections;
 use crate::serde::to_vec;
+use crate::zk::Proof;
 use crate::GasInfo;
-
-use zk_headstash::{circuit::Instance, Proof};
 
 /// A kibi (kilo binary)
 const KI: usize = 1024;
@@ -860,12 +859,10 @@ pub fn do_halo2_proof_instance_verify<
         .as_ref()
         .ok_or_else(|| VmError::generic_err("VK not available"))?;
 
-    let instances = Instance::from_bytes(instances_bytes);
-
-    let proof = Proof::new(proof_bytes);
-    let result = proof.verify(vk.vk(), &[instances]);
-
-    match result {
+    match Proof::new(proof_bytes).verify(
+        vk.vk(),
+        &[crate::zk::Instance::new_from_vm(instances_bytes)?],
+    ) {
         Ok(_) => Ok(0),
         Err(_) => Ok(1),
     }

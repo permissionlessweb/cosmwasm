@@ -286,7 +286,7 @@ where
         code_bundle: crate::zk::CodeBundle,
         checked: bool,
         persist: bool,
-    ) -> VmResult<Checksum> {
+    ) -> VmResult<[Checksum; 2]> {
         // Validate WASM
         if checked {
             check_wasm(
@@ -313,16 +313,20 @@ where
             let checksum = save_wasm_to_disk(&cache.wasm_path, &code_bundle.wasm)?;
 
             // Save VK if present
-            if let Some(ref vk) = code_bundle.verifying_key {
-                self.save_vk_to_disk(&cache.wasm_path, &checksum, vk)?;
-            }
+            let vk_checksum = match code_bundle.verifying_key {
+                Some(vk) => self.save_vk_to_disk(&cache.wasm_path, &vk)?,
+                None => Checksum::generate(&[0; 32]),
+            };
 
             // Save compiled module
             cache.fs_cache.store(&checksum, &module)?;
 
-            Ok(checksum)
+            Ok([checksum, vk_checksum])
         } else {
-            Ok(Checksum::generate(&code_bundle.wasm))
+            Ok([
+                Checksum::generate(&code_bundle.wasm),
+                Checksum::generate(&[0; 32]),
+            ])
         }
     }
 
@@ -388,10 +392,10 @@ where
     fn save_vk_to_disk(
         &self,
         dir: impl Into<PathBuf>,
-        checksum: &Checksum,
         vk: &crate::zk::SerializedVK,
-    ) -> VmResult<()> {
-        let path = self.vk_path(dir, checksum);
+    ) -> VmResult<Checksum> {
+        let checksum = Checksum::generate(&vk.bytes);
+        let path = self.vk_path(dir, &checksum);
 
         // Format: [circuit_type (1 byte)][vk_bytes]
         let mut file_content = Vec::with_capacity(1 + vk.bytes.len());
@@ -408,7 +412,7 @@ where
         file.write_all(&file_content)
             .map_err(|e| VmError::cache_err(format!("Error writing VK file: {}", e)))?;
 
-        Ok(())
+        Ok(checksum)
     }
 
     /// Load a verifying key from disk
@@ -584,7 +588,7 @@ where
         {
             cache.stats.hits_fs_cache = cache.stats.hits_fs_cache.saturating_add(1);
             cache.pinned_memory_cache.store(checksum, cached_module)?;
-            
+
             if self.has_vk(checksum) {
                 drop(cache);
                 self.pin_vk(checksum)?;
