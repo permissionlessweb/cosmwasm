@@ -21,6 +21,7 @@ use crate::parsed_wasm::ParsedWasm;
 use crate::size::Size;
 use crate::static_analysis::{Entrypoint, ExportInfo, REQUIRED_IBC_EXPORTS};
 use crate::wasm_backend::{compile, make_compiling_engine};
+use crate::zk::check_vk;
 
 const STATE_DIR: &str = "state";
 // Things related to the state of the blockchain.
@@ -287,46 +288,58 @@ where
         checked: bool,
         persist: bool,
     ) -> VmResult<[Checksum; 2]> {
+        let wasm = !code_bundle.wasm.is_empty();
         // Validate WASM
         if checked {
-            check_wasm(
-                &code_bundle.wasm,
-                &self.available_capabilities,
-                &self.wasm_limits,
-                crate::internals::Logger::Off,
-            )?;
-
-            // Validate VK if present
+            // verifying key can be empty. omit check if not providedF
             if let Some(ref vk) = code_bundle.verifying_key {
-                crate::zk::validate_vk_bytes(&vk.bytes)
-                    .map_err(|e| VmError::generic_err(format!("VK validation failed: {}", e)))?;
+                check_vk(&vk.bytes).map_err(|e| VmError::generic_err(format!("VK: {}", e)))?;
+            }
+            // wasm can be empty. omit check if bytes length is 0
+            if wasm {
+                check_wasm(
+                    &code_bundle.wasm,
+                    &self.available_capabilities,
+                    &self.wasm_limits,
+                    crate::internals::Logger::Off,
+                )?;
             }
         }
 
-        // Compile WASM
-        let module = compile_module(&code_bundle.wasm)?;
-
         if persist {
             let mut cache = self.inner.lock().unwrap();
+            Ok(match (wasm, code_bundle.verifying_key) {
+                (true, Some(vk)) => {
+                    let (m, cs) = self.store_wasm_to_disk(&cache.wasm_path, code_bundle.wasm)?;
+                    cache.fs_cache.store(&cs, &m)?;
 
-            // Save WASM to disk
-            let checksum = save_wasm_to_disk(&cache.wasm_path, &code_bundle.wasm)?;
+                    [cs, self.save_vk_to_disk(&cache.wasm_path, &vk)?]
+                }
+                (true, None) => {
+                    let (m, cs) = self.store_wasm_to_disk(&cache.wasm_path, code_bundle.wasm)?;
+                    cache.fs_cache.store(&cs, &m)?;
 
-            // Save VK if present
-            let vk_checksum = match code_bundle.verifying_key {
-                Some(vk) => self.save_vk_to_disk(&cache.wasm_path, &vk)?,
-                None => Checksum::generate(&[0; 32]),
-            };
-
-            // Save compiled module
-            cache.fs_cache.store(&checksum, &module)?;
-
-            Ok([checksum, vk_checksum])
+                    [cs, self.dummy_checksum()]
+                }
+                (false, None) => [self.dummy_checksum(), self.dummy_checksum()],
+                (false, Some(vk)) => [
+                    self.dummy_checksum(),
+                    self.save_vk_to_disk(&cache.wasm_path, &vk)?,
+                ],
+            })
         } else {
-            Ok([
-                Checksum::generate(&code_bundle.wasm),
-                Checksum::generate(&[0; 32]),
-            ])
+            // Simulation: just return the checksums that would be produced
+            let wasm_checksum = if !code_bundle.wasm.is_empty() {
+                Checksum::generate(&code_bundle.wasm)
+            } else {
+                self.dummy_checksum()
+            };
+            let vk_checksum = if let Some(vk) = &code_bundle.verifying_key {
+                Checksum::generate(&vk.bytes)
+            } else {
+                self.dummy_checksum()
+            };
+            Ok([wasm_checksum, vk_checksum])
         }
     }
 
@@ -386,9 +399,21 @@ where
     fn vk_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
         dir.into().join(checksum.to_hex()).with_extension("vk")
     }
+    // Helper to produce a dummy checksum (same as used for missing VK)
+    fn dummy_checksum(&self) -> Checksum {
+        Checksum::generate(&[0; 32])
+    }
+    // Helper to produce a dummy checksum (same as used for missing VK)
+    fn store_wasm_to_disk(&self, dir: &PathBuf, wasm: Vec<u8>) -> VmResult<(Module, Checksum)> {
+        // Compile and store WASM
+        Ok((compile_module(&wasm)?, save_wasm_to_disk(dir, &wasm)?))
+    }
 
     /// Save a verifying key to disk
     /// Format: [circuit_type: u8][vk_bytes]
+    ///  - circuit type: 1 byte
+    ///  - K: circuit params constant K - 1 byte
+    ///  - I: number of required instances - 1 byte
     fn save_vk_to_disk(
         &self,
         dir: impl Into<PathBuf>,
@@ -428,22 +453,23 @@ where
             return Ok(None);
         }
 
-        let mut file = File::open(&path)
+        let mut vkf = File::open(&path)
             .map_err(|e| VmError::cache_err(format!("Error opening VK file: {}", e)))?;
 
-        let mut file_content = Vec::new();
-        file.read_to_end(&mut file_content)
+        let mut vkb = Vec::new();
+        vkf.read_to_end(&mut vkb)
             .map_err(|e| VmError::cache_err(format!("Error reading VK file: {}", e)))?;
 
-        if file_content.is_empty() {
+        if vkb.is_empty() {
             return Err(VmError::generic_err("VK file is empty"));
         }
 
         // Parse circuit type
-        let circuit_type = crate::zk::CircuitType::from_u8(file_content[0])
+        let ct = crate::zk::CircuitType::from_u8(vkb[0])
             .ok_or_else(|| VmError::generic_err("Unknown circuit type in VK file"))?;
+        let i = vkb[1];
 
-        let vk_bytes = file_content[1..].to_vec();
+        let vk_bytes = vkb[2..].to_vec();
         let size_bytes = vk_bytes.len();
 
         // Compute hash
@@ -460,8 +486,9 @@ where
         Ok(Some(crate::zk::SerializedVK {
             bytes: vk_bytes,
             hash,
-            circuit_type,
+            circuit_type: ct,
             size_bytes,
+            instances: i,
         }))
     }
 

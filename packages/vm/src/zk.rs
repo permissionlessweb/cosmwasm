@@ -274,6 +274,12 @@ pub enum CircuitType {
     Generic = 0,
 }
 
+impl Default for CircuitType {
+    fn default() -> Self {
+        CircuitType::Generic
+    }
+}
+
 impl CircuitType {
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
@@ -302,11 +308,24 @@ impl CodeBundle {
         }
     }
 
+    /// with the
     pub fn with_vk(wasm: Vec<u8>, vk_bytes: Vec<u8>) -> Self {
-        Self::with_vk_and_type(wasm, vk_bytes, CircuitType::Generic)
+        let ct = vk_bytes[0];
+        let i = vk_bytes[1];
+        Self::with_vk_and_type(
+            wasm,
+            vk_bytes,
+            i,
+            CircuitType::from_u8(ct).unwrap_or_default(),
+        )
     }
 
-    pub fn with_vk_and_type(wasm: Vec<u8>, vk_bytes: Vec<u8>, circuit_type: CircuitType) -> Self {
+    pub fn with_vk_and_type(
+        wasm: Vec<u8>,
+        vk_bytes: Vec<u8>,
+        i: u8,
+        circuit_type: CircuitType,
+    ) -> Self {
         let size_bytes = vk_bytes.len();
         let hash = {
             let mut hasher = Sha256::new();
@@ -324,6 +343,7 @@ impl CodeBundle {
                 hash,
                 circuit_type,
                 size_bytes,
+                instances: i,
             }),
         }
     }
@@ -340,6 +360,8 @@ pub struct SerializedVK {
     pub circuit_type: CircuitType,
     /// Size in bytes (for memory accounting)
     pub size_bytes: usize,
+    /// Required instance count.
+    pub instances: u8,
 }
 
 /// Deserialized verifying key ready for proof verification
@@ -432,7 +454,7 @@ impl LoadedVerifyingKey {
 
 /// Validates that a combined params+VK blob matches expected structure
 /// This validates the file format written by `build_and_write`
-pub fn validate_vk_bytes(bytes: &[u8]) -> io::Result<()> {
+pub fn check_vk(bytes: &[u8]) -> io::Result<(CircuitType, u8)> {
     if bytes.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -441,6 +463,14 @@ pub fn validate_vk_bytes(bytes: &[u8]) -> io::Result<()> {
     }
 
     let mut reader = Cursor::new(bytes);
+
+    // Remaining bytes are the VK
+    let mut header_bytes = [0u8; 2];
+    reader.read_exact(&mut header_bytes)?;
+
+    let v = CircuitType::from_u8(header_bytes[0])
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid circuit type in VK"))?;
+    let i = header_bytes[1];
 
     // Step 1: Read and validate params
     let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(&mut reader)
@@ -527,7 +557,7 @@ pub fn validate_vk_bytes(bytes: &[u8]) -> io::Result<()> {
         ));
     }
 
-    Ok(())
+    Ok((v, i))
 }
 
 /// Extracts a verifying key from WASM custom sections
@@ -559,22 +589,13 @@ pub fn extract_vk_from_wasm(wasm: &[u8]) -> io::Result<Option<SerializedVK>> {
                         ));
                     }
 
-                    // First byte is circuit type
-                    let circuit_type = CircuitType::from_u8(vk_data[0]).ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::InvalidData, "Invalid circuit type in VK")
-                    })?;
-
-                    // Remaining bytes are the VK
-                    let vk_bytes = vk_data[1..].to_vec();
-                    let size_bytes = vk_bytes.len();
-
-                    // Validate VK format
-                    validate_vk_bytes(&vk_bytes)?;
+                    let (v, i) = check_vk(&vk_data)?;
+                    let size_bytes = vk_data.len() - 2;
 
                     // Compute hash
                     let hash = {
                         let mut hasher = Sha256::new();
-                        hasher.update(&vk_bytes);
+                        hasher.update(&vk_data);
                         let result = hasher.finalize();
                         let mut hash = [0u8; 32];
                         hash.copy_from_slice(&result);
@@ -582,10 +603,11 @@ pub fn extract_vk_from_wasm(wasm: &[u8]) -> io::Result<Option<SerializedVK>> {
                     };
 
                     return Ok(Some(SerializedVK {
-                        bytes: vk_bytes,
+                        bytes: vk_data.to_vec(),
                         hash,
-                        circuit_type,
+                        circuit_type: v,
                         size_bytes,
+                        instances: i,
                     }));
                 }
             }
@@ -634,13 +656,13 @@ mod tests {
 
     #[test]
     fn test_validate_empty() {
-        assert!(validate_vk_bytes(&[]).is_err());
+        assert!(check_vk(&[]).is_err());
     }
 
     #[test]
     fn test_validate_truncated() {
         // Just a version byte, nothing else
-        assert!(validate_vk_bytes(&[0x01]).is_err());
+        assert!(check_vk(&[0x01]).is_err());
     }
 
     #[test]
@@ -691,7 +713,7 @@ mod tests {
 
     #[test]
     fn validate_empty_vk_bytes() {
-        let result = validate_vk_bytes(&[]);
+        let result = check_vk(&[]);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
