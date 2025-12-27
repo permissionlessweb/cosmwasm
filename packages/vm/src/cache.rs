@@ -308,24 +308,26 @@ where
 
         if persist {
             let mut cache = self.inner.lock().unwrap();
+            // save wasm || vk if present, always also pin vk
             Ok(match (wasm, code_bundle.verifying_key) {
                 (true, Some(vk)) => {
                     let (m, cs) = self.store_wasm_to_disk(&cache.wasm_path, code_bundle.wasm)?;
                     cache.fs_cache.store(&cs, &m)?;
-
-                    [cs, self.save_vk_to_disk(&cache.wasm_path, &vk)?]
+                    let vcs = self.save_vk_to_disk(&cache.wasm_path, &vk)?;
+                    self.pin_vk(&vcs)?;
+                    [cs, vcs]
                 }
                 (true, None) => {
                     let (m, cs) = self.store_wasm_to_disk(&cache.wasm_path, code_bundle.wasm)?;
                     cache.fs_cache.store(&cs, &m)?;
-
                     [cs, self.dummy_checksum()]
                 }
                 (false, None) => [self.dummy_checksum(), self.dummy_checksum()],
-                (false, Some(vk)) => [
-                    self.dummy_checksum(),
-                    self.save_vk_to_disk(&cache.wasm_path, &vk)?,
-                ],
+                (false, Some(vk)) => {
+                    let vcs = self.save_vk_to_disk(&cache.wasm_path, &vk)?;
+                    self.pin_vk(&vcs)?;
+                    [self.dummy_checksum(), vcs]
+                }
             })
         } else {
             // Simulation: just return the checksums that would be produced
