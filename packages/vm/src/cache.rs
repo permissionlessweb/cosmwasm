@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use wasmer::{Module, Store};
 
 use cosmwasm_std::Checksum;
@@ -288,15 +288,24 @@ where
         checked: bool,
         persist: bool,
     ) -> VmResult<[Checksum; 2]> {
-        let wasm = !code_bundle.wasm.is_empty();
-        // Validate WASM
+        let has_wasm = !code_bundle.wasm.is_empty();
+        // map.checked && checkvk == Some(v,i) || None
+        let has_vk = code_bundle
+            .verifying_key
+            .as_ref()
+            .map_or(false, |vk| !vk.bytes.is_empty());
+
+        // Error if both are empty
+        if !has_wasm && !has_vk {
+            return Err(VmError::generic_err("must provide either wasm or vk"));
+        }
+
+        // Validate WASM and VK
         if checked {
-            // verifying key can be empty. omit check if not providedF
             if let Some(ref vk) = code_bundle.verifying_key {
                 check_vk(&vk.bytes).map_err(|e| VmError::generic_err(format!("VK: {}", e)))?;
             }
-            // wasm can be empty. omit check if bytes length is 0
-            if wasm {
+            if has_wasm {
                 check_wasm(
                     &code_bundle.wasm,
                     &self.available_capabilities,
@@ -306,43 +315,62 @@ where
             }
         }
 
-        if persist {
-            let mut cache = self.inner.lock().unwrap();
-            // save wasm || vk if present, always also pin vk
-            Ok(match (wasm, code_bundle.verifying_key) {
-                (true, Some(vk)) => {
-                    let (m, cs) = self.store_wasm_to_disk(&cache.wasm_path, code_bundle.wasm)?;
-                    cache.fs_cache.store(&cs, &m)?;
-                    let vcs = self.save_vk_to_disk(&cache.wasm_path, &vk)?;
-                    self.pin_vk(&vcs)?;
-                    [cs, vcs]
-                }
-                (true, None) => {
-                    let (m, cs) = self.store_wasm_to_disk(&cache.wasm_path, code_bundle.wasm)?;
-                    cache.fs_cache.store(&cs, &m)?;
-                    [cs, self.dummy_checksum()]
-                }
-                (false, None) => [self.dummy_checksum(), self.dummy_checksum()],
-                (false, Some(vk)) => {
-                    let vcs = self.save_vk_to_disk(&cache.wasm_path, &vk)?;
-                    self.pin_vk(&vcs)?;
-                    [self.dummy_checksum(), vcs]
-                }
-            })
-        } else {
-            // Simulation: just return the checksums that would be produced
-            let wasm_checksum = if !code_bundle.wasm.is_empty() {
+        // Non-persist mode: just compute and return checksums
+        if !persist {
+            let wasm_checksum = if has_wasm {
                 Checksum::generate(&code_bundle.wasm)
             } else {
-                self.dummy_checksum()
+                Checksum::generate(&[])
             };
             let vk_checksum = if let Some(vk) = &code_bundle.verifying_key {
                 Checksum::generate(&vk.bytes)
             } else {
-                self.dummy_checksum()
+                Checksum::generate(&[])
             };
-            Ok([wasm_checksum, vk_checksum])
+            return Ok([wasm_checksum, vk_checksum]);
         }
+
+        // Persist mode: acquire lock once and handle everything within it
+        let mut cache = self.inner.lock().unwrap();
+
+        // Store WASM code and get its checksum
+        let wasm_checksum = if has_wasm {
+            let (m, cs) = self.store_wasm_to_disk(&cache.wasm_path, code_bundle.wasm.clone())?;
+            cache.fs_cache.store(&cs, &m)?;
+            cs
+        } else {
+            Checksum::generate(&[])
+        };
+
+        // // Store and pin VK
+        // let vk_checksum = Checksum::generate(&[]);
+        let vk_checksum = if let Some(vk) = &code_bundle.verifying_key {
+            let vcs = self.store_vk_to_disk(&cache.wasm_path, vk)?;
+
+            if !cache.pinned_vk_cache.contains_key(&vcs) {
+                if let Some(serialized_vk) = self.load_vk_from_disk(&cache.wasm_path, &vcs)? {
+                    let loaded_vk = crate::zk::LoadedVerifyingKey::from_bytes(&serialized_vk.bytes)
+                        .map_err(|e| {
+                            VmError::generic_err(format!("VK deserialization failed: {}", e))
+                        })?;
+                    let vk_size = loaded_vk.actual_size_bytes();
+                    cache.pinned_vk_memory += vk_size;
+                    cache
+                        .pinned_vk_cache
+                        .insert(vcs, std::sync::Arc::new(loaded_vk));
+                }
+            }
+
+            vcs
+        } else {
+            Checksum::generate(&[])
+        };
+        // let res = if persist {
+        //     self.persist_code_and_vk(has_wasm, &code_bundle)?
+        // } else {
+        //     self.compute_checksums(has_wasm, &code_bundle)
+        // };
+        Ok([wasm_checksum, vk_checksum])
     }
 
     /// Load a verifying key from disk
@@ -401,10 +429,57 @@ where
     fn vk_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
         dir.into().join(checksum.to_hex()).with_extension("vk")
     }
+
     // Helper to produce a dummy checksum (same as used for missing VK)
     fn dummy_checksum(&self) -> Checksum {
-        Checksum::generate(&[0; 32])
+        Checksum::generate(&[])
     }
+
+    // Helper: Compute checksums without persisting
+    fn compute_checksums(
+        &self,
+        has_wasm: bool,
+        code_bundle: &crate::zk::CodeBundle,
+    ) -> [Checksum; 2] {
+        let testing = (has_wasm, &code_bundle.verifying_key);
+
+        match (has_wasm, &code_bundle.verifying_key) {
+            (true, None) => [Checksum::generate(&code_bundle.wasm), self.dummy_checksum()],
+            (true, Some(vk)) => [
+                Checksum::generate(&code_bundle.wasm),
+                Checksum::generate(&vk.bytes),
+            ],
+            (false, None) => [self.dummy_checksum(), self.dummy_checksum()],
+            (false, Some(vk)) => [self.dummy_checksum(), Checksum::generate(&vk.bytes)],
+        }
+    }
+
+    // Helper: Persist both WASM and VK to disk
+    fn persist_code_and_vk(
+        &self,
+        has_wasm: bool,
+        code_bundle: &crate::zk::CodeBundle,
+    ) -> VmResult<[Checksum; 2]> {
+        let mut cache = self.inner.lock().unwrap();
+        let wasm = code_bundle.wasm.clone();
+
+        let wasm_checksum = if has_wasm {
+            let (m, cs) = self.store_wasm_to_disk(&cache.wasm_path, wasm)?;
+            cache.fs_cache.store(&cs, &m)?;
+            cs
+        } else {
+            self.dummy_checksum()
+        };
+
+        let vk_checksum = if let Some(vk) = &code_bundle.verifying_key {
+            self.store_vk_to_disk(&cache.wasm_path, vk)?
+        } else {
+            self.dummy_checksum()
+        };
+
+        Ok([wasm_checksum, vk_checksum])
+    }
+
     // Helper to produce a dummy checksum (same as used for missing VK)
     fn store_wasm_to_disk(&self, dir: &PathBuf, wasm: Vec<u8>) -> VmResult<(Module, Checksum)> {
         // Compile and store WASM
@@ -416,7 +491,7 @@ where
     ///  - circuit type: 1 byte
     ///  - K: circuit params constant K - 1 byte
     ///  - I: number of required instances - 1 byte
-    fn save_vk_to_disk(
+    fn store_vk_to_disk(
         &self,
         dir: impl Into<PathBuf>,
         vk: &crate::zk::SerializedVK,
@@ -424,9 +499,8 @@ where
         let checksum = Checksum::generate(&vk.bytes);
         let path = self.vk_path(dir, &checksum);
 
-        // Format: [circuit_type (1 byte)][vk_bytes]
-        let mut file_content = Vec::with_capacity(1 + vk.bytes.len());
-        file_content.push(vk.circuit_type.to_u8());
+        let mut file_content: Vec<u8> = Vec::with_capacity(vk.bytes.len());
+        file_content.push(vk.metadata.circuit_type.to_u8());
         file_content.extend_from_slice(&vk.bytes);
 
         let mut file = OpenOptions::new()
@@ -458,40 +532,33 @@ where
         let mut vkf = File::open(&path)
             .map_err(|e| VmError::cache_err(format!("Error opening VK file: {}", e)))?;
 
-        let mut vkb = Vec::new();
-        vkf.read_to_end(&mut vkb)
+        let mut bytes = Vec::new();
+        vkf.read_to_end(&mut bytes)
             .map_err(|e| VmError::cache_err(format!("Error reading VK file: {}", e)))?;
 
-        if vkb.is_empty() {
-            return Err(VmError::generic_err("VK file is empty"));
-        }
+        // Skip leading 0x00 byte if present (defensive against format variation)
+        let bytes = if bytes[0] == 0x00 {
+            eprintln!("⚠️  Skipping leading 0x00 byte");
+            bytes[1..].to_vec()
+        } else {
+            bytes
+        };
 
-        // Parse circuit type
-        let ct = crate::zk::CircuitType::from_u8(vkb[0])
-            .ok_or_else(|| VmError::generic_err("Unknown circuit type in VK file"))?;
-        let i = vkb[1];
+        let zkm = check_vk(&bytes)
+            .map_err(|e| VmError::generic_err(format!("Error reading VK file: {}", e)))?;
 
-        let vk_bytes = vkb[2..].to_vec();
-        let size_bytes = vk_bytes.len();
-
-        // Compute hash
+        // TODO: Compute hash of just vk bytes, not params
         use sha2::{Digest, Sha256};
         let hash = {
             let mut hasher = Sha256::new();
-            hasher.update(&vk_bytes);
+            hasher.update(&zkm.vk_bytes(&bytes));
             let result = hasher.finalize();
             let mut hash = [0u8; 32];
             hash.copy_from_slice(&result);
             hash
         };
 
-        Ok(Some(crate::zk::SerializedVK {
-            bytes: vk_bytes,
-            hash,
-            circuit_type: ct,
-            size_bytes,
-            instances: i,
-        }))
+        Ok(Some(crate::zk::SerializedVK::new(&bytes, hash, &zkm)))
     }
 
     /// Remove a VK file from disk
@@ -867,6 +934,7 @@ mod tests {
     use super::*;
     use crate::calls::{call_execute, call_instantiate};
     use crate::testing::{mock_backend, mock_env, mock_info, MockApi, MockQuerier, MockStorage};
+    use crate::CodeBundle;
     use cosmwasm_std::{coins, Empty};
     use std::borrow::Cow;
     use std::fs::{create_dir_all, remove_dir_all};
@@ -909,6 +977,20 @@ mod tests {
         ])
     }
 
+    fn make_testing_options_with_vk(
+    ) -> (CacheOptions, TempDir, zk_headstash::deploy::HeadstashSuite) {
+        let temp_dir = TempDir::new().unwrap();
+        (
+            CacheOptions {
+                base_dir: temp_dir.path().into(),
+                available_capabilities: default_capabilities(),
+                memory_cache_size_bytes: TESTING_MEMORY_CACHE_SIZE,
+                instance_memory_limit_bytes: TESTING_MEMORY_LIMIT,
+            },
+            temp_dir,
+            zk_headstash::deploy::HeadstashSuite::new(),
+        )
+    }
     fn make_testing_options() -> (CacheOptions, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         (
@@ -2073,4 +2155,44 @@ mod tests {
         let err = cache.store_code(HACKATOM, true, true).unwrap_err();
         assert!(matches!(err, VmError::StaticValidationErr { .. }));
     }
+
+    #[test]
+    pub fn test_vk_save_and_load_verification() {
+        use std::fs;
+        use std::io::{Read, Write};
+
+        let (testing_opts, _temp_dir, suite) = make_testing_options_with_vk();
+        let cache: Cache<MockApi, MockStorage, MockQuerier> =
+            unsafe { Cache::new(testing_opts).unwrap() };
+        // Generate test circuit keys
+        let path = Path::new("./data/test_keys");
+        let key_folder = path.join("no_rick");
+        let combinded = key_folder.join("vk_combined.bin");
+
+        let _ = fs::create_dir_all(path);
+
+        let proofs = zk_headstash::deploy::HeadstashLaunchpadInstance::gen_test_circuit_keys(
+            &suite,
+            path,
+            None,
+            // Some(&key_folder),
+            vec![],
+        )
+        .unwrap();
+
+        let mut pb = Vec::new();
+        let mut pf = fs::File::open(&combinded).expect("Failed to open params file");
+        pf.read_to_end(&mut pb).expect("Failed");
+
+        let codebundle = CodeBundle::with_vk(HACKATOM.to_vec(), pb).unwrap();
+        let checksums = cache.store_code_with_vk(codebundle, true, true).unwrap();
+
+        // Verify checksums were returned
+        assert_eq!(checksums.len(), 2, "Should return 2 checksums");
+        assert!(!checksums[0].as_slice().is_empty(), "no empty checksums");
+        assert!(!checksums[1].as_slice().is_empty(), "no empty checksums");
+        println!("{:#?}", checksums[0]);
+        println!("{:#?}", checksums[1]);
+    }
+    // println!("{:#?}", checksums[1]);
 }

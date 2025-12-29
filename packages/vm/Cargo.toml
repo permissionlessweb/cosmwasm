@@ -69,12 +69,15 @@ dhat = { version = "0.3.3", optional = true }
 # wasmer = { path = "../../../wasmer/lib/api", default-features = false, features = ["singlepass"] }
 # wasmer-middlewares = { path = "../../../wasmer/lib/middlewares" }
 
-halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp",package = "halo2_proofs" }
+ halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
+ # halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
 pasta_curves = "0.5"
 group = "0.13.0"
 rand = "0.8"
+zk-headstash = { path = "../../../../TERPNETWORK/zk-airdrop/genesis-sinsemilla/zk-crates/zk-headstash",  default-features = false, features = ["interface", "std", "multicore","circuit"] }
 
 [dev-dependencies]
+# zk-headstash = { git = "https://github.com/permissionlessweb/airdrop", branch = "genesis-sinsemilla", default-features = false, features = ["interface", "std","circuit"] }
 criterion = { version = "0.5.1", features = ["html_reports"] }
 glob = "0.3.1"
 hex-literal = "0.4.1"

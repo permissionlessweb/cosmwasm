@@ -28,8 +28,6 @@ mod wasm_backend;
 
 pub mod zk;
 
-pub use zk::{CircuitType, CodeBundle, SerializedVK};
-
 pub use crate::backend::{
     Backend, BackendApi, BackendError, BackendResult, GasInfo, Querier, Storage,
 };
@@ -63,6 +61,9 @@ pub use crate::errors::{
 pub use crate::instance::{DebugInfo, GasReport, Instance, InstanceOptions};
 pub use crate::serde::{from_slice, to_vec};
 pub use crate::size::Size;
+
+pub use halo2_proofs::COSMWASM_METADATA_LENGTH as HALO2_METADATA_LENGTH;
+pub use zk::{CircuitType, CodeBundle, SerializedVK};
 
 pub mod internals {
     #![doc(hidden)]
