@@ -69,8 +69,8 @@ dhat = { version = "0.3.3", optional = true }
 # wasmer = { path = "../../../wasmer/lib/api", default-features = false, features = ["singlepass"] }
 # wasmer-middlewares = { path = "../../../wasmer/lib/middlewares" }
 
- halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
- # halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
+ # halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
+ halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
 pasta_curves = "0.5"
 group = "0.13.0"
 rand = "0.8"
