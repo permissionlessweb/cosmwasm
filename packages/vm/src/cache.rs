@@ -2193,6 +2193,9 @@ mod tests {
         assert!(!checksums[1].as_slice().is_empty(), "no empty checksums");
         println!("{:#?}", checksums[0]);
         println!("{:#?}", checksums[1]);
+        let codebundle = CodeBundle::wasm_only(HACKATOM.to_vec());
+        let checksums = cache.store_code_with_vk(codebundle, true, true).unwrap();
+        // println!("{:#?}", checksums[1]);
+        // test saving empty bytes
     }
-    // println!("{:#?}", checksums[1]);
 }

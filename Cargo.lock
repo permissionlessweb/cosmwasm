@@ -984,7 +984,7 @@ dependencies = [
  "dhat",
  "glob",
  "group",
- "halo2_proofs",
+ "halo2_proofs 0.3.2",
  "hex",
  "hex-literal",
  "leb128",
@@ -1888,13 +1888,14 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.4.0"
+source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#a331093234caf051613c44363a5f69b6ed2b0c1f"
 dependencies = [
  "arrayvec",
  "bitvec",
  "ff",
  "group",
  "halo2_poseidon",
- "halo2_proofs",
+ "halo2_proofs 0.3.2 (git+https://github.com/permissionlessweb/halo2?branch=mvp)",
  "lazy_static",
  "pasta_curves",
  "proptest",
@@ -1907,6 +1908,7 @@ dependencies = [
 [[package]]
 name = "halo2_poseidon"
 version = "0.1.0"
+source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#a331093234caf051613c44363a5f69b6ed2b0c1f"
 dependencies = [
  "bitvec",
  "ff",
@@ -1917,6 +1919,21 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.3.2"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "group",
+ "indexmap 1.9.3",
+ "maybe-rayon",
+ "pasta_curves",
+ "rand_core 0.6.4",
+ "tracing",
+]
+
+[[package]]
+name = "halo2_proofs"
+version = "0.3.2"
+source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#a331093234caf051613c44363a5f69b6ed2b0c1f"
 dependencies = [
  "backtrace",
  "blake2b_simd",
@@ -1991,6 +2008,7 @@ checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 [[package]]
 name = "headstash-randomness"
 version = "0.1.0"
+source = "git+https://github.com/hard-nett/airdrop?branch=genesis-sinsemilla#ec405ac50883474a43fd9b0952a7666fef5ae835"
 dependencies = [
  "blake3",
  "rand 0.8.5",
@@ -5117,6 +5135,7 @@ dependencies = [
 [[package]]
 name = "zk-headstash"
 version = "0.0.1"
+source = "git+https://github.com/hard-nett/airdrop?branch=genesis-sinsemilla#ec405ac50883474a43fd9b0952a7666fef5ae835"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -5130,7 +5149,7 @@ dependencies = [
  "group",
  "halo2-base",
  "halo2_gadgets",
- "halo2_proofs",
+ "halo2_proofs 0.3.2 (git+https://github.com/permissionlessweb/halo2?branch=mvp)",
  "headstash-randomness",
  "hex",
  "incrementalmerkletree",
