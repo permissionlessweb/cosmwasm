@@ -269,6 +269,37 @@ impl Proof {
     // }
 }
 
+/// Metadata about a circuit compatible with the CosmWasm VM
+#[derive(Debug, Clone, Copy)]
+pub struct CircuitMetadata {
+    pub circuit_type: CircuitType,
+    pub instances: u8,
+    pub k: u32,
+    pub name: &'static str,
+}
+
+/// Trait implemented by circuits derived with #[cosmwasm_circuit]
+/// Provides metadata and helper methods for VM-compatible circuits
+pub trait CosmwasmCircuitFor<C: Circuit<vesta::Scalar>> {
+    /// Get metadata about the circuit
+    fn circuit_metadata() -> CircuitMetadata;
+
+    /// Build the verifying key
+    fn verifying_key() -> VerifyingKey;
+
+    /// Get the circuit type
+    fn circuit_type() -> CircuitType;
+
+    /// Get the instance count
+    fn instance_count() -> u8;
+
+    /// Get the k parameter
+    fn k_parameter() -> u32;
+
+    /// Validate instance compatibility
+    fn is_compatible(instances: &[vesta::Scalar]) -> bool;
+}
+
 /// Metadata extracted from a verified VK blob
 #[derive(Debug, Clone)]
 pub struct ZkMetadata {
