@@ -63,6 +63,9 @@ const MAX_LENGTH_DEBUG: usize = 2 * MI;
 /// Max length for an abort message
 const MAX_LENGTH_ABORT: usize = 2 * MI;
 
+/// Max length for an zk-id
+pub const ZKID_MAX_LEN: usize = 64;
+
 #[inline(always)]
 fn charge_host_call_gas<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
     env: &Environment<A, S, Q>,
@@ -818,12 +821,14 @@ pub fn do_ed25519_batch_verify<
 }
 
 /// internal function that retrives vk from pinned memory and performs proof verification on instance & proof bytes
+///  we
 pub fn do_halo2_proof_instance_verify<
     A: BackendApi + 'static,
     S: Storage + 'static,
     Q: Querier + 'static,
 >(
     mut env: FunctionEnvMut<Environment<A, S, Q>>,
+    zkid_ptr: u32,
     proof_ptr: u32,
     _proof_len: u32,
     instances_ptr: u32,
@@ -832,6 +837,8 @@ pub fn do_halo2_proof_instance_verify<
     let (data, mut store) = env.data_and_store_mut();
 
     charge_host_call_gas(data, &mut store)?;
+
+    let zkid = read_region(data, &mut store, zkid_ptr, ZKID_MAX_LEN)?;
 
     // Read proof from WASM memory (max 2 MB)
     const MAX_PROOF_SIZE: usize = 2 * 1024 * 1024;
@@ -855,7 +862,7 @@ pub fn do_halo2_proof_instance_verify<
 
     // Retrieve vk from pinned memory, defaults to None.
     let vk = data
-        .pinned_vk
+        .pinned_circuit
         .as_ref()
         .ok_or_else(|| VmError::generic_err("VK not available"))?;
 

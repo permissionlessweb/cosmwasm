@@ -223,7 +223,7 @@ pub struct Environment<A, S, Q> {
     data: Arc<RwLock<ContextData<S, Q>>>,
     /// Whether this contract was uploaded with a verifying key
     /// Pinned verifying key for Halo2 proof verification
-    pub pinned_vk: Option<crate::zk::PinnedVK>,
+    pub pinned_circuit: Option<crate::zk::PinnedCircuit>,
 }
 
 unsafe impl<A: BackendApi, S: Storage, Q: Querier> Send for Environment<A, S, Q> {}
@@ -237,7 +237,7 @@ impl<A: BackendApi, S: Storage, Q: Querier> Clone for Environment<A, S, Q> {
             api: self.api.clone(),
             gas_config: self.gas_config.clone(),
             data: self.data.clone(),
-            pinned_vk: self.pinned_vk.clone(),
+            pinned_circuit: self.pinned_circuit.clone(),
         }
     }
 }
@@ -247,13 +247,13 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
         Self::new_with_vk(api, gas_limit, None)
     }
 
-    pub fn new_with_vk(api: A, gas_limit: u64, vk: Option<crate::zk::PinnedVK>) -> Self {
+    pub fn new_with_vk(api: A, gas_limit: u64, vk: Option<crate::zk::PinnedCircuit>) -> Self {
         Environment {
             memory: None,
             api,
             gas_config: GasConfig::default(),
             data: Arc::new(RwLock::new(ContextData::new(gas_limit))),
-            pinned_vk: vk,
+            pinned_circuit: vk,
         }
     }
 
@@ -512,7 +512,7 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
     }
     /// Returns true if this contract instance supports verifying keys for Halo2 proof verification
     pub fn supports_verifying_keys(&self) -> bool {
-        self.pinned_vk.is_some()
+        self.pinned_circuit.is_some()
     }
 }
 

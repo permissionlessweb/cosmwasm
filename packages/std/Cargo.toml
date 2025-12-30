@@ -81,6 +81,7 @@ cosmwasm-crypto = { workspace = true }
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 
 [dev-dependencies]
+zk-headstash  = { workspace = true, features = ["interface"] }
 cosmwasm-core = { workspace = true }
 cosmwasm-schema = { workspace = true }
 # The chrono dependency is only used in an example, which Rust compiles for us. If this causes trouble, remove it.

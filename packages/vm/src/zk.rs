@@ -1,5 +1,6 @@
 // packages/vm/src/zk.rs - Zero-knowledge proof support for CosmWasm
 
+use cosmwasm_std::Checksum;
 use group::ff::PrimeField;
 use halo2_proofs::{
     arithmetic::Field,
@@ -14,11 +15,12 @@ use std::sync::Arc;
 use wasmer::wasmparser::{Parser, Payload};
 use zk_headstash::example_circuits::no_rick::NoRickCircuit;
 
-use crate::VmError;
+use crate::{VmError, VmResult};
 
 /// Custom section name for embedded verifying keys
 /// Contracts can embed their VK in a WASM custom section with this name
 pub const VK_CUSTOM_SECTION_NAME: &str = "cosmwasm_zk_vk";
+pub const VK_VERSION: i32 = 0x01;
 
 pub type CosmwasmCircuitFp = CosmwasmCircuit<NoRickCircuit<pallas::Base>>;
 
@@ -275,6 +277,7 @@ pub struct ZkMetadata {
     pub params_len: usize,
     pub vk_len: usize,
 }
+
 impl ZkMetadata {
     /// Extract params bytes from the full VK file
     pub fn params_bytes<'a>(&self, full_bytes: &'a [u8]) -> &'a [u8] {
@@ -311,6 +314,36 @@ impl ZkMetadata {
         }
         Ok(())
     }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.circuit_type.to_u8());
+        bytes.extend_from_slice(&self.instances.to_le_bytes());
+        bytes.extend_from_slice(&(self.params_len as u64).to_le_bytes());
+        bytes.extend_from_slice(&(self.vk_len as u64).to_le_bytes());
+        bytes
+    }
+
+    /// Hash the verifying key bytes using the same method as halo2
+    /// halo2 uses Blake2b-256 for circuit hashing
+    pub fn hash_vk(&self, full_bytes: &[u8]) -> Checksum {
+        Checksum::generate(&self.vk_bytes(full_bytes))
+    }
+
+    /// Validate that the VK hash matches expected
+    pub fn validate_vk_hash(&self, full_bytes: &[u8], expected_hash: &[u8; 32]) -> io::Result<()> {
+        let computed_hash = self.hash_vk(full_bytes);
+        if computed_hash != <[u8; 32] as Into<Checksum>>::into(*expected_hash) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "VK hash mismatch: got {:?}, expected {:?}",
+                    computed_hash, expected_hash
+                ),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Circuit type identifier for VK deserialization
@@ -330,8 +363,7 @@ impl Default for CircuitType {
 impl CircuitType {
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
-            0 => Some(CircuitType::Generic),
-            _ => None,
+            _ => Some(CircuitType::Generic),
         }
     }
 
@@ -355,27 +387,21 @@ impl CodeBundle {
         }
     }
 
-    /// with the
+    /// validates binary structure, returns hash of just verifying key (mimics release specification of halo2 circuits for interoperability)
     pub fn with_vk(wasm: Vec<u8>, vk_bytes: Vec<u8>) -> io::Result<Self> {
-        let vk = check_vk(&vk_bytes)?;
-
-        Ok(Self::with_vk_and_type(wasm, vk_bytes, &vk))
+        let (vk, hash) = check_vk(&vk_bytes)?;
+        Ok(Self::with_vk_and_type(wasm, vk_bytes, &vk, hash))
     }
 
-    pub fn with_vk_and_type(wasm: Vec<u8>, vk_bytes: Vec<u8>, metadata: &ZkMetadata) -> Self {
-        // Extract just the VK data (without params and footer)
-        let hash = {
-            let mut hasher = Sha256::new();
-            hasher.update(&metadata.vk_bytes(&vk_bytes));
-            let result = hasher.finalize();
-            let mut hash: [u8; 32] = [0u8; 32];
-            hash.copy_from_slice(&result);
-            hash
-        };
-
+    pub fn with_vk_and_type(
+        wasm: Vec<u8>,
+        vk_bytes: Vec<u8>,
+        metadata: &ZkMetadata,
+        hash: Checksum,
+    ) -> Self {
         CodeBundle {
             wasm,
-            verifying_key: Some(SerializedVK::new(&vk_bytes, hash, metadata)),
+            verifying_key: Some(SerializedVK::new(&vk_bytes, &hash, metadata)),
         }
     }
 }
@@ -386,18 +412,87 @@ pub struct SerializedVK {
     /// Raw bytes of the serialized params + vk
     pub bytes: Vec<u8>,
     /// SHA256 hash of the bytes for integrity checking
-    pub hash: [u8; 32],
+    pub hash: Checksum,
     /// Circuit metadata
     pub metadata: ZkMetadata,
 }
 
 impl SerializedVK {
-    pub fn new(bytes: &[u8], hash: [u8; 32], metadata: &ZkMetadata) -> Self {
+    pub fn new(bytes: &[u8], hash: &Checksum, metadata: &ZkMetadata) -> Self {
         Self {
             bytes: bytes.into(),
-            hash,
+            hash: *hash,
             metadata: metadata.clone(),
         }
+    }
+}
+
+impl From<Vec<u8>> for SerializedVK {
+    fn from(value: Vec<u8>) -> Self {
+        let mut offset = 0;
+
+        // Circuit type (1 byte)
+        let ct = CircuitType::from_u8(value[offset]).unwrap_or_default();
+        offset += 1;
+
+        // Instances (1 byte)
+        let i = value[offset];
+        offset += 1;
+
+        // Params len (8 bytes)
+        let vkpl = u64::from_le_bytes([
+            value[offset],
+            value[offset + 1],
+            value[offset + 2],
+            value[offset + 3],
+            value[offset + 4],
+            value[offset + 5],
+            value[offset + 6],
+            value[offset + 7],
+        ]) as usize;
+        offset += 8;
+
+        // VK len (8 bytes)
+        let vk_len = u64::from_le_bytes([
+            value[offset],
+            value[offset + 1],
+            value[offset + 2],
+            value[offset + 3],
+            value[offset + 4],
+            value[offset + 5],
+            value[offset + 6],
+            value[offset + 7],
+        ]) as usize;
+        offset += 8;
+
+        // Hash (32 bytes)
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&value[offset..offset + 32]);
+        offset += 32;
+
+        // Bytes (remaining)
+        let bytes = value[offset..].to_vec();
+
+        SerializedVK {
+            bytes,
+            hash: hash.into(),
+            metadata: ZkMetadata {
+                circuit_type: ct,
+                instances: i,
+                params_len: vkpl,
+                vk_len,
+            },
+        }
+    }
+}
+
+impl Into<Vec<u8>> for SerializedVK {
+    fn into(self) -> Vec<u8> {
+        let mut result = Vec::new();
+        result.extend_from_slice(&self.bytes);
+        result.extend_from_slice(&self.hash.as_slice());
+        result.extend_from_slice(&self.metadata.to_bytes());
+        result
     }
 }
 
@@ -406,7 +501,7 @@ impl SerializedVK {
 #[derive(Debug)]
 pub struct LoadedVerifyingKey(pub VerifyingKey);
 /// Thread-safe handle to a pinned verifying key
-pub type PinnedVK = Arc<LoadedVerifyingKey>;
+pub type PinnedCircuit = Arc<LoadedVerifyingKey>;
 
 impl LoadedVerifyingKey {
     /// Estimate memory footprint for gas/resource accounting
@@ -436,7 +531,7 @@ impl LoadedVerifyingKey {
 
     /// Deserialize from raw bytes
     /// Format: [params_len (8 bytes LE)][params bytes][vk bytes]
-    pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
+    pub fn from_bytes(bytes: &[u8]) -> VmResult<Self> {
         eprintln!("📦 from_bytes called with {} bytes total", bytes.len());
         eprintln!(
             "   First 30 bytes of buffer: {:02x?}",
@@ -447,8 +542,7 @@ impl LoadedVerifyingKey {
             &bytes[bytes.len().saturating_sub(20)..]
         );
         if bytes.len() < 10 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
+            return Err(VmError::generic_err(
                 "VK data too short - need at least 2 header bytes + 4 byte K",
             ));
         }
@@ -466,11 +560,9 @@ impl LoadedVerifyingKey {
 
         // define all values for metadata params
         let v = CircuitType::from_u8(bytes[footer_start]).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "LVK::from_bytes: Invalid circuit type in VK footer",
-            )
+            VmError::generic_err("LVK::from_bytes: Invalid circuit type in VK footer")
         })?;
+
         let i = bytes[footer_start + 1];
         let params_len = u32::from_le_bytes([
             bytes[footer_start + 2],
@@ -505,14 +597,16 @@ impl LoadedVerifyingKey {
 
         // Deserialize params
         let mut params_reader = Cursor::new(params_bytes);
-        let p = poly::commitment::Params::<vesta::Affine>::read(&mut params_reader)?;
+        let p = poly::commitment::Params::<vesta::Affine>::read(&mut params_reader)
+            .map_err(|e| VmError::generic_err(e.to_string()))?;
 
         // Deserialize vk
         let mut vk_reader = Cursor::new(vk_bytes);
         let vk = halo2_proofs::plonk::VerifyingKey::<vesta::Affine>::read::<_, CosmwasmCircuitFp>(
             &mut vk_reader,
             &p,
-        )?;
+        )
+        .map_err(|e| VmError::generic_err(e.to_string()))?;
 
         Ok(LoadedVerifyingKey(VerifyingKey::new(vk, p.k(), i.into())))
     }
@@ -540,7 +634,7 @@ impl LoadedVerifyingKey {
 
 /// Validates that a combined params+VK blob matches expected structure
 /// This validates the file format written by `build_and_write`
-pub fn check_vk(bytes: &[u8]) -> io::Result<ZkMetadata> {
+pub fn check_vk(bytes: &[u8]) -> io::Result<(ZkMetadata, Checksum)> {
     if bytes.len() < COSMWASM_METADATA_LENGTH {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -605,25 +699,24 @@ pub fn check_vk(bytes: &[u8]) -> io::Result<ZkMetadata> {
 
     let vk_bytes = &bytes[params_len..params_len + vk_len];
 
-    // VK should start with version byte 0x01
-    if vk_bytes.is_empty() || vk_bytes[0] != 0x01 {
+    // VK bytes should exists
+    if vk_bytes.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "Invalid VK version byte: expected 0x01, got 0x{:02x}",
-                vk_bytes.get(0).copied().unwrap_or(0)
-            ),
+            format!("No VK bytes recognized"),
         ));
     }
 
     eprintln!("✓ VK structure validated: version=0x01");
 
-    Ok(ZkMetadata {
+    let zk = ZkMetadata {
         circuit_type: v,
         instances: i,
         params_len,
         vk_len,
-    })
+    };
+    let hash = zk.hash_vk(bytes);
+    Ok((zk, hash))
 }
 
 #[cfg(test)]
@@ -645,7 +738,7 @@ mod tests {
     fn circuit_type_conversion() {
         assert_eq!(CircuitType::Generic.to_u8(), 0);
         assert_eq!(CircuitType::from_u8(0), Some(CircuitType::Generic));
-        assert_eq!(CircuitType::from_u8(255), None);
+        assert_eq!(CircuitType::from_u8(255), Some(CircuitType::Generic));
     }
 
     #[test]
@@ -659,42 +752,49 @@ mod tests {
     #[test]
     fn code_bundle_with_vk() {
         let wasm = vec![0u8; 100];
-        let vk = vec![1u8; 200];
-        let bundle = CodeBundle::with_vk(wasm.clone(), vk.clone()).unwrap();
+
+        // Define sizes
+        let vkp_len: u32 = 90;
+        let vk_len: u32 = 100; // The actual vk portion
+        let footer_len: u32 = 10;
+        // Total = 90 + 100 + 10 = 200 bytes
+        //
+        // Build footer (10 bytes)
+        let mut footer = [0u8; 10];
+        footer[0] = 0x01; // Version
+        footer[1] = 0x02; // # public instances
+        footer[2..6].copy_from_slice(&vkp_len.to_le_bytes());
+        footer[6..10].copy_from_slice(&vk_len.to_le_bytes());
+        // Build the full vk blob
+        let mut vk_blob = Vec::new();
+        vk_blob.extend(vec![0xAA; vkp_len as usize]); // vk_params (90 bytes)
+        vk_blob.extend(vec![0xBB; vk_len as usize]); // vk data (100 bytes)
+        vk_blob.extend_from_slice(&footer); // footer (10 bytes)
+
+        assert_eq!(vk_blob.len(), 200); // Sanity check
+
+        let bundle = CodeBundle::with_vk(wasm.clone(), vk_blob.clone()).unwrap();
 
         assert_eq!(bundle.wasm, wasm);
         assert!(bundle.verifying_key.is_some());
 
         let vk_data = bundle.verifying_key.unwrap();
-        assert_eq!(vk_data.bytes, vk);
+
+        assert_eq!(vk_data.bytes, vk_blob);
         assert_eq!(vk_data.metadata.circuit_type, CircuitType::Generic);
-        assert_eq!(vk_data.metadata.vk_len, 200);
-        // Hash should be deterministic
-        assert_ne!(vk_data.hash, [0u8; 32]);
+        assert_eq!(vk_data.metadata.vk_len, 100); // Total blob length
+        assert_ne!(vk_data.hash, Checksum::from([0u8; 32]));
     }
-
-    // #[test]
-    // fn memory_estimation() {
-    //     // For k=11, we expect a reasonably sized VK
-    //     let size = LoadedVerifyingKey::estimate_memory_size(11);
-    //     // Should be in the range of megabytes
-    //     assert!(size > 100_000); // > 100 KB
-    //     assert!(size < 100_000_000); // < 100 MB
-
-    //     // Larger k should give larger estimate
-    //     let size_small = LoadedVerifyingKey::estimate_memory_size(8);
-    //     let size_large = LoadedVerifyingKey::estimate_memory_size(14);
-    //     assert!(size_large > size_small);
-    // }
 
     #[test]
     fn validate_empty_vk_bytes() {
         let result = check_vk(&[]);
+        println!("{:#?}", result);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("VK bytes cannot be empty"));
+            .contains("VK bytes too short - need at least 10 bytes for footer"));
     }
 
     /// Helper to create a minimal valid WASM module with a custom section

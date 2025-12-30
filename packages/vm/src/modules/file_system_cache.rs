@@ -254,6 +254,37 @@ impl FileSystemCache {
             Ok(false)
         }
     }
+
+    /// Stores a serialized verifying key to the file system.
+    pub fn store_circuit(&mut self, checksum: &Checksum, vk: &[u8]) -> VmResult<usize> {
+        mkdir_p(&self.modules_path)
+            .map_err(|_e| VmError::cache_err("Error creating circuits directory"))?;
+
+        let path = self.circuit_file(checksum);
+        catch_unwind(|| {
+            fs::write(&path, vk)
+                .map_err(|e| VmError::cache_err(format!("Error writing circuit to disk: {e}")))
+        })
+        .map_err(|_| VmError::cache_err("Could not write circuit to disk"))??;
+
+        Ok(vk.len())
+    }
+
+    /// Removes a verifying key from the file system.
+    pub fn remove_circuit(&mut self, checksum: &Checksum) -> VmResult<()> {
+        let path = self.circuit_file(checksum);
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| {
+                VmError::cache_err(format!("Error removing circuit from disk: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Gets the circuit file path for a checksum.
+    fn circuit_file(&self, checksum: &Checksum) -> PathBuf {
+        self.modules_path.join(checksum.to_hex())
+    }
 }
 
 /// Returns the size of the module stored on disk

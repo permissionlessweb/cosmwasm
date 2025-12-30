@@ -101,8 +101,9 @@ extern "C" {
     /// greater than 1 in case of error.
     fn ed25519_batch_verify(messages_ptr: u32, signatures_ptr: u32, public_keys_ptr: u32) -> u32;
 
-    /// Verifies proof bytes for a set of public instances with the contract halo2 verifying keys.
+    /// Verifies proof bytes for a set of public instances with the contract halo2 verifying keys, given a circuit id.
     fn halo2_proof_instance_verify(
+        zkid_ptr: u32,
         proof_ptr: u32,
         proof_len: u32,
         instances_ptr: u32,
@@ -717,9 +718,13 @@ impl Api for ExternalApi {
 
     fn halo2_proof_instance_verify(
         &self,
+        zkid: &[u8],
         proof: &[u8],
         instances: &[u8],
     ) -> Result<bool, VerificationError> {
+        let zkid_send = Region::from_slice(zkid);
+        let zkid_ptr = zkid_send.as_ptr() as u32;
+
         let proof_send = Region::from_slice(proof);
         let proof_send_ptr = proof_send.as_ptr() as u32;
         let proof_len = proof.len() as u32;
@@ -730,6 +735,7 @@ impl Api for ExternalApi {
 
         let result = unsafe {
             halo2_proof_instance_verify(
+                zkid_ptr,
                 proof_send_ptr,
                 proof_len,
                 instances_send_ptr,

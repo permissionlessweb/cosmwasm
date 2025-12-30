@@ -87,7 +87,7 @@ where
         gas_limit: u64,
         extra_imports: Option<HashMap<&str, Exports>>,
         instantiation_lock: Option<&Mutex<()>>,
-        vk: Option<crate::zk::PinnedVK>,
+        vk: Option<crate::zk::PinnedCircuit>,
     ) -> VmResult<Self> {
         let fe = FunctionEnv::new(
             &mut store,
