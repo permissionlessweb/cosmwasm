@@ -542,7 +542,7 @@ where
 
     pub fn store_code_with_circuit(
         &self,
-        code_bundle: crate::zk::CodeBundle,
+        code_bundle: &crate::zk::CodeBundle,
         checked: bool,
         persist: bool,
     ) -> VmResult<[Checksum; 2]> {
@@ -676,30 +676,6 @@ where
     /// Get the path where a VK file would be stored
     fn vk_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
         dir.into().join(checksum.to_hex()).with_extension("vk")
-    }
-
-    // Helper to produce a dummy checksum (same as used for missing VK)
-    fn dummy_checksum(&self) -> Checksum {
-        Checksum::generate(&[])
-    }
-
-    // Helper: Compute checksums without persisting
-    fn compute_checksums(
-        &self,
-        has_wasm: bool,
-        code_bundle: &crate::zk::CodeBundle,
-    ) -> [Checksum; 2] {
-        let testing = (has_wasm, &code_bundle.verifying_key);
-
-        match (has_wasm, &code_bundle.verifying_key) {
-            (true, None) => [Checksum::generate(&code_bundle.wasm), self.dummy_checksum()],
-            (true, Some(vk)) => [
-                Checksum::generate(&code_bundle.wasm),
-                Checksum::generate(&vk.bytes),
-            ],
-            (false, None) => [self.dummy_checksum(), self.dummy_checksum()],
-            (false, Some(vk)) => [self.dummy_checksum(), Checksum::generate(&vk.bytes)],
-        }
     }
 
     // // Helper: Persist both WASM and VK to disk
@@ -2192,24 +2168,26 @@ mod tests {
 
         let codebundle = CodeBundle::with_vk(HACKATOM.to_vec(), pb).unwrap();
         let checksums = cache
-            .store_code_with_circuit(codebundle, true, true)
+            .store_code_with_circuit(&codebundle, true, true)
             .unwrap();
 
         // Verify checksums were returned
         assert_eq!(checksums.len(), 2, "Should return 2 checksums");
         assert!(!checksums[0].as_slice().is_empty(), "no empty checksums");
         assert!(!checksums[1].as_slice().is_empty(), "no empty checksums");
+        assert_eq!(codebundle.compute_checksums(), checksums);
         println!("{:#?}", checksums[0]);
         println!("{:#?}", checksums[1]);
 
         // confirm retrieval of vk from pinned memory
+        assert_eq!(codebundle.verifying_key.clone().unwrap().hash, checksums[1]);
         let vk = cache.get_pinned_circuit(&checksums[1]).unwrap();
         assert_eq!(vk.vk().i, 1);
 
         // cannot store only wasm file
         let codebundle = CodeBundle::wasm_only(HACKATOM.to_vec());
         let err = cache
-            .store_code_with_circuit(codebundle, true, true)
+            .store_code_with_circuit(&codebundle, true, true)
             .unwrap_err();
 
         // println!("{:#?}", checksums[1]);

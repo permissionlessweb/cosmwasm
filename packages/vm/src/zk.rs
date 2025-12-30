@@ -404,6 +404,26 @@ impl CodeBundle {
             verifying_key: Some(SerializedVK::new(&vk_bytes, &hash, metadata)),
         }
     }
+
+    // true - wasm; false - && circuit
+    pub fn bundle_has_circuit(&self) -> bool {
+        self.verifying_key.is_some()
+    }
+
+    // Helper: Compute checksums without persisting
+    pub fn compute_checksums(&self) -> [Checksum; 2] {
+        match (self.wasm.len() > 0, &self.verifying_key) {
+            (true, None) => [Checksum::generate(&self.wasm), self.dummy_checksum()],
+            (true, Some(vk)) => [Checksum::generate(&self.wasm), Checksum::from(vk.hash)],
+            (false, None) => [self.dummy_checksum(), self.dummy_checksum()],
+            (false, Some(vk)) => [self.dummy_checksum(), Checksum::generate(&vk.bytes)],
+        }
+    }
+
+    // Helper to produce a dummy checksum (same as used for missing VK)
+    fn dummy_checksum(&self) -> Checksum {
+        Checksum::generate(&[])
+    }
 }
 
 /// Serialized verifying key bundle that gets stored alongside WASM

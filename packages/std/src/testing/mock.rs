@@ -153,6 +153,7 @@ impl Api for MockApi {
     fn bls12_381_aggregate_g2(&self, g2s: &[u8]) -> Result<[u8; 96], VerificationError> {
         cosmwasm_crypto::bls12_381_aggregate_g2(g2s).map_err(Into::into)
     }
+    
     fn halo2_proof_instance_verify(
         &self,
         zkid: u64,
@@ -1675,15 +1676,16 @@ mod tests {
         let spec = vec![(private.to_string(), forbid.to_string())];
         let p = HLI::gen_test_circuit_keys(&HeadstashSuite::new(), path, None, spec).unwrap();
 
-        api.halo2_proof_instance_verify(
-            1,
-            &p[0].bytes(),
-            &NoRickInstance {
-                word: forbid.into(),
-            }
-            .to_cosmwasm_instance(),
-        )
-        .unwrap();
+        let res = api
+            .halo2_proof_instance_verify(
+                1,
+                &p[0].bytes(),
+                &NoRickInstance {
+                    word: forbid.into(),
+                }
+                .to_cosmwasm_instance(),
+            )
+            .unwrap();
     }
 
     #[test]
