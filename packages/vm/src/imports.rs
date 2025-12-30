@@ -838,8 +838,9 @@ pub fn do_halo2_proof_instance_verify<
 
     charge_host_call_gas(data, &mut store)?;
 
+    // Read zkid
     let zkid = read_region(data, &mut store, zkid_ptr, ZKID_MAX_LEN)?;
-
+    let zkid = u64::from_le_bytes(zkid[0..8].try_into().expect("msg"));
     // Read proof from WASM memory (max 2 MB)
     const MAX_PROOF_SIZE: usize = 2 * 1024 * 1024;
     let proof_bytes = read_region(data, &mut store, proof_ptr, MAX_PROOF_SIZE)?;
@@ -856,18 +857,39 @@ pub fn do_halo2_proof_instance_verify<
     );
     process_gas_info(data, &mut store, gas_info)?;
 
-    if !data.supports_verifying_keys() {
-        return Ok(0);
-    }
+    let checksum = data
+        .resolve_zkid_to_checksum(zkid) // ← Lookup: zkid → Checksum
+        .ok_or_else(|| {
+            VmError::generic_err(format!("ZK circuit {} not found in registry", zkid))
+        })?;
 
-    // Retrieve vk from pinned memory, defaults to None.
-    let vk = data
-        .pinned_circuit
-        .as_ref()
-        .ok_or_else(|| VmError::generic_err("VK not available"))?;
+    // 5. Load verifying key from app state storage
+    // The app layer stores the serialized VK bytes under a key like "zk_vk:{checksum_hex}"
+    let vk_key = checksum.as_slice();
+    let (result, _gas_info) = data.with_storage_from_context(|storage| Ok(storage.get(&vk_key)))?;
+
+    let serialized_vk_bytes = result
+        .map_err(|e| {
+            VmError::generic_err(format!(
+                "Storage error loading VK for circuit {}: {}",
+                zkid, e
+            ))
+        })?
+        .ok_or_else(|| {
+            VmError::generic_err(format!("VK not stored in app state for circuit {}", zkid))
+        })?;
+
+    // 6. Deserialize the verifying key
+    let loaded_vk =
+        crate::zk::LoadedVerifyingKey::from_bytes(&serialized_vk_bytes).map_err(|e| {
+            VmError::generic_err(format!(
+                "Failed to deserialize VK for circuit {}: {}",
+                zkid, e
+            ))
+        })?;
 
     match Proof::new(proof_bytes).verify(
-        vk.vk(),
+        loaded_vk.vk(),
         &[crate::zk::Instance::new_from_vm(instances_bytes)?],
     ) {
         Ok(_) => Ok(0),

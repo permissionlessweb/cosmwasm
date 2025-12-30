@@ -12,6 +12,7 @@ use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, M
 
 use crate::backend::{BackendApi, GasInfo, Querier, Storage};
 use crate::errors::{VmError, VmResult};
+use cosmwasm_std::Checksum;
 
 /// Keep this as low as necessary to avoid deepy nested errors like this:
 ///
@@ -221,9 +222,6 @@ pub struct Environment<A, S, Q> {
     pub api: A,
     pub gas_config: GasConfig,
     data: Arc<RwLock<ContextData<S, Q>>>,
-    /// Whether this contract was uploaded with a verifying key
-    /// Pinned verifying key for Halo2 proof verification
-    pub pinned_circuit: Option<crate::zk::PinnedCircuit>,
 }
 
 unsafe impl<A: BackendApi, S: Storage, Q: Querier> Send for Environment<A, S, Q> {}
@@ -237,7 +235,6 @@ impl<A: BackendApi, S: Storage, Q: Querier> Clone for Environment<A, S, Q> {
             api: self.api.clone(),
             gas_config: self.gas_config.clone(),
             data: self.data.clone(),
-            pinned_circuit: self.pinned_circuit.clone(),
         }
     }
 }
@@ -253,7 +250,6 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
             api,
             gas_config: GasConfig::default(),
             data: Arc::new(RwLock::new(ContextData::new(gas_limit))),
-            pinned_circuit: vk,
         }
     }
 
@@ -510,9 +506,28 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
             (context_data.storage.take(), context_data.querier.take())
         })
     }
-    /// Returns true if this contract instance supports verifying keys for Halo2 proof verification
-    pub fn supports_verifying_keys(&self) -> bool {
-        self.pinned_circuit.is_some()
+
+    /// Query storage to get `zkid → checksum` mapping
+    /// 
+    /// Resolves a zkid to its corresponding checksum in app state
+    /// The checksum mapping is stored by the application layer during store_code_with_circuit
+    pub fn resolve_zkid_to_checksum(&self, zkid: u64) -> Option<Checksum> {
+        // storage.get() returns BackendResult which is (Result<..>, GasInfo)
+        let (result, _gas_info) = self
+            .with_storage_from_context(|storage| Ok(storage.get(&zkid.to_le_bytes())))
+            .ok()?;
+
+        // Extract the Option<Vec<u8>> from the Result
+        let bytes_opt = result.ok()?;
+
+        // Checksum is 32 bytes (256-bit hash)
+        bytes_opt.and_then(|bytes| {
+            if bytes.len() == 32 {
+                Some(Checksum::from(<[u8; 32]>::try_from(&bytes[..]).ok()?))
+            } else {
+                None
+            }
+        })
     }
 }
 
