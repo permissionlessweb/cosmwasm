@@ -241,10 +241,10 @@ impl<A: BackendApi, S: Storage, Q: Querier> Clone for Environment<A, S, Q> {
 
 impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
     pub fn new(api: A, gas_limit: u64) -> Self {
-        Self::new_with_vk(api, gas_limit, None)
+        Self::new_with_vk(api, gas_limit)
     }
 
-    pub fn new_with_vk(api: A, gas_limit: u64, vk: Option<crate::zk::PinnedCircuit>) -> Self {
+    pub fn new_with_vk(api: A, gas_limit: u64) -> Self {
         Environment {
             memory: None,
             api,
@@ -508,7 +508,7 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
     }
 
     /// Query storage to get `zkid → checksum` mapping
-    /// 
+    ///
     /// Resolves a zkid to its corresponding checksum in app state
     /// The checksum mapping is stored by the application layer during store_code_with_circuit
     pub fn resolve_zkid_to_checksum(&self, zkid: u64) -> Option<Checksum> {

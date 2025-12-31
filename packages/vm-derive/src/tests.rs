@@ -10,25 +10,25 @@ mod parser_tests {
 
     #[test]
     fn test_parse_basic_attributes() {
-        let input = parse_quote!(k = 17, instances = 2);
+        let input = parse_quote!(k = 17, i = 2);
         let attrs: CircuitAttributes = syn::parse2(input).unwrap();
-        assert_eq!(attrs.k, 17);
-        assert_eq!(attrs.instances, 2);
-        assert_eq!(attrs.circuit_type, "Generic");
+
+        assert_eq!(attrs.i, 2);
+        assert_eq!(attrs.ct, "Generic");
     }
 
     #[test]
-    fn test_parse_with_circuit_type() {
-        let input = parse_quote!(k = 18, instances = 3, circuit_type = "Generic");
+    fn test_parse_with_ct() {
+        let input = parse_quote!(k = 18, i = 3, ct = "Generic");
         let attrs: CircuitAttributes = syn::parse2(input).unwrap();
-        assert_eq!(attrs.k, 18);
-        assert_eq!(attrs.instances, 3);
-        assert_eq!(attrs.circuit_type, "Generic");
+
+        assert_eq!(attrs.i, 3);
+        assert_eq!(attrs.ct, "Generic");
     }
 
     #[test]
     fn test_parse_missing_k() {
-        let input = parse_quote!(instances = 2);
+        let input = parse_quote!(i = 2);
         let result: syn::Result<CircuitAttributes> = syn::parse2(input);
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -36,24 +36,24 @@ mod parser_tests {
     }
 
     #[test]
-    fn test_parse_missing_instances() {
+    fn test_parse_missing_i() {
         let input = parse_quote!(k = 17);
         let result: syn::Result<CircuitAttributes> = syn::parse2(input);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("Missing required attribute: instances"));
+        assert!(err.to_string().contains("Missing required attribute: i"));
     }
 
     #[test]
     fn test_parse_duplicate_k() {
-        let input = parse_quote!(k = 17, k = 18, instances = 2);
+        let input = parse_quote!(k = 17, k = 18, i = 2);
         let result: syn::Result<CircuitAttributes> = syn::parse2(input);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_unknown_attribute() {
-        let input = parse_quote!(k = 17, instances = 2, unknown = "value");
+        let input = parse_quote!(k = 17, i = 2, unknown = "value");
         let result: syn::Result<CircuitAttributes> = syn::parse2(input);
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -62,14 +62,13 @@ mod parser_tests {
 
     #[test]
     fn test_parse_k_boundary_values() {
-        let input = parse_quote!(k = 11, instances = 1);
+        let input = parse_quote!(k = 11, i = 1);
         let attrs: CircuitAttributes = syn::parse2(input).unwrap();
-        assert_eq!(attrs.k, 11);
 
-        let input = parse_quote!(k = 20, instances = 255);
+        let input = parse_quote!(k = 20, i = 255);
         let attrs: CircuitAttributes = syn::parse2(input).unwrap();
-        assert_eq!(attrs.k, 20);
-        assert_eq!(attrs.instances, 255);
+
+        assert_eq!(attrs.i, 255);
     }
 }
 
@@ -82,9 +81,8 @@ mod validator_tests {
     #[test]
     fn test_validate_valid_attributes() {
         let attrs = CircuitAttributes {
-            k: 17,
-            instances: 2,
-            circuit_type: "Generic".to_string(),
+            i: 2,
+            ct: "Generic".to_string(),
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(result.is_valid);
@@ -94,9 +92,8 @@ mod validator_tests {
     #[test]
     fn test_validate_k_too_small() {
         let attrs = CircuitAttributes {
-            k: 10,
-            instances: 2,
-            circuit_type: "Generic".to_string(),
+            i: 2,
+            ct: "Generic".to_string(),
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(!result.is_valid);
@@ -107,9 +104,8 @@ mod validator_tests {
     #[test]
     fn test_validate_k_too_large() {
         let attrs = CircuitAttributes {
-            k: 21,
-            instances: 2,
-            circuit_type: "Generic".to_string(),
+            i: 2,
+            ct: "Generic".to_string(),
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(!result.is_valid);
@@ -117,35 +113,34 @@ mod validator_tests {
     }
 
     #[test]
-    fn test_validate_instances_zero() {
+    fn test_validate_i_zero() {
         let attrs = CircuitAttributes {
-            k: 17,
-            instances: 0,
-            circuit_type: "Generic".to_string(),
+            i: 0,
+            ct: "Generic".to_string(),
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(!result.is_valid);
         assert!(!result.errors.is_empty());
-        assert!(result.errors[0].to_string().contains("Instance count must be in range"));
+        assert!(result.errors[0]
+            .to_string()
+            .contains("Instance count must be in range"));
     }
 
     #[test]
-    fn test_validate_instances_too_large() {
+    fn test_validate_i_too_large() {
         let attrs = CircuitAttributes {
-            k: 17,
-            instances: 255u8, // Max valid
-            circuit_type: "Generic".to_string(),
+            i: 255u8, // Max valid
+            ct: "Generic".to_string(),
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(result.is_valid);
     }
 
     #[test]
-    fn test_validate_unknown_circuit_type() {
+    fn test_validate_unknown_ct() {
         let attrs = CircuitAttributes {
-            k: 17,
-            instances: 2,
-            circuit_type: "UnknownType".to_string(),
+            i: 2,
+            ct: "UnknownType".to_string(),
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(!result.is_valid);
@@ -155,9 +150,9 @@ mod validator_tests {
     #[test]
     fn test_validate_multiple_errors() {
         let attrs = CircuitAttributes {
-            k: 5,     // Too small
-            instances: 0,     // Too small
-            circuit_type: "Invalid".to_string(), // Unknown
+            // Too small
+            i: 0,                      // Too small
+            ct: "Invalid".to_string(), // Unknown
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(!result.is_valid);
@@ -168,39 +163,35 @@ mod validator_tests {
     fn test_validate_boundary_k() {
         // k = 11 should be valid (minimum)
         let attrs = CircuitAttributes {
-            k: 11,
-            instances: 1,
-            circuit_type: "Generic".to_string(),
+            i: 1,
+            ct: "Generic".to_string(),
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(result.is_valid);
 
         // k = 20 should be valid (maximum)
         let attrs = CircuitAttributes {
-            k: 20,
-            instances: 1,
-            circuit_type: "Generic".to_string(),
+            i: 1,
+            ct: "Generic".to_string(),
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(result.is_valid);
     }
 
     #[test]
-    fn test_validate_boundary_instances() {
-        // instances = 1 should be valid (minimum)
+    fn test_validate_boundary_i() {
+        // i = 1 should be valid (minimum)
         let attrs = CircuitAttributes {
-            k: 17,
-            instances: 1,
-            circuit_type: "Generic".to_string(),
+            i: 1,
+            ct: "Generic".to_string(),
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(result.is_valid);
 
-        // instances = 255 should be valid (maximum for u8)
+        // i = 255 should be valid (maximum for u8)
         let attrs = CircuitAttributes {
-            k: 17,
-            instances: 255,
-            circuit_type: "Generic".to_string(),
+            i: 255,
+            ct: "Generic".to_string(),
         };
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(result.is_valid);
@@ -219,9 +210,8 @@ mod code_generator_tests {
     fn test_code_generator_creates_instance() {
         let circuit_name = Ident::new("TestCircuit", proc_macro2::Span::call_site());
         let attrs = CircuitAttributes {
-            k: 17,
-            instances: 2,
-            circuit_type: "Generic".to_string(),
+            i: 2,
+            ct: "Generic".to_string(),
         };
         let generator = CodeGenerator::new(circuit_name, attrs);
         let _generated = generator.generate();
@@ -232,9 +222,8 @@ mod code_generator_tests {
     fn test_generated_code_contains_trait_impl() {
         let circuit_name = Ident::new("TestCircuit", proc_macro2::Span::call_site());
         let attrs = CircuitAttributes {
-            k: 17,
-            instances: 2,
-            circuit_type: "Generic".to_string(),
+            i: 2,
+            ct: "Generic".to_string(),
         };
         let generator = CodeGenerator::new(circuit_name, attrs);
         let generated = generator.generate();
@@ -253,9 +242,8 @@ mod code_generator_tests {
     fn test_generated_code_contains_constants() {
         let circuit_name = Ident::new("TestCircuit", proc_macro2::Span::call_site());
         let attrs = CircuitAttributes {
-            k: 17,
-            instances: 2,
-            circuit_type: "Generic".to_string(),
+            i: 2,
+            ct: "Generic".to_string(),
         };
         let generator = CodeGenerator::new(circuit_name, attrs);
         let generated = generator.generate();
@@ -263,16 +251,15 @@ mod code_generator_tests {
 
         // Check that constants are present
         assert!(generated_str.contains("METADATA"));
-        assert!(generated_str.contains("CircuitMetadata"));
+        assert!(generated_str.contains("PlonkishCircuitMetadata"));
     }
 
     #[test]
     fn test_generated_code_has_correct_values() {
         let circuit_name = Ident::new("MyCircuit", proc_macro2::Span::call_site());
         let attrs = CircuitAttributes {
-            k: 18,
-            instances: 3,
-            circuit_type: "Generic".to_string(),
+            i: 3,
+            ct: "Generic".to_string(),
         };
         let generator = CodeGenerator::new(circuit_name, attrs);
         let generated = generator.generate();
@@ -280,17 +267,16 @@ mod code_generator_tests {
 
         // Verify that the specific values are in the generated code
         assert!(generated_str.contains("18")); // k value
-        assert!(generated_str.contains("3")); // instances value
+        assert!(generated_str.contains("3")); // i value
         assert!(generated_str.contains("MyCircuit")); // circuit name
     }
 
     #[test]
-    fn test_circuit_type_to_u8_generic() {
+    fn test_ct_to_u8_generic() {
         let circuit_name = Ident::new("TestCircuit", proc_macro2::Span::call_site());
         let attrs = CircuitAttributes {
-            k: 17,
-            instances: 2,
-            circuit_type: "Generic".to_string(),
+            i: 2,
+            ct: "Generic".to_string(),
         };
         let generator = CodeGenerator::new(circuit_name, attrs);
         let generated = generator.generate();
@@ -311,9 +297,8 @@ mod integration_tests {
     fn test_parse_and_validate_flow() {
         // Simulate the complete parsing and validation flow
         let input_attrs = CircuitAttributes {
-            k: 17,
-            instances: 2,
-            circuit_type: "Generic".to_string(),
+            i: 2,
+            ct: "Generic".to_string(),
         };
 
         // This should be valid
@@ -325,9 +310,8 @@ mod integration_tests {
     fn test_various_k_values() {
         for k in [11, 12, 15, 17, 19, 20] {
             let attrs = CircuitAttributes {
-                k,
-                instances: 2,
-                circuit_type: "Generic".to_string(),
+                i: 2,
+                ct: "Generic".to_string(),
             };
             let result = validate_attributes(&attrs, Span::call_site());
             assert!(result.is_valid, "k={} should be valid", k);
@@ -336,14 +320,13 @@ mod integration_tests {
 
     #[test]
     fn test_various_instance_counts() {
-        for instances in [1, 2, 5, 10, 50, 100, 200, 255] {
+        for i in [1, 2, 5, 10, 50, 100, 200, 255] {
             let attrs = CircuitAttributes {
-                k: 17,
-                instances,
-                circuit_type: "Generic".to_string(),
+                i,
+                ct: "Generic".to_string(),
             };
             let result = validate_attributes(&attrs, Span::call_site());
-            assert!(result.is_valid, "instances={} should be valid", instances);
+            assert!(result.is_valid, "i={} should be valid", i);
         }
     }
 }

@@ -16,6 +16,7 @@ use rand_core::OsRng;
 #[cfg(feature = "iterator")]
 use cosmwasm_std::Order;
 use wasmer::{AsStoreMut, FunctionEnvMut};
+use zk_cosmwasm::{Instance, Proof};
 
 use crate::backend::{BackendApi, BackendError, Querier, Storage};
 use crate::conversion::{ref_to_u32, to_u32};
@@ -28,7 +29,6 @@ use crate::sections::decode_sections;
 #[allow(unused_imports)]
 use crate::sections::encode_sections;
 use crate::serde::to_vec;
-use crate::zk::Proof;
 use crate::GasInfo;
 
 /// A kibi (kilo binary)
@@ -880,17 +880,14 @@ pub fn do_halo2_proof_instance_verify<
         })?;
 
     // 6. Deserialize the verifying key
-    let loaded_vk =
-        crate::zk::LoadedVerifyingKey::from_bytes(&serialized_vk_bytes).map_err(|e| {
+    match Proof::new(proof_bytes).verify(
+        &zk_cosmwasm::VK::from_bytes(&serialized_vk_bytes).map_err(|e| {
             VmError::generic_err(format!(
                 "Failed to deserialize VK for circuit {}: {}",
                 zkid, e
             ))
-        })?;
-
-    match Proof::new(proof_bytes).verify(
-        loaded_vk.vk(),
-        &[crate::zk::Instance::new_from_vm(instances_bytes)?],
+        })?,
+        &[Instance::new_from_vm(instances_bytes)?],
     ) {
         Ok(_) => Ok(0),
         Err(_) => Ok(1),

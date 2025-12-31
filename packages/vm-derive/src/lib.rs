@@ -44,13 +44,12 @@ pub fn hash_function(
 /// Derive macro for CosmWasm-compatible Halo2 circuits
 ///
 /// # Attributes
-/// - `k`: Circuit size parameter (11-20)
-/// - `instances`: Number of public inputs (1-255)
-/// - `circuit_type`: Optional circuit type identifier (default: "Generic")
+/// - `i`: Number of public inputs (1-255)
+/// - `ct`: Optional circuit type identifier (default: "Generic")
 ///
 /// # Example
 /// ```ignore
-/// #[cosmwasm_circuit(k = 17, instances = 4)]
+/// #[cosmwasm_circuit(i = 4)]
 /// pub struct MyCircuit {
 ///     secret: Option<vesta::Scalar>,
 /// }

@@ -56,7 +56,6 @@ pub fn cosmwasm_circuit_impl(
     // Return the original item plus generated code
     Ok(quote! {
         #item
-
         #generated
     })
 }

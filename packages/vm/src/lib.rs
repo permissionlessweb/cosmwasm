@@ -28,6 +28,14 @@ mod wasm_backend;
 
 pub mod zk;
 
+#[cfg(feature = "zk-tests")]
+pub use crate::zk::example_circuits;
+
+pub use crate::zk::{
+    check_circuit, cosmwasm_circuit::PlonkishCircuitMetadata, CodeBundle, CosmwasmCircuit, Proof,
+    ProvingKey, SerializedPlonkishCircuitData, VK,
+};
+
 pub use crate::backend::{
     Backend, BackendApi, BackendError, BackendResult, GasInfo, Querier, Storage,
 };
@@ -63,7 +71,6 @@ pub use crate::serde::{from_slice, to_vec};
 pub use crate::size::Size;
 
 pub use halo2_proofs::COSMWASM_METADATA_LENGTH as HALO2_METADATA_LENGTH;
-pub use zk::{CircuitType, CodeBundle, SerializedVK};
 
 pub mod internals {
     #![doc(hidden)]

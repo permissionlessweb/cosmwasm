@@ -106,8 +106,8 @@ extern "C" {
         zkid_ptr: u32,
         proof_ptr: u32,
         proof_len: u32,
-        instances_ptr: u32,
-        instances_len: u32,
+        i_ptr: u32,
+        i_len: u32,
     ) -> u32;
 
     /// Writes a debug message (UTF-8 encoded) to the host for debugging purposes.
@@ -720,7 +720,7 @@ impl Api for ExternalApi {
         &self,
         zkid: &[u8],
         proof: &[u8],
-        instances: &[u8],
+        i: &[u8],
     ) -> Result<bool, VerificationError> {
         let zkid_send = Region::from_slice(zkid);
         let zkid_ptr = zkid_send.as_ptr() as u32;
@@ -730,17 +730,11 @@ impl Api for ExternalApi {
         let proof_len = proof.len() as u32;
 
         let instances_send = Region::from_slice(instances);
-        let instances_send_ptr = instances_send.as_ptr() as u32;
-        let instances_len = instances.len() as u32;
+        let i_send_ptr = instances_send.as_ptr() as u32;
+        let i_len = instances.len() as u32;
 
         let result = unsafe {
-            halo2_proof_instance_verify(
-                zkid_ptr,
-                proof_send_ptr,
-                proof_len,
-                instances_send_ptr,
-                instances_len,
-            )
+            halo2_proof_instance_verify(zkid_ptr, proof_send_ptr, proof_len, i_send_ptr, i_len)
         };
 
         match result {

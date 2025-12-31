@@ -32,20 +32,20 @@ impl CodeGenerator {
     /// Generate CosmwasmCircuitFor<T> trait implementation
     fn generate_trait_impl(&self) -> TokenStream {
         let circuit_name = &self.circuit_name;
-        let k = self.attrs.k;
-        let instances = self.attrs.instances;
-        let circuit_type_byte = self.circuit_type_to_u8(&self.attrs.circuit_type);
+
+        let i = self.attrs.i;
+        let ct_byte = self.ct_to_u8(&self.attrs.ct);
 
         quote! {
             /// Automatically generated trait implementation for CosmWasm circuit compatibility
             impl cosmwasm_vm::zk::CosmwasmCircuitFor<#circuit_name> {
                 /// Get metadata about this circuit
-                pub fn circuit_metadata() -> cosmwasm_vm::zk::CircuitMetadata {
-                    cosmwasm_vm::zk::CircuitMetadata {
-                        circuit_type: cosmwasm_vm::zk::CircuitType::from_u8(#circuit_type_byte)
+                pub fn circuit_metadata() -> cosmwasm_vm::zk::PlonkishCircuitMetadata {
+                    cosmwasm_vm::zk::PlonkishCircuitMetadata {
+                        ct: cosmwasm_vm::zk::CircuitType::from_u8(#ct_byte)
                             .expect("Valid circuit type"),
-                        instances: #instances,
-                        k: #k,
+                        i: #i,
+
                         name: stringify!(#circuit_name),
                     }
                 }
@@ -55,28 +55,23 @@ impl CodeGenerator {
                     let circuit = #circuit_name::without_witnesses(&Self {
                         /* circuit will be instantiated by user impl */
                     });
-                    cosmwasm_vm::zk::VerifyingKey::build(circuit, #k, #instances as usize)
+                    cosmwasm_vm::zk::VerifyingKey::build(circuit, #i as usize)
                 }
 
                 /// Get the circuit type byte for serialization
-                pub fn circuit_type() -> cosmwasm_vm::zk::CircuitType {
-                    cosmwasm_vm::zk::CircuitType::from_u8(#circuit_type_byte)
+                pub fn ct() -> cosmwasm_vm::zk::CircuitType {
+                    cosmwasm_vm::zk::CircuitType::from_u8(#ct_byte)
                         .expect("Valid circuit type")
                 }
 
                 /// Get the instance count
                 pub fn instance_count() -> u8 {
-                    #instances
-                }
-
-                /// Get the k parameter
-                pub fn k_parameter() -> u32 {
-                    #k
+                    #i
                 }
 
                 /// Validate instance compatibility
-                pub fn is_compatible(instances: &[pasta_curves::vesta::Scalar]) -> bool {
-                    instances.len() == #instances as usize
+                pub fn is_compatible(i: &[pasta_curves::vesta::Scalar]) -> bool {
+                    i.len() == #i as usize
                 }
             }
         }
@@ -88,23 +83,21 @@ impl CodeGenerator {
         let const_name = format!("{}_METADATA", circuit_name.to_string().to_uppercase());
         let const_ident = syn::Ident::new(&const_name, circuit_name.span());
 
-        let k = self.attrs.k;
-        let instances = self.attrs.instances;
+        let i = self.attrs.i;
 
         quote! {
             /// Circuit metadata available at compile time
-            pub const #const_ident: cosmwasm_vm::zk::CircuitMetadata = cosmwasm_vm::zk::CircuitMetadata {
-                circuit_type: cosmwasm_vm::zk::CircuitType::Generic,
-                instances: #instances,
-                k: #k,
-                name: stringify!(#circuit_name),
+            pub const #const_ident: cosmwasm_vm::zk::PlonkishCircuitMetadata = cosmwasm_vm::zk::PlonkishCircuitMetadata {
+                ct: cosmwasm_vm::zk::CircuitType::Plonkish,
+                i: #i,
+                // name: stringify!(#circuit_name),
             };
         }
     }
 
     /// Convert circuit type string to u8
-    fn circuit_type_to_u8(&self, circuit_type: &str) -> u8 {
-        match circuit_type {
+    fn ct_to_u8(&self, ct: &str) -> u8 {
+        match ct {
             "Generic" => 0x00,
             _ => 0x00, // Default fallback
         }

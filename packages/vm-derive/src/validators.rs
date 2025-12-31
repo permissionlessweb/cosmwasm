@@ -40,36 +40,19 @@ impl ValidationResult {
 pub fn validate_attributes(attrs: &CircuitAttributes, span: Span) -> ValidationResult {
     let mut result = ValidationResult::new();
 
-    // Validate k parameter: must be in range [11, 20]
-    if attrs.k < 11 || attrs.k > 20 {
-        result.add_error(Error::new(
-            span,
-            format!(
-                "Circuit parameter k must be in range [11, 20], got {}",
-                attrs.k
-            ),
-        ));
-    }
-
     // Validate instances: must be in range [1, 255]
-    if attrs.instances == 0 || attrs.instances > 255 {
+    if attrs.i == 0 || attrs.i > 255 {
         result.add_error(Error::new(
             span,
-            format!(
-                "Instance count must be in range [1, 255], got {}",
-                attrs.instances
-            ),
+            format!("Instance count must be in range [1, 255], got {}", attrs.i),
         ));
     }
 
     // Validate circuit type
-    if !is_valid_circuit_type(&attrs.circuit_type) {
+    if !is_valid_ct(&attrs.ct) {
         result.add_error(Error::new(
             span,
-            format!(
-                "Unknown circuit type '{}'. Valid types: Generic",
-                attrs.circuit_type
-            ),
+            format!("Unknown circuit type '{}'. Valid types: Generic", attrs.ct),
         ));
     }
 
@@ -77,8 +60,8 @@ pub fn validate_attributes(attrs: &CircuitAttributes, span: Span) -> ValidationR
 }
 
 /// Check if a circuit type string is valid
-fn is_valid_circuit_type(circuit_type: &str) -> bool {
-    matches!(circuit_type, "Generic")
+fn is_valid_ct(ct: &str) -> bool {
+    matches!(ct, "Generic")
 }
 
 /// Verify that the struct can be used as a circuit

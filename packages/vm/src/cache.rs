@@ -8,6 +8,7 @@ use std::sync::{Mutex, MutexGuard};
 use wasmer::{Module, Store};
 
 use cosmwasm_std::Checksum;
+use zk_cosmwasm::*;
 
 use crate::backend::{Backend, BackendApi, Querier, Storage};
 use crate::capabilities::required_capabilities_from_module;
@@ -21,8 +22,7 @@ use crate::parsed_wasm::ParsedWasm;
 use crate::size::Size;
 use crate::static_analysis::{Entrypoint, ExportInfo, REQUIRED_IBC_EXPORTS};
 use crate::wasm_backend::{compile, make_compiling_engine};
-use crate::zk::check_vk;
-use crate::SerializedVK;
+use crate::{check_circuit, CodeBundle, SerializedPlonkishCircuitData};
 
 const STATE_DIR: &str = "state";
 // Things related to the state of the blockchain.
@@ -266,7 +266,7 @@ where
     }
 
     pub fn store_circuit(&self, vk: &[u8], persist: bool) -> VmResult<Checksum> {
-        let (svk, hash) = check_vk(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
+        let (svk, hash) = check_circuit(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
 
         if persist {
             self.save_circuit_to_disk(vk)
@@ -443,7 +443,6 @@ where
         options: InstanceOptions,
     ) -> VmResult<Instance<A, S, Q>> {
         let (module, store) = self.get_module(checksum)?;
-        let pinned_circuit = self.get_pinned_circuit(checksum);
 
         let instance = Instance::from_module(
             store,
@@ -452,7 +451,6 @@ where
             options.gas_limit,
             None,
             Some(&self.instantiation_lock),
-            pinned_circuit,
         )?;
         Ok(instance)
     }
@@ -542,7 +540,7 @@ where
 
     pub fn store_code_with_circuit(
         &self,
-        code_bundle: &crate::zk::CodeBundle,
+        code_bundle: &CodeBundle,
         checked: bool,
         persist: bool,
     ) -> VmResult<[Checksum; 2]> {
@@ -563,7 +561,7 @@ where
         // Validate WASM and VK
         if checked {
             if let Some(ref vk) = code_bundle.verifying_key {
-                check_vk(&vk.bytes).map_err(|e| VmError::generic_err(format!("VK: {}", e)))?;
+                check_circuit(&vk.bytes).map_err(|e| VmError::generic_err(format!("VK: {}", e)))?;
             }
             if has_wasm {
                 check_wasm(
@@ -606,17 +604,15 @@ where
             },
             if let Some(svk) = &code_bundle.verifying_key {
                 let vcs = self.store_circuit_to_disk(&cache.wasm_path, svk)?;
-
+                // add to pinned vk cache
                 if !cache.pinned_memory_cache.has(&vcs, true) {
                     if let Some(serialized_vk) = self.load_vk_from_disk(&cache.wasm_path, &vcs)? {
-                        let vk = crate::zk::LoadedVerifyingKey::from_bytes(&serialized_vk.bytes)?;
-                        // add to pinned vk cache
-                        cache
-                            .pinned_memory_cache
-                            .store_circuit(&vcs, std::sync::Arc::new(vk))?;
+                        cache.pinned_memory_cache.store_circuit(
+                            &vcs,
+                            std::sync::Arc::new(VK::from_bytes(&serialized_vk.bytes)?),
+                        )?;
                     }
                 }
-
                 vcs
             } else {
                 Checksum::generate(&[])
@@ -626,7 +622,7 @@ where
     }
 
     /// Load a verifying key from disk
-    pub fn load_vk(&self, checksum: &Checksum) -> VmResult<Option<crate::zk::SerializedVK>> {
+    pub fn load_vk(&self, checksum: &Checksum) -> VmResult<Option<SerializedPlonkishCircuitData>> {
         let cache = self.inner.lock().unwrap();
         self.load_vk_from_disk(&cache.wasm_path, checksum)
     }
@@ -645,12 +641,11 @@ where
         if cache.pinned_memory_cache.has(checksum, true) {
             return Ok(());
         }
-        if let Some(serialized_vk) = self.load_vk_from_disk(&cache.wasm_path, checksum)? {
-            let loaded_vk = crate::zk::LoadedVerifyingKey::from_bytes(&serialized_vk.bytes)
-                .map_err(|e| VmError::generic_err(format!("VK deserialization failed: {}", e)))?;
+        if let Some(vkbz) = self.load_vk_from_disk(&cache.wasm_path, checksum)? {
+            let vk = VK::from_bytes(&vkbz.bytes)?;
             cache
                 .pinned_memory_cache
-                .store_circuit(checksum, std::sync::Arc::new(loaded_vk))?;
+                .store_circuit(checksum, std::sync::Arc::new(vk))?;
             Ok(())
         } else {
             Err(VmError::generic_err("No VK found for checksum"))
@@ -664,7 +659,7 @@ where
     }
 
     /// Get a pinned VK
-    fn get_pinned_circuit(&self, checksum: &Checksum) -> Option<crate::zk::PinnedCircuit> {
+    fn get_pinned_circuit(&self, checksum: &Checksum) -> Option<PinnedCircuit> {
         self.inner
             .lock()
             .unwrap()
@@ -712,13 +707,11 @@ where
     fn store_circuit_to_disk(
         &self,
         dir: impl Into<PathBuf>,
-        vk: &crate::zk::SerializedVK,
+        vk: &SerializedPlonkishCircuitData,
     ) -> VmResult<Checksum> {
-        let checksum = Checksum::from(vk.hash);
-        let path = self.vk_path(dir, &checksum);
+        let path = self.vk_path(dir, &vk.hash);
 
         let mut file_content: Vec<u8> = Vec::with_capacity(vk.bytes.len());
-        file_content.push(vk.metadata.circuit_type.to_u8());
         file_content.extend_from_slice(&vk.bytes);
 
         let mut file = OpenOptions::new()
@@ -731,7 +724,7 @@ where
         file.write_all(&file_content)
             .map_err(|e| VmError::cache_err(format!("Error writing VK file: {}", e)))?;
 
-        Ok(checksum)
+        Ok(vk.hash)
     }
 
     /// Load a verifying key from disk
@@ -740,7 +733,7 @@ where
         &self,
         dir: impl Into<PathBuf>,
         checksum: &Checksum,
-    ) -> VmResult<Option<crate::zk::SerializedVK>> {
+    ) -> VmResult<Option<SerializedPlonkishCircuitData>> {
         let path = self.vk_path(dir, checksum);
 
         if !path.exists() {
@@ -762,10 +755,14 @@ where
             bytes
         };
 
-        let (zkm, hash) = check_vk(&bytes)
+        let (zkm, hash) = crate::check_circuit(&bytes)
             .map_err(|e| VmError::generic_err(format!("Error reading VK file: {}", e)))?;
 
-        Ok(Some(crate::zk::SerializedVK::new(&bytes, &hash, &zkm)))
+        Ok(Some(crate::SerializedPlonkishCircuitData::new(
+            &bytes,
+            &hash.as_slice(),
+            &zkm.to_bytes(),
+        )))
     }
 
     /// Remove a VK file from disk if the path exists
@@ -847,7 +844,8 @@ fn save_wasm_to_disk(dir: impl Into<PathBuf>, wasm: &[u8]) -> VmResult<Checksum>
 /// It will create the directory if it doesn't exist.
 /// Saving the same byte code multiple times is allowed.
 fn save_vk_to_disk(dir: impl Into<PathBuf>, vk: &[u8]) -> VmResult<Checksum> {
-    let (_, checksum) = check_vk(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
+    let (_, checksum) =
+        crate::check_circuit(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
     // calculate filename
     let filename = checksum.to_hex();
     let filepath = dir.into().join(filename).with_extension("wasm");
@@ -916,12 +914,12 @@ mod tests {
     use super::*;
     use crate::calls::{call_execute, call_instantiate};
     use crate::testing::{mock_backend, mock_env, mock_info, MockApi, MockQuerier, MockStorage};
-    use crate::CodeBundle;
     use cosmwasm_std::{coins, Empty};
     use std::borrow::Cow;
     use std::fs::{create_dir_all, remove_dir_all};
     use tempfile::TempDir;
     use wasm_encoder::ComponentSection;
+    use CodeBundle;
 
     const TESTING_GAS_LIMIT: u64 = 500_000_000; // ~0.5ms
     const TESTING_MEMORY_LIMIT: Size = Size::mebi(16);
@@ -959,8 +957,7 @@ mod tests {
         ])
     }
 
-    fn make_testing_options_with_vk(
-    ) -> (CacheOptions, TempDir, zk_headstash::deploy::HeadstashSuite) {
+    fn make_testing_options_with_vk() -> (CacheOptions, TempDir, zk_cosmwasm::TestPressSuite) {
         let temp_dir = TempDir::new().unwrap();
         (
             CacheOptions {
@@ -970,7 +967,7 @@ mod tests {
                 instance_memory_limit_bytes: TESTING_MEMORY_LIMIT,
             },
             temp_dir,
-            zk_headstash::deploy::HeadstashSuite::new(),
+            zk_cosmwasm::TestPressSuite::new(),
         )
     }
     fn make_testing_options() -> (CacheOptions, TempDir) {
@@ -2150,14 +2147,12 @@ mod tests {
         let path = Path::new("./data/test_keys");
         let key_folder = path.join("no_rick");
         let combinded = key_folder.join("vk_combined.bin");
-
         let _ = fs::create_dir_all(path);
 
-        let proofs = zk_headstash::deploy::HeadstashLaunchpadInstance::gen_test_circuit_keys(
+        let proofs = zk_cosmwasm::TestPressLaunchpadInstance::gen_test_circuit_keys(
             &suite,
             path,
-            None,
-            // Some(&key_folder),
+            None, // Some(&key_folder),
             vec![],
         )
         .unwrap();
@@ -2182,7 +2177,7 @@ mod tests {
         // confirm retrieval of vk from pinned memory
         assert_eq!(codebundle.verifying_key.clone().unwrap().hash, checksums[1]);
         let vk = cache.get_pinned_circuit(&checksums[1]).unwrap();
-        assert_eq!(vk.vk().i, 1);
+        assert_eq!(vk.i, 1);
 
         // cannot store only wasm file
         let codebundle = CodeBundle::wasm_only(HACKATOM.to_vec());

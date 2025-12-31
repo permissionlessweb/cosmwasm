@@ -334,7 +334,7 @@ pub trait Api: Any {
         &self,
         zkid: u64,
         proof: &[u8],
-        instances: &[u8],
+        i: &[u8],
     ) -> Result<bool, VerificationError> {
         unimplemented!()
     }

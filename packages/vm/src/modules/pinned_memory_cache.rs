@@ -18,7 +18,7 @@ pub struct InstrumentedCircuit {
     /// Number of loads from memory this module received
     pub hits: u32,
     /// The actual cached module
-    pub circuit: crate::zk::PinnedCircuit,
+    pub circuit: zk_cosmwasm::PinnedCircuit,
 }
 
 /// An pinned in memory module cache
@@ -51,11 +51,11 @@ impl PinnedMemoryCache {
 
         Ok(())
     }
-    
+
     pub fn store_circuit(
         &mut self,
         checksum: &Checksum,
-        circuit: crate::zk::PinnedCircuit,
+        circuit: zk_cosmwasm::PinnedCircuit,
     ) -> VmResult<()> {
         self.circuits
             .insert(*checksum, InstrumentedCircuit { hits: 0, circuit });
@@ -90,7 +90,7 @@ impl PinnedMemoryCache {
     pub fn load_circuit(
         &mut self,
         checksum: &Checksum,
-    ) -> VmResult<Option<crate::zk::PinnedCircuit>> {
+    ) -> VmResult<Option<zk_cosmwasm::PinnedCircuit>> {
         match self.circuits.get_mut(checksum) {
             Some(cached) => {
                 cached.hits = cached.hits.saturating_add(1);

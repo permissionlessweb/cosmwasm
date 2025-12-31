@@ -12,7 +12,7 @@ readme = "README.md"
 features = ["cosmwasm_3_0", "staking", "stargate", "ibc2"]
 
 [features]
-default = ["exports", "iterator", "std"]
+default = ["exports", "iterator", "std" ]
 # Enable if this cosmwasm-std is the primary version of cosmwas-std used in the contract. This
 # adds exports and imports needed for basic communication between contract and VM.
 exports = []
@@ -81,7 +81,6 @@ cosmwasm-crypto = { workspace = true }
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 
 [dev-dependencies]
-zk-headstash  = { workspace = true, features = ["interface"] }
 cosmwasm-core = { workspace = true }
 cosmwasm-schema = { workspace = true }
 # The chrono dependency is only used in an example, which Rust compiles for us. If this causes trouble, remove it.

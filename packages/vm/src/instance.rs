@@ -76,7 +76,7 @@ where
         let engine = make_compiling_engine(memory_limit);
         let module = compile(&engine, code)?;
         let store = Store::new(engine);
-        Instance::from_module(store, &module, backend, options.gas_limit, None, None, None)
+        Instance::from_module(store, &module, backend, options.gas_limit, None, None)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -87,12 +87,8 @@ where
         gas_limit: u64,
         extra_imports: Option<HashMap<&str, Exports>>,
         instantiation_lock: Option<&Mutex<()>>,
-        vk: Option<crate::zk::PinnedCircuit>,
     ) -> VmResult<Self> {
-        let fe = FunctionEnv::new(
-            &mut store,
-            Environment::new_with_vk(backend.api, gas_limit, vk),
-        );
+        let fe = FunctionEnv::new(&mut store, Environment::new_with_vk(backend.api, gas_limit));
 
         let mut import_obj = Imports::new();
         let mut env_imports = Exports::new();
@@ -535,7 +531,7 @@ where
     S: Storage + 'static, // 'static is needed here to allow using this in an Environment that is cloned into closures
     Q: Querier + 'static,
 {
-    Instance::from_module(store, module, backend, gas_limit, extra_imports, None, None)
+    Instance::from_module(store, module, backend, gas_limit, extra_imports, None)
 }
 
 #[cfg(test)]
@@ -700,7 +696,6 @@ mod tests {
             backend,
             instance_options.gas_limit,
             Some(extra_imports),
-            None,
             None,
         )
         .unwrap();
