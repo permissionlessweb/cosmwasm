@@ -881,7 +881,7 @@ pub fn do_halo2_proof_instance_verify<
 
     // 6. Deserialize the verifying key
     match Proof::new(proof_bytes).verify(
-        &zk_cosmwasm::VK::from_bytes(&serialized_vk_bytes).map_err(|e| {
+        &zk_cosmwasm::VerifyingKey::from_bytes(&serialized_vk_bytes).map_err(|e| {
             VmError::generic_err(format!(
                 "Failed to deserialize VK for circuit {}: {}",
                 zkid, e

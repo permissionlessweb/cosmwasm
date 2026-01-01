@@ -317,11 +317,6 @@ impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
         eprintln!("  Before FieldChip::configure: columns exist");
         let config = FieldChip::configure(meta, advice, instance, constant);
         eprintln!("  ✓ FieldChip::configure returned");
-        eprintln!(
-            "  After FieldChip::configure: num_advice={}, num_fixed={:#?} ",
-            config.advice.len(),
-            meta,
-        );
         config
     }
 

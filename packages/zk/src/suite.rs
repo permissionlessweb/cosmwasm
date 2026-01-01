@@ -200,7 +200,7 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsIn
         use std::io::{self, Seek};
         const K: u32 = 10;
         const V: u8 = 0;
-        const I: u8 = 2;
+        const I: u8 = 1;
 
         eprintln!("  📝 Generating NoRickCircuit keys...");
         let circuit: NoRickCircuit<Fp> = Default::default();
@@ -251,27 +251,38 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsIn
         let vk_len = temp.len() as u32;
         eprintln!("norick: ✓ Verifying key size: {} bytes", vk_len);
         combined_file.write_all(&temp)?;
-        // WRITE METADATA FOOTER
+
+        // WRITE EXTENDED 32-BYTE METADATA FOOTER using CircuitFooter
+        use crate::cosmwasm_circuit::{CircuitFooter, CircuitType};
+        let footer = CircuitFooter::new(
+            CircuitType::Plonkish,
+            I,                    // instance_count: 1
+            2,                    // num_fixed_columns (NoRickCircuit: 1 constant + 1 selector)
+            2,                    // num_advice_columns (NoRickCircuit: 2 advice columns)
+            1,                    // num_instance_columns
+            3,                    // degree (typical for plonk gates)
+            params_len,
+            vk_len,
+            1,                    // num_selectors (NoRickCircuit: 1 selector for multiply gate)
+            0,                    // crc32 (not computed for now)
+        );
+
         let metadata_start = combined_file.seek(io::SeekFrom::Current(0))?;
-
-        combined_file.write_all(&[V])?;
-        combined_file.write_all(&[I])?;
-        combined_file.write_all(&params_len.to_le_bytes())?;
-        combined_file.write_all(&vk_len.to_le_bytes())?;
-
+        combined_file.write_all(&footer.to_bytes())?;
         let metadata_end = combined_file.seek(io::SeekFrom::Current(0))?;
         let actual_metadata_len = (metadata_end - metadata_start) as usize;
 
         assert_eq!(
-            actual_metadata_len, COSMWASM_METADATA_LENGTH,
-            "norick: Metadata size mismatch: wrote {} bytes, expected {}",
-            actual_metadata_len, COSMWASM_METADATA_LENGTH
-        );
-        eprintln!(
-            "norick: Metadata footer written: {} bytes",
+            actual_metadata_len, 32,
+            "norick: Metadata size mismatch: wrote {} bytes, expected 32",
             actual_metadata_len
         );
-        eprintln!("norick: V: {}, I: {}", V, I);
+        eprintln!(
+            "norick: CircuitFooter written: {} bytes (extended format)",
+            actual_metadata_len
+        );
+        eprintln!("norick: instance_count={}, fixed_cols={}, advice_cols={}, instance_cols={}, degree={}",
+            I, 1, 2, 1, 3);
         eprintln!("  params_len: {}, vk_len: {}", params_len, vk_len);
 
         combined_file.flush()?;

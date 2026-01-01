@@ -33,7 +33,7 @@ pub use crate::zk::example_circuits;
 
 pub use crate::zk::{
     check_circuit, cosmwasm_circuit::PlonkishCircuitMetadata, CodeBundle, CosmwasmCircuit, Proof,
-    ProvingKey, SerializedPlonkishCircuitData, VK,
+    ProvingKey, SerializedPlonkishCircuitData, VerifyingKey,
 };
 
 pub use crate::backend::{

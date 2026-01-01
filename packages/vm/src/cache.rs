@@ -271,7 +271,8 @@ where
         if persist {
             self.save_circuit_to_disk(vk)
         } else {
-            Ok(hash)
+            let cs: [u8; 32] = hash.as_slice().try_into().expect("store circuit checksum");
+            Ok(Checksum::from(cs))
         }
     }
 
@@ -609,7 +610,7 @@ where
                     if let Some(serialized_vk) = self.load_vk_from_disk(&cache.wasm_path, &vcs)? {
                         cache.pinned_memory_cache.store_circuit(
                             &vcs,
-                            std::sync::Arc::new(VK::from_bytes(&serialized_vk.bytes)?),
+                            std::sync::Arc::new(VerifyingKey::from_bytes(&serialized_vk.bytes)?),
                         )?;
                     }
                 }
@@ -642,7 +643,7 @@ where
             return Ok(());
         }
         if let Some(vkbz) = self.load_vk_from_disk(&cache.wasm_path, checksum)? {
-            let vk = VK::from_bytes(&vkbz.bytes)?;
+            let vk = VerifyingKey::from_bytes(&vkbz.bytes)?;
             cache
                 .pinned_memory_cache
                 .store_circuit(checksum, std::sync::Arc::new(vk))?;
@@ -709,7 +710,7 @@ where
         dir: impl Into<PathBuf>,
         vk: &SerializedPlonkishCircuitData,
     ) -> VmResult<Checksum> {
-        let path = self.vk_path(dir, &vk.hash);
+        let path = self.vk_path(dir, &vk.hash.into());
 
         let mut file_content: Vec<u8> = Vec::with_capacity(vk.bytes.len());
         file_content.extend_from_slice(&vk.bytes);
@@ -724,7 +725,7 @@ where
         file.write_all(&file_content)
             .map_err(|e| VmError::cache_err(format!("Error writing VK file: {}", e)))?;
 
-        Ok(vk.hash)
+        Ok(vk.hash.into())
     }
 
     /// Load a verifying key from disk
@@ -2175,7 +2176,10 @@ mod tests {
         println!("{:#?}", checksums[1]);
 
         // confirm retrieval of vk from pinned memory
-        assert_eq!(codebundle.verifying_key.clone().unwrap().hash, checksums[1]);
+        assert_eq!(
+            Checksum::from(codebundle.verifying_key.clone().unwrap().hash),
+            checksums[1]
+        );
         let vk = cache.get_pinned_circuit(&checksums[1]).unwrap();
         assert_eq!(vk.i, 1);
 
