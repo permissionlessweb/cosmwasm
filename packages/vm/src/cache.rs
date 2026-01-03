@@ -674,30 +674,6 @@ where
         dir.into().join(checksum.to_hex()).with_extension("vk")
     }
 
-    // // Helper: Persist both WASM and VK to disk
-    // fn persist_code_and_vk(
-    //     &self,
-    //     has_wasm: bool,
-    //     code_bundle: &crate::zk::CodeBundle,
-    // ) -> VmResult<[Checksum; 2]> {
-    //     let mut cache = self.inner.lock().unwrap();
-    //     Ok([
-    //         if has_wasm {
-    //             let (m, cs) =
-    //                 self.store_wasm_to_disk(&cache.wasm_path, code_bundle.wasm.clone())?;
-    //             cache.fs_cache.store(&cs, &m)?;
-    //             cs
-    //         } else {
-    //             self.dummy_checksum()
-    //         },
-    //         if let Some(vk) = &code_bundle.verifying_key {
-    //             self.store_circuit_to_disk(&cache.wasm_path, vk)?
-    //         } else {
-    //             self.dummy_checksum()
-    //         },
-    //     ])
-    // }
-
     // Helper to produce a dummy checksum (same as used for missing VK)
     fn store_wasm_to_disk(&self, dir: &PathBuf, wasm: Vec<u8>) -> VmResult<(Module, Checksum)> {
         // Compile and store WASM
@@ -841,30 +817,6 @@ fn save_wasm_to_disk(dir: impl Into<PathBuf>, wasm: &[u8]) -> VmResult<Checksum>
 
     Ok(checksum)
 }
-/// save stores the wasm code in the given directory and returns an ID for lookup.
-/// It will create the directory if it doesn't exist.
-/// Saving the same byte code multiple times is allowed.
-fn save_vk_to_disk(dir: impl Into<PathBuf>, vk: &[u8]) -> VmResult<Checksum> {
-    let (_, checksum) =
-        crate::check_circuit(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
-    // calculate filename
-    let filename = checksum.to_hex();
-    let filepath = dir.into().join(filename).with_extension("wasm");
-
-    // write data to file
-    // Since the same filename (a collision resistant hash) cannot be generated from two different byte codes
-    // (even if a malicious actor tried), it is safe to override.
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(filepath)
-        .map_err(|e| VmError::cache_err(format!("Error opening Wasm file for writing: {e}")))?;
-    file.write_all(vk)
-        .map_err(|e| VmError::cache_err(format!("Error writing Wasm file: {e}")))?;
-
-    Ok(checksum)
-}
 
 fn load_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResult<Vec<u8>> {
     // this requires the directory and file to exist
@@ -909,6 +861,46 @@ fn remove_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResu
 
     Ok(())
 }
+
+/// save stores the wasm code in the given directory and returns an ID for lookup.
+/// It will create the directory if it doesn't exist.
+/// Saving the same byte code multiple times is allowed.
+fn save_vk_to_disk(dir: impl Into<PathBuf>, vk: &[u8]) -> VmResult<Checksum> {
+    let (_, checksum) =
+        crate::check_circuit(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
+    // calculate filename
+    let filename = checksum.to_hex();
+    let filepath = dir.into().join(filename).with_extension("wasm");
+
+    // write data to file
+    // Since the same filename (a collision resistant hash) cannot be generated from two different byte codes
+    // (even if a malicious actor tried), it is safe to override.
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(filepath)
+        .map_err(|e| VmError::cache_err(format!("Error opening Wasm file for writing: {e}")))?;
+    file.write_all(vk)
+        .map_err(|e| VmError::cache_err(format!("Error writing Wasm file: {e}")))?;
+
+    Ok(checksum)
+}
+
+// fn load_vk_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResult<Vec<u8>> {
+//     // this requires the directory and file to exist
+//     // The files previously had no extension, so to allow for a smooth transition,
+//     // we also try to load the file without the wasm extension.
+//     let path = dir.into().join(checksum.to_hex());
+//     let mut file = File::open(path.with_extension("wasm"))
+//         .or_else(|_| File::open(path))
+//         .map_err(|_e| VmError::cache_err("Error opening Wasm file for reading"))?;
+
+//     let mut wasm = Vec::<u8>::new();
+//     file.read_to_end(&mut wasm)
+//         .map_err(|_e| VmError::cache_err("Error reading Wasm file"))?;
+//     Ok(wasm)
+// }
 
 #[cfg(test)]
 mod tests {
@@ -2139,7 +2131,7 @@ mod tests {
     #[test]
     pub fn test_vk_save_and_load_verification() {
         use std::fs;
-        use std::io::{Read, Write};
+        use std::io::Read;
 
         let (testing_opts, _temp_dir, suite) = make_testing_options_with_vk();
         let cache: Cache<MockApi, MockStorage, MockQuerier> =
@@ -2154,7 +2146,7 @@ mod tests {
             &suite,
             path,
             None, // Some(&key_folder),
-            vec![],
+            vec![("lrain".to_string(), "rick".into())],
         )
         .unwrap();
 

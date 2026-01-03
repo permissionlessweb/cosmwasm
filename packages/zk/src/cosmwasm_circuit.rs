@@ -1,6 +1,7 @@
 use std::io::{self, Cursor};
 use std::sync::Arc;
 
+use crate::errors::{ZkError, ZkResult};
 use group::ff::{Field, PrimeField};
 use halo2_proofs::{
     circuit::Layouter,
@@ -9,7 +10,10 @@ use halo2_proofs::{
 };
 use pasta_curves::vesta;
 
-use crate::errors::{ZkError, ZkResult};
+/// Custom section name for embedded verifying keys
+/// Contracts can embed their VK in a WASM custom section with this name
+pub const VK_CUSTOM_SECTION_NAME: &str = "cosmwasm_zk_vk";
+pub const VK_VERSION: i32 = 0x01;
 
 /// Thread-safe handle to a pinned verifying key
 pub type PinnedCircuit = Arc<VerifyingKey>;
@@ -154,6 +158,31 @@ thread_local! {
         std::cell::RefCell::new(None);
 }
 
+/// RAII Guard for DynamicCircuit thread-local configuration
+///
+/// Automatically clears the thread-local config when dropped, preventing leaks
+/// and reentrancy issues in concurrent scenarios. Ensures cleanup even if panic occurs.
+///
+/// # Safety
+/// This guard must be held for the entire duration of VK deserialization/keygen.
+/// Dropping it will clear the thread-local config.
+#[must_use = "guard should be held for the entire operation"]
+pub struct DynamicCircuitGuard;
+
+impl DynamicCircuitGuard {
+    /// Create a new guard - should only be created after set_as_current()
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl Drop for DynamicCircuitGuard {
+    fn drop(&mut self) {
+        // Automatically cleanup the thread-local on scope exit
+        DynamicCircuit::clear_current();
+    }
+}
+
 /// Generic circuit that implements Circuit<vesta::Scalar> dynamically
 /// Configured at runtime using footer metadata to match any constraint system
 ///
@@ -201,10 +230,24 @@ impl DynamicCircuit {
 
     /// Set this circuit's config as the current thread-local for use in configure()
     /// Must be called before halo2 operations that invoke configure()
-    pub fn set_as_current(&self) {
+
+    /// Set config and return an RAII guard for automatic cleanup
+    ///
+    /// The guard ensures cleanup happens automatically even if panic occurs.
+    /// This is the preferred method for safe VK deserialization.
+    ///
+    /// # Usage
+    /// ```ignore
+    /// let circuit = DynamicCircuit::from_footer(&footer);
+    /// let _guard = circuit.set_as_current_guarded();
+    /// // halo2::VerifyingKey::read can now use the circuit
+    /// // Guard automatically cleans up when _guard goes out of scope
+    /// ```
+    pub fn set_as_current_guarded(&self) -> DynamicCircuitGuard {
         DYNAMIC_CIRCUIT_CONFIG.with(|cfg| {
             *cfg.borrow_mut() = Some(self.config);
         });
+        DynamicCircuitGuard::new()
     }
 
     /// Get the current thread-local configuration
@@ -226,7 +269,7 @@ impl Circuit<vesta::Scalar> for DynamicCircuit {
 
     fn without_witnesses(&self) -> Self {
         // Ensure our config is available in the thread-local when needed
-        self.set_as_current();
+        let _ = self.set_as_current_guarded();
         self.clone()
     }
 
@@ -405,16 +448,16 @@ pub struct SerializedPlonkishCircuitData {
     /// SHA256 hash of just the params+vk bytes (without footer) for integrity checking
     pub hash: [u8; 32],
     /// Circuit metadata footer
-    pub metadata: Vec<u8>,
+    pub footer: Vec<u8>,
 }
 
 impl SerializedPlonkishCircuitData {
     /// Create from raw components
-    pub fn new(bytes: &[u8], hash: &[u8], metadata: &[u8]) -> Self {
+    pub fn new(bytes: &[u8], hash: &[u8], footer: &[u8]) -> Self {
         Self {
             bytes: bytes.into(),
-            hash: hash.try_into().expect("hash checksumF"),
-            metadata: metadata.into(),
+            hash: hash.try_into().expect("hash checksum"),
+            footer: footer.into(),
         }
     }
 
@@ -440,14 +483,6 @@ impl SerializedPlonkishCircuitData {
             ));
         }
 
-        let metadata = PlonkishCircuitMetadata::new(
-            footer.circuit_type,
-            footer.instance_count,
-            params_len,
-            vk_len,
-        )
-        .to_bytes();
-
         // For hash, we need to compute it from the params+vk bytes
         // This is a simplified approach - the actual hash should be provided
         let mut hash = [0u8; 32];
@@ -456,7 +491,7 @@ impl SerializedPlonkishCircuitData {
         Ok(Self {
             bytes: value.into(),
             hash,
-            metadata,
+            footer: footer_bytes.to_vec(),
         })
     }
 }
@@ -555,17 +590,10 @@ impl VerifyingKey {
             )));
         }
 
-        // Store as SerializedPlonkishCircuitData with the raw bytes
-        let metadata = PlonkishCircuitMetadata::new(
-            footer.circuit_type,
-            footer.instance_count,
-            params_len,
-            vk_len,
-        );
         Ok(SerializedPlonkishCircuitData::new(
             bytes,
             &[0u8; 32],
-            &metadata.to_bytes(),
+            &footer_bytes,
         ))
     }
 
@@ -619,7 +647,9 @@ impl VerifyingKey {
         // Create DynamicCircuit from footer metadata
         eprintln!("🔧 Creating DynamicCircuit from footer...");
         let circuit = DynamicCircuit::from_footer(&footer);
-        circuit.set_as_current();
+
+        // RAII guard ensures cleanup even if deserialization panics
+        let _guard = circuit.set_as_current_guarded();
 
         // Deserialize vk using DynamicCircuit
         eprintln!(
@@ -640,7 +670,8 @@ impl VerifyingKey {
         })?;
         eprintln!("✓ VK deserialized successfully");
 
-        DynamicCircuit::clear_current();
+        // Guard automatically cleans up when dropped at scope end
+        drop(_guard);
 
         Ok(VerifyingKey::new(
             vk,
@@ -936,76 +967,4 @@ impl Proof {
 
     //     batch.add_proof(instances, self.0.clone());
     // }
-}
-
-// packages/vm/src/zk.rs - Zero-knowledge proof support for CosmWasm
-
-use wasmer::wasmparser::{Parser, Payload};
-
-/// Custom section name for embedded verifying keys
-/// Contracts can embed their VK in a WASM custom section with this name
-pub const VK_CUSTOM_SECTION_NAME: &str = "cosmwasm_zk_vk";
-pub const VK_VERSION: i32 = 0x01;
-
-/// Metadata about a circuit in use of Plonk (Halo2 is our default) compatible with the CosmWasm VM
-#[derive(Debug, Clone, Copy)]
-pub struct PlonkishCircuitMetadata {
-    pub ct: CircuitType,
-    pub i: u8,
-    pub vkpl: usize,
-    pub vkl: usize,
-}
-
-impl PlonkishCircuitMetadata {
-    pub fn new(ct: CircuitType, i: u8, vkpl: usize, vkl: usize) -> Self {
-        Self { ct, i, vkpl, vkl }
-    }
-    /// Extract params bytes from the full VK file
-    pub fn params_bytes<'a>(&self, full_bytes: &'a [u8]) -> &'a [u8] {
-        &full_bytes[..self.vkpl]
-    }
-
-    /// Extract VK bytes from the full VK file
-    pub fn vk_bytes<'a>(&self, full_bytes: &'a [u8]) -> &'a [u8] {
-        &full_bytes[self.vkpl..self.vkpl + self.vkl]
-    }
-
-    /// Extract metadata/footer bytes from the full VK file
-    pub fn metadata_bytes<'a>(&self, full_bytes: &'a [u8]) -> &'a [u8] {
-        // Footer is always 32 bytes
-        const FOOTER_SIZE: usize = 32;
-        &full_bytes[self.vkpl + self.vkl..]
-    }
-
-    /// Total expected file size
-    pub fn total_size(&self) -> usize {
-        const FOOTER_SIZE: usize = 32;
-        self.vkpl + self.vkl + FOOTER_SIZE
-    }
-
-    /// Validate that the file size matches expected
-    pub fn validate_size(&self, actual_size: usize) -> io::Result<()> {
-        let expected = self.total_size();
-        if actual_size != expected {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Size mismatch: got {} bytes, expected {}",
-                    actual_size, expected
-                ),
-            ));
-        }
-        Ok(())
-    }
-
-    /// writes the plonkish circuit metadata footer to its own array of bytes.
-    /// Format: [ct (1)][i (1)][vkpl (4)][vkl (4)] = 10 bytes total
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(self.ct.to_u8());
-        bytes.push(self.i);
-        bytes.extend_from_slice(&(self.vkpl as u32).to_le_bytes());
-        bytes.extend_from_slice(&(self.vkl as u32).to_le_bytes());
-        bytes
-    }
 }

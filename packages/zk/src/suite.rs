@@ -256,15 +256,15 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsIn
         use crate::cosmwasm_circuit::{CircuitFooter, CircuitType};
         let footer = CircuitFooter::new(
             CircuitType::Plonkish,
-            I,                    // instance_count: 1
-            2,                    // num_fixed_columns (NoRickCircuit: 1 constant + 1 selector)
-            2,                    // num_advice_columns (NoRickCircuit: 2 advice columns)
-            1,                    // num_instance_columns
-            3,                    // degree (typical for plonk gates)
+            I, // instance_count: 1
+            2, // num_fixed_columns (NoRickCircuit: 1 constant + 1 selector)
+            2, // num_advice_columns (NoRickCircuit: 2 advice columns)
+            1, // num_instance_columns
+            3, // degree (typical for plonk gates)
             params_len,
             vk_len,
-            1,                    // num_selectors (NoRickCircuit: 1 selector for multiply gate)
-            0,                    // crc32 (not computed for now)
+            1, // num_selectors (NoRickCircuit: 1 selector for multiply gate)
+            0, // crc32 (not computed for now)
         );
 
         let metadata_start = combined_file.seek(io::SeekFrom::Current(0))?;
@@ -281,8 +281,10 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsIn
             "norick: CircuitFooter written: {} bytes (extended format)",
             actual_metadata_len
         );
-        eprintln!("norick: instance_count={}, fixed_cols={}, advice_cols={}, instance_cols={}, degree={}",
-            I, 1, 2, 1, 3);
+        eprintln!(
+            "norick: instance_count={}, fixed_cols={}, advice_cols={}, instance_cols={}, degree={}",
+            I, 1, 2, 1, 3
+        );
         eprintln!("  params_len: {}, vk_len: {}", params_len, vk_len);
 
         combined_file.flush()?;
