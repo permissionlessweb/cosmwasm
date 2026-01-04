@@ -58,6 +58,7 @@ thiserror = "1.0.26"
 wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass"] }
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
+rand = "0.8"
 strum = { version = "0.26.2", default-features = false, features = ["derive"] }
 # For heap profiling. Only used in the "heap_profiling" example. This has to be a non-dev dependency
 # because cargo currently does not support optional dev-dependencies.
@@ -69,10 +70,10 @@ dhat = { version = "0.3.3", optional = true }
 # wasmer = { path = "../../../wasmer/lib/api", default-features = false, features = ["singlepass"] }
 # wasmer-middlewares = { path = "../../../wasmer/lib/middlewares" }
 
- # halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
- halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
-rand = "0.8"
+halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
 zk-cosmwasm  = { workspace = true, features = ["interface"]  }
+
+# halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
