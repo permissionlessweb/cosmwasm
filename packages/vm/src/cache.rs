@@ -267,9 +267,10 @@ where
 
     pub fn store_circuit(&self, vk: &[u8], persist: bool) -> VmResult<Checksum> {
         let (svk, hash) = check_circuit(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
-
         if persist {
-            self.save_circuit_to_disk(vk)
+            let res = self.save_circuit_to_disk(vk)?;
+            self.pin_circuit(&hash)?;
+            Ok(res)
         } else {
             let cs: [u8; 32] = hash.as_slice().try_into().expect("store circuit checksum");
             Ok(Checksum::from(cs))
@@ -671,7 +672,7 @@ where
 
     /// Get the path where a VK file would be stored
     fn vk_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
-        dir.into().join(checksum.to_hex()).with_extension("vk")
+        dir.into().join(checksum.to_hex()).with_extension("bin")
     }
 
     // Helper to produce a dummy checksum (same as used for missing VK)
@@ -870,7 +871,7 @@ fn save_vk_to_disk(dir: impl Into<PathBuf>, vk: &[u8]) -> VmResult<Checksum> {
         crate::check_circuit(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
     // calculate filename
     let filename = checksum.to_hex();
-    let filepath = dir.into().join(filename).with_extension("wasm");
+    let filepath = dir.into().join(filename).with_extension("bin");
 
     // write data to file
     // Since the same filename (a collision resistant hash) cannot be generated from two different byte codes

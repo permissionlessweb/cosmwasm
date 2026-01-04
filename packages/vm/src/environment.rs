@@ -510,21 +510,38 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
     /// Query storage to get `zkid → checksum` mapping
     ///
     /// Resolves a zkid to its corresponding checksum in app state
-    /// The checksum mapping is stored by the application layer during store_code_with_circuit
-    pub fn resolve_zkid_to_checksum(&self, zkid: u64) -> Option<Checksum> {
+    /// The checksum mapping is stored by the application layer during store_circuit
+    pub fn resolve_zkid_to_checksum(&self, zkid: u32) -> Option<Checksum> {
+        let zkid_key = zkid.to_le_bytes();
+        eprintln!("[halo2] [5] Looking up zkid {} with key: {:02x?}", zkid, zkid_key);
+
         // storage.get() returns BackendResult which is (Result<..>, GasInfo)
         let (result, _gas_info) = self
-            .with_storage_from_context(|storage| Ok(storage.get(&zkid.to_le_bytes())))
+            .with_storage_from_context(|storage| {
+                eprintln!("[halo2] [5] Querying storage for zkid→checksum mapping...");
+                Ok(storage.get(&zkid_key))
+            })
             .ok()?;
 
         // Extract the Option<Vec<u8>> from the Result
-        let bytes_opt = result.ok()?;
+        let bytes_opt = match result {
+            Ok(opt) => {
+                eprintln!("[halo2] [5] Storage query returned: {:?}", opt.as_ref().map(|b| format!("{} bytes", b.len())));
+                opt
+            }
+            Err(e) => {
+                eprintln!("[halo2] [5] ✗ Storage error: {}", e);
+                return None;
+            }
+        };
 
         // Checksum is 32 bytes (256-bit hash)
         bytes_opt.and_then(|bytes| {
             if bytes.len() == 32 {
+                eprintln!("[halo2] [5] ✓ Found checksum for zkid {}: {}", zkid, hex::encode(&bytes));
                 Some(Checksum::from(<[u8; 32]>::try_from(&bytes[..]).ok()?))
             } else {
+                eprintln!("[halo2] [5] ✗ Invalid checksum length: expected 32, got {}", bytes.len());
                 None
             }
         })
