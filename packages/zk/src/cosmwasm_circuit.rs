@@ -382,6 +382,12 @@ pub struct CosmwasmCircuit<C> {
     circuit: C,
 }
 
+impl<C> CosmwasmCircuit<C> {
+    pub fn new(circuit: C) -> Self {
+        Self { circuit }
+    }
+}
+
 /// implement minimal halo2-circuit trait for field-element.
 impl<C, F> halo2_proofs::plonk::Circuit<F> for CosmwasmCircuit<C>
 where
