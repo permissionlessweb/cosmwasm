@@ -718,23 +718,20 @@ impl Api for ExternalApi {
 
     fn halo2_proof_instance_verify(
         &self,
-        zkid: &[u8],
+        zkid: u32,
         proof: &[u8],
         i: &[u8],
     ) -> Result<bool, VerificationError> {
-        let zkid_send = Region::from_slice(zkid);
-        let zkid_ptr = zkid_send.as_ptr() as u32;
-
         let proof_send = Region::from_slice(proof);
         let proof_send_ptr = proof_send.as_ptr() as u32;
         let proof_len = proof.len() as u32;
 
-        let instances_send = Region::from_slice(instances);
+        let instances_send = Region::from_slice(i);
         let i_send_ptr = instances_send.as_ptr() as u32;
-        let i_len = instances.len() as u32;
+        let i_len = i.len() as u32;
 
         let result = unsafe {
-            halo2_proof_instance_verify(zkid_ptr, proof_send_ptr, proof_len, i_send_ptr, i_len)
+            halo2_proof_instance_verify(zkid, proof_send_ptr, proof_len, i_send_ptr, i_len)
         };
 
         match result {

@@ -581,20 +581,20 @@ where
             } else {
                 Checksum::generate(&[])
             };
-            let vk_checksum = if let Some(vk) = &code_bundle.verifying_key {
+            let circuit_checksum = if let Some(vk) = &code_bundle.verifying_key {
                 Checksum::generate(&vk.bytes)
             } else {
                 Checksum::generate(&[])
             };
-            return Ok([wasm_checksum, vk_checksum]);
+            return Ok([wasm_checksum, circuit_checksum]);
         }
 
         // Persist mode: acquire lock once and handle everything within it
         let mut cache = self.inner.lock().unwrap();
 
         // Store WASM code & VK binary,pin VK and return both checksums
-        // let vk_checksum = Checksum::generate(&[]);
-        let (wasm_checksum, vk_checksum) = (
+        // let circuit_checksum = Checksum::generate(&[]);
+        let (wasm_checksum, circuit_checksum) = (
             if has_wasm {
                 let (m, cs) =
                     self.store_wasm_to_disk(&cache.wasm_path, code_bundle.wasm.clone())?;
@@ -619,7 +619,7 @@ where
                 Checksum::generate(&[])
             },
         );
-        Ok([wasm_checksum, vk_checksum])
+        Ok([wasm_checksum, circuit_checksum])
     }
 
     /// Load a verifying key from disk
@@ -886,21 +886,6 @@ fn save_vk_to_disk(dir: impl Into<PathBuf>, vk: &[u8]) -> VmResult<Checksum> {
 
     Ok(checksum)
 }
-
-// fn load_vk_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResult<Vec<u8>> {
-//     // this requires the directory and file to exist
-//     // The files previously had no extension, so to allow for a smooth transition,
-//     // we also try to load the file without the wasm extension.
-//     let path = dir.into().join(checksum.to_hex());
-//     let mut file = File::open(path.with_extension("wasm"))
-//         .or_else(|_| File::open(path))
-//         .map_err(|_e| VmError::cache_err("Error opening Wasm file for reading"))?;
-
-//     let mut wasm = Vec::<u8>::new();
-//     file.read_to_end(&mut wasm)
-//         .map_err(|_e| VmError::cache_err("Error reading Wasm file"))?;
-//     Ok(wasm)
-// }
 
 #[cfg(test)]
 mod tests {

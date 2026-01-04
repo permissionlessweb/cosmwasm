@@ -198,7 +198,7 @@ impl Api for MockApi {
 
     fn halo2_proof_instance_verify(
         &self,
-        zkid: u64,
+        zkid: u32,
         proof: &[u8],
         instances: &[u8],
     ) -> Result<bool, VerificationError> {
@@ -212,7 +212,7 @@ impl Api for MockApi {
         // IMPORTANT: Call the verifier INSIDE the with block, not after
         ZK_CIRCUIT_REGISTRY.with(|registry| {
             let borrow = registry.borrow();
-            match borrow.get(&zkid) {
+            match borrow.get(&zkid.into()) {
                 Some((_, verifier)) => verifier(proof, instances),
                 None => Err(VerificationError::unknown_err(66)),
             }

@@ -332,7 +332,7 @@ pub trait Api: Any {
     #[allow(unused_variables)]
     fn halo2_proof_instance_verify(
         &self,
-        zkid: u64,
+        zkid: u32,
         proof: &[u8],
         i: &[u8],
     ) -> Result<bool, VerificationError> {
