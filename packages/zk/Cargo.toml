@@ -31,15 +31,17 @@ thiserror = "1.0.26"
 wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass"] }
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
-
- 
- # halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
-halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
- #halo2_gadgets = { path = "../../../../halo2/halo2_gadgets", default-features = false ,features = ["test-dependencies"]  } 
-halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", default-features = false ,features = ["test-dependencies"]  } 
 pasta_curves = "0.5"
 group = "0.13.0"
 rand = "0.8"
+ 
+# halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
+# halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", default-features = false ,features = ["test-dependencies"]  } 
+
+# for dev environment
+halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
+halo2_gadgets = { path = "../../../../halo2/halo2_gadgets", default-features = false ,features = ["test-dependencies"]  } 
+
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }

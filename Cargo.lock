@@ -798,7 +798,7 @@ dependencies = [
  "derive_more 1.0.0-beta.6",
  "dhat",
  "glob",
- "halo2_proofs",
+ "halo2_proofs 0.3.2 (git+https://github.com/permissionlessweb/halo2?branch=mvp)",
  "hex",
  "hex-literal",
  "leb128",
@@ -1551,14 +1551,13 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.4.0"
-source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#e9960e139ca07aec8857ee096e3f7a23c625948e"
 dependencies = [
  "arrayvec",
  "bitvec",
  "ff",
  "group",
  "halo2_poseidon",
- "halo2_proofs",
+ "halo2_proofs 0.3.2",
  "lazy_static",
  "pasta_curves",
  "proptest",
@@ -1571,12 +1570,25 @@ dependencies = [
 [[package]]
 name = "halo2_poseidon"
 version = "0.1.0"
-source = "git+https://github.com/permissionlessweb/halo2?branch=mvp#e9960e139ca07aec8857ee096e3f7a23c625948e"
 dependencies = [
  "bitvec",
  "ff",
  "group",
  "pasta_curves",
+]
+
+[[package]]
+name = "halo2_proofs"
+version = "0.3.2"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "group",
+ "indexmap 1.9.3",
+ "maybe-rayon",
+ "pasta_curves",
+ "rand_core 0.6.4",
+ "tracing",
 ]
 
 [[package]]
@@ -4189,7 +4201,7 @@ dependencies = [
  "glob",
  "group",
  "halo2_gadgets",
- "halo2_proofs",
+ "halo2_proofs 0.3.2",
  "hex",
  "hex-literal",
  "leb128",
