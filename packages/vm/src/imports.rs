@@ -906,12 +906,29 @@ pub fn do_halo2_proof_instance_verify<
         ))
     })?;
 
-    let instance = Instance::new_from_vm(instances_bytes)?;
-    let proof = Proof::new(proof_bytes);
+    let instance = Instance::new_from_vm(instances_bytes.clone())?;
+    let proof = Proof::new(proof_bytes.clone());
+
+    // Debug: print verification inputs
+    eprintln!("🔍 Proof verification debug:");
+    eprintln!("  zkid: {}", zkid_u64);
+    eprintln!("  proof_bytes len: {}", proof_bytes.len());
+    eprintln!("  instances_bytes len: {}", instances_bytes.len());
+    eprintln!(
+        "  instances_bytes (hex): {:02x?}",
+        &instances_bytes[..std::cmp::min(64, instances_bytes.len())]
+    );
+    eprintln!("  instance.size: {}", instance.get_size());
 
     match proof.verify(&vk, &[instance]) {
-        Ok(_) => Ok(0),  // Valid proof
-        Err(_) => Ok(1), // Invalid proof
+        Ok(_) => {
+            eprintln!("✅ Proof verification succeeded!");
+            Ok(0)
+        }
+        Err(e) => {
+            eprintln!("❌ Proof verification failed: {:?}", e);
+            Ok(1)
+        }
     }
 }
 

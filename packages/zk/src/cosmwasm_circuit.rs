@@ -51,8 +51,13 @@ pub struct CircuitFooter {
     /// the number and order of commitments in the verifying key. Only the first 32 fixed columns are supported
     /// via this mask — sufficient for all practical CosmWasm circuits.
     pub fixed_equality_mask: u32,
-    /// Reserved for future extensions
-    pub reserved_3: u32,
+    /// Packed advice query counts per column.
+    /// Each nibble (4 bits) represents the number of queries for that advice column.
+    /// Nibble 0 (bits 0-3) = column 0 query count
+    /// Nibble 1 (bits 4-7) = column 1 query count
+    /// ... up to 8 columns supported (columns 0-7)
+    /// Example: 0x12 means column 0 has 2 queries, column 1 has 1 query
+    pub advice_query_counts: u32,
     /// CRC32 checksum of params+vk bytes (optional validation)
     pub crc32: u32,
 }
@@ -70,6 +75,7 @@ impl CircuitFooter {
         vk_len: u32,
         num_selectors: u32,
         fixed_equality_mask: u32,
+        advice_query_counts: u32,
         crc32: u32,
     ) -> Self {
         Self {
@@ -85,7 +91,7 @@ impl CircuitFooter {
             vk_len,
             num_selectors,
             fixed_equality_mask,
-            reserved_3: 0,
+            advice_query_counts,
             crc32,
         }
     }
@@ -105,7 +111,7 @@ impl CircuitFooter {
         bytes[12..16].copy_from_slice(&self.vk_len.to_le_bytes());
         bytes[16..20].copy_from_slice(&self.num_selectors.to_le_bytes());
         bytes[20..24].copy_from_slice(&self.fixed_equality_mask.to_le_bytes());
-        bytes[24..28].copy_from_slice(&self.reserved_3.to_le_bytes());
+        bytes[24..28].copy_from_slice(&self.advice_query_counts.to_le_bytes());
         bytes[28..32].copy_from_slice(&self.crc32.to_le_bytes());
         bytes
     }
@@ -143,7 +149,7 @@ impl CircuitFooter {
             vk_len: u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
             num_selectors: u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]),
             fixed_equality_mask: u32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]),
-            reserved_3: u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]),
+            advice_query_counts: u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]),
             crc32: u32::from_le_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]),
         })
     }
@@ -157,6 +163,8 @@ pub struct DynamicCircuitConfig {
     pub num_instance_columns: u8,
     pub num_selectors: u32,
     pub fixed_equality_mask: u32,
+    /// Packed advice query counts per column (each nibble = query count for one column)
+    pub advice_query_counts: u32,
 }
 
 // Thread-local storage for circuit config during keygen
@@ -215,6 +223,7 @@ impl DynamicCircuit {
         num_instance_columns: u8,
         num_selectors: u32,
         fixed_equality_mask: u32,
+        advice_query_counts: u32,
     ) -> Self {
         Self {
             config: DynamicCircuitConfig {
@@ -223,6 +232,7 @@ impl DynamicCircuit {
                 num_instance_columns,
                 num_selectors,
                 fixed_equality_mask,
+                advice_query_counts,
             },
         }
     }
@@ -235,6 +245,7 @@ impl DynamicCircuit {
             footer.num_instance_columns,
             footer.num_selectors,
             footer.fixed_equality_mask,
+            footer.advice_query_counts,
         )
     }
 
@@ -317,6 +328,46 @@ impl Circuit<vesta::Scalar> for DynamicCircuit {
             meta.enable_equality(col);
             advice_cols.push(col);
         }
+
+        // --------------------------------------------------------------------
+        // Create dummy gate to generate advice queries at correct rotations
+        // --------------------------------------------------------------------
+        // The advice_query_counts is a packed u32 where each nibble (4 bits) represents
+        // the number of queries for that advice column. Nibble 0 = column 0, etc.
+        // We create a dummy gate that queries each column the required number of times
+        // at sequential rotations starting from Rotation(0).
+        //
+        // Example: advice_query_counts = 0x12 means:
+        //   - Column 0: 2 queries (Rotation(0), Rotation(1))
+        //   - Column 1: 1 query (Rotation(0))
+        let advice_query_counts = config.advice_query_counts;
+        let has_dummy_gate = advice_query_counts != 0;
+        if has_dummy_gate {
+            use halo2_proofs::poly::Rotation;
+            // Create a selector for our dummy gate (uses one of the circuit's selectors)
+            let dummy_selector = meta.selector();
+
+            meta.create_gate("dynamic_queries", |meta| {
+                let s = meta.query_selector(dummy_selector);
+
+                // Query each advice column the required number of times
+                for (col_idx, col) in advice_cols.iter().enumerate() {
+                    // Extract query count for this column from the packed nibbles
+                    let query_count = ((advice_query_counts >> (col_idx * 4)) & 0xF) as i32;
+
+                    // Create queries at sequential rotations: 0, 1, 2, ...
+                    for rotation in 0..query_count {
+                        let _ = meta.query_advice(*col, Rotation(rotation));
+                    }
+                }
+
+                // Return a trivial "always satisfied" constraint: s * 0 = 0
+                // The selector is never enabled during synthesis, so this constraint
+                // is never checked. It exists only to register the queries above.
+                vec![s * plonk::Expression::Constant(vesta::Scalar::zero())]
+            });
+        }
+
         // --------------------------------------------------------------------
         // Instance columns
         // --------------------------------------------------------------------
@@ -342,7 +393,13 @@ impl Circuit<vesta::Scalar> for DynamicCircuit {
         // Selectors
         // --------------------------------------------------------------------
         // Selectors are NOT fixed columns and must be recreated explicitly
-        for _ in 0..config.num_selectors {
+        // If we created a dummy gate above, it used one selector, so create one fewer
+        let selectors_to_create = if has_dummy_gate {
+            config.num_selectors.saturating_sub(1)
+        } else {
+            config.num_selectors
+        };
+        for _ in 0..selectors_to_create {
             meta.selector();
         }
         // Note: We don't recreate gates here because:
@@ -776,6 +833,7 @@ impl VerifyingKey {
         num_instance_columns: u8,
         degree: u8,
         fixed_equality_mask: u8,
+        advice_query_counts: u8,
     ) -> io::Result<Vec<u8>> {
         let mut params_buf = Vec::new();
         self.params.write(&mut params_buf)?;
@@ -795,6 +853,7 @@ impl VerifyingKey {
             vk_buf.len() as u32,
             1,
             fixed_equality_mask.into(),
+            advice_query_counts as u32,
             0, // CRC32 - can be computed if needed
         );
 
@@ -901,6 +960,9 @@ impl Instance {
             .collect::<Vec<_>>();
         let size = is.len();
         Ok(Self { i: is, size })
+    }
+    pub fn get_size(&self) -> usize {
+        self.size
     }
 }
 

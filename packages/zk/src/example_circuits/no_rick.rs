@@ -352,7 +352,8 @@ impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
         }
 
         // ---------------------------------------------------------------------
-        let rick_constant = chip.load_public(layouter.namespace(|| "load public rick"), 1)?;
+        // Load forbidden word from instance row 0 (only 1 instance column now)
+        let rick_constant = chip.load_public(layouter.namespace(|| "load public rick"), 0)?;
         // Check for "rick" at every possible starting index (0 to 16)
         let mut conditions = Vec::new();
         for idx in 0..17 {
@@ -418,16 +419,15 @@ pub struct NoRickInstance {
 
 impl NoRickInstance {
     /// serialize instances into set of circuit field [vesta::Scalar] with lenth `I`
-    pub fn to_halo2_instance(&self) -> [[vesta::Scalar; 2]; 1] {
-        let mut instance = [vesta::Scalar::zero(); 2];
-        instance[0] = Fp::one();
-        instance[1] = str_to_field(&self.word);
+    pub fn to_halo2_instance(&self) -> [[vesta::Scalar; 1]; 1] {
+        let mut instance = [vesta::Scalar::zero(); 1];
+        instance[0] = str_to_field(&self.word);
         [instance]
     }
     /// serialize instances into set of circuit field bytes with lenth `I`,specifically for cosmwasm-std api
     pub fn to_cosmwasm_instance(&self) -> Vec<u8> {
         let instances = self.to_halo2_instance();
-        let mut bytes = Vec::with_capacity(2 * 32);
+        let mut bytes = Vec::with_capacity(1 * 32);
         for instance_row in instances.iter() {
             for scalar in instance_row.iter() {
                 // to_repr() returns a 32-byte little-endian representation
@@ -669,7 +669,8 @@ fn test_rick_circuit() {
 
     circuit.priv_input = string_vec3;
 
-    let public_inputs3 = vec![Fp::one(), str_to_field("rick")];
+    // Circuit now uses only 1 instance (the forbidden word at row 0)
+    let public_inputs3 = vec![str_to_field("rick")];
     let prover3 = MockProver::run(circuit_rows, &circuit, vec![public_inputs3]).unwrap();
     assert!(prover3.verify().is_ok());
 }

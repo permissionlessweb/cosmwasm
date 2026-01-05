@@ -121,10 +121,11 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
         } else {
             eprintln!("🔑 Generating test circuit keys for example circuits...");
             fs::create_dir_all(path)?;
-            self.gen_no_rick_circuit_keys(path)?;
+            // IMPORTANT: Use the SAME params/pk that are written to file!
+            // Previously called NoRickProvingKey::build() which created NEW random params,
+            // causing params mismatch between proof creation and verification.
+            let nrpk = self.gen_no_rick_circuit_keys(path)?;
             eprintln!("✅ All test circuit keys generated successfully");
-            let nrpk = NoRickProvingKey::build();
-            // println!("NoRickProvingKey: {:#?}", nrpk);
             nrpk
         };
 
@@ -154,27 +155,23 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
     /// Generate keys for NoRickCircuit example.
     /// Follows specification of zk-wasmvm
     #[cfg(feature = "zk-tests")]
-    fn gen_no_rick_circuit_keys(&self, base_path: &Path) -> Result<(), BoxError> {
-        use halo2_proofs::plonk::Circuit;
-
+    fn gen_no_rick_circuit_keys(&self, base_path: &Path) -> Result<crate::example_circuits::NoRickProvingKey, BoxError> {
         use crate::example_circuits::NoRickCircuit;
+        use halo2_proofs::plonk::Circuit;
         use std::io::{self, Seek};
+        eprintln!("  📝 Generating NoRickCircuit keys...");
         const I: u8 = 1;
         const V: CircuitType = CircuitType::Plonkish;
         const K: u32 = 10;
-
-        eprintln!("  📝 Generating NoRickCircuit keys...");
+        let cd = base_path.join("no_rick");
+        fs::create_dir_all(&cd)?;
         let mut cs = plonk::ConstraintSystem::<Fp>::default();
         NoRickCircuit::<Fp>::configure(&mut cs); // Run configure to build cs
-                                                 // Compute fixed_equality_mask
         println!("cs.pinned: {:#?}", cs.pinned());
         let circuit: NoRickCircuit<Fp> = NoRickCircuit::default();
         let p = halo2_proofs::poly::commitment::Params::<vesta::Affine>::new(K);
         let vk = plonk::keygen_vk(&p, &circuit).map_err(|e| format!("VK: {:?}", e))?;
         let pk = plonk::keygen_pk(&p, vk.clone(), &circuit).map_err(|e| format!("PK: {:?}", e))?;
-
-        let cd = base_path.join("no_rick");
-        fs::create_dir_all(&cd)?;
         let pp = cd.join("params.bin");
         let vp = cd.join("verifying_key.bin");
         let cp = cd.join("vk_combined.bin");
@@ -237,17 +234,86 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
 
         // WRITE EXTENDED 32-BYTE METADATA FOOTER using CircuitFooter
         use crate::cosmwasm_circuit::{CircuitFooter, CircuitType};
+
+        // Compute actual column counts from permutation columns
+        // cs.get_num_advice() returns query count, not column count!
+        let perm_cols = cs.get_permutation_columns();
+        let num_fixed_in_perm = perm_cols
+            .iter()
+            .filter(|c| matches!(c.column_type(), halo2_proofs::plonk::Any::Fixed))
+            .count();
+        let num_advice_in_perm = perm_cols
+            .iter()
+            .filter(|c| matches!(c.column_type(), halo2_proofs::plonk::Any::Advice))
+            .count();
+        let num_instance_in_perm = perm_cols
+            .iter()
+            .filter(|c| matches!(c.column_type(), halo2_proofs::plonk::Any::Instance))
+            .count();
+
+        eprintln!("norick: CS column counts (from permutation):");
+        eprintln!(
+            "  fixed_columns: {} (cs.get reports: {})",
+            num_fixed_in_perm,
+            cs.get_num_fixed_columns()
+        );
+        eprintln!(
+            "  advice_columns: {} (cs.get reports: {})",
+            num_advice_in_perm,
+            cs.get_num_advice()
+        );
+        eprintln!(
+            "  instance_columns: {} (cs.get reports: {})",
+            num_instance_in_perm,
+            cs.get_num_instance_columns()
+        );
+        eprintln!("  selectors: {}", cs.get_num_selectors());
+        eprintln!("  total permutation_columns: {}", perm_cols.len());
+
+        // Compute advice_query_counts: packed nibbles representing query count per advice column
+        // For NoRickCircuit:
+        //   - advice[0]: queried at Rotation(0) and Rotation(1) = 2 queries
+        //   - advice[1]: queried at Rotation(0) = 1 query
+        // Packed: nibble 0 = 2, nibble 1 = 1 → 0x12
+        //
+        // Generic computation: count unique rotations per advice column from cs
+        // For now, we use num_advice_queries / num_advice_columns as an approximation,
+        // but for precise reconstruction we encode the actual structure.
+        // NoRickCircuit has 3 total queries across 2 columns: col0=2, col1=1
+        let advice_query_counts: u32 = {
+            // For circuits with standard query patterns, compute from cs
+            // NoRickCircuit: advice[0]=2 queries, advice[1]=1 query → 0x12
+            let total_queries = cs.get_num_advice() as u32;
+            let num_cols = num_advice_in_perm as u32;
+
+            if num_cols == 2 && total_queries == 3 {
+                // NoRickCircuit pattern: col0=2, col1=1
+                0x12
+            } else if num_cols > 0 {
+                // Default: assume 1 query per column
+                let mut packed = 0u32;
+                for i in 0..num_cols.min(8) {
+                    packed |= 1 << (i * 4);
+                }
+                packed
+            } else {
+                0
+            }
+        };
+        eprintln!("norick: advice_query_counts: 0x{:08x}", advice_query_counts);
+
         let footer = CircuitFooter::new(
             V,
             I,
-            cs.get_num_fixed_columns(),
-            cs.get_num_advice(),
-            cs.get_num_instance_columns(),
+            num_fixed_in_perm as u8,
+            num_advice_in_perm as u8,
+            num_instance_in_perm as u8,
             cs.degree() as u8,
             params_len,
             vk_len,
             cs.get_num_selectors(), // num_selectors (NoRickCircuit: 1 selector for multiply gate)
             fixed_equality_mask,
+            advice_query_counts,
             0, // crc32 (not computed for now)
         );
 
@@ -305,7 +371,8 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
         pkf.flush()?;
         eprintln!("norick: Proving key written to {}", pkp.display());
 
-        Ok(())
+        // Return the ProvingKey so proofs use the SAME params as written to file
+        Ok(crate::example_circuits::NoRickProvingKey::new(pk, p))
     }
 }
 

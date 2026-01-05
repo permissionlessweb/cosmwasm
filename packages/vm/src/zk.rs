@@ -287,6 +287,7 @@ mod tests {
             vk_len,
             0, // num_selectors
             1, // num_selectors
+            1,
             0, // crc32
         );
 
