@@ -1,6 +1,8 @@
 use crate::prelude::*;
+use crate::Checksum;
 use crate::HashFunction;
 use crate::{Addr, CanonicalAddr, Timestamp};
+
 use alloc::collections::BTreeMap;
 #[cfg(feature = "cosmwasm_1_3")]
 use alloc::collections::BTreeSet;
@@ -61,7 +63,7 @@ use super::MockStorage;
 type CircuitVerifier = Box<dyn Fn(&[u8], &[u8]) -> Result<bool, VerificationError>>;
 
 thread_local! {
-    static ZK_CIRCUIT_REGISTRY: std::cell::RefCell<std::collections::HashMap<u64, (String, CircuitVerifier)>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    static ZK_CIRCUIT_REGISTRY: std::cell::RefCell<std::collections::HashMap<Checksum, (String, CircuitVerifier)>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 /// Register a circuit verifier for halo2 proof verification in tests.
@@ -81,7 +83,7 @@ thread_local! {
 /// register_test_circuit(1, "NoRick", verifier);
 /// ```
 #[cfg(test)]
-pub fn register_test_circuit(zkid: u64, circuit_name: &str, verifier: CircuitVerifier) {
+pub fn register_test_circuit(zkid: Checksum, circuit_name: &str, verifier: CircuitVerifier) {
     ZK_CIRCUIT_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
@@ -198,7 +200,7 @@ impl Api for MockApi {
 
     fn halo2_proof_instance_verify(
         &self,
-        zkid: u32,
+        checksum: &[u8],
         proof: &[u8],
         instances: &[u8],
     ) -> Result<bool, VerificationError> {
@@ -206,13 +208,13 @@ impl Api for MockApi {
         // if proof.is_empty() ||instances.is_empty() || instances.len() % 32 != 0{
         //     return Err(VerificationError::unknown_err(66));
         // }
-
+        assert!(checksum.len() == 32);
         // Get verifier from registry and invoke it
         // Retrieve and invoke the verifier closure from registry
         // IMPORTANT: Call the verifier INSIDE the with block, not after
         ZK_CIRCUIT_REGISTRY.with(|registry| {
             let borrow = registry.borrow();
-            match borrow.get(&zkid.into()) {
+            match borrow.get(&Checksum::try_from(checksum).unwrap()) {
                 Some((_, verifier)) => verifier(proof, instances),
                 None => Err(VerificationError::unknown_err(66)),
             }

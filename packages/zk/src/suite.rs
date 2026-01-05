@@ -146,14 +146,14 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsIn
             // TODO: Load compressed params/vk file
             // Load params and vk separately
             let params_path = kp.join("params.bin");
-            let vk_path = kp.join("verifying_key.bin");
+            let circuit_path = kp.join("verifying_key.bin");
             let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(
                 &mut std::fs::File::open(params_path)?,
             )?;
             let vk = plonk::VerifyingKey::<vesta::Affine>::read::<
                 File,
                 NoRickCircuit<pasta_curves::Fp>,
-            >(&mut std::fs::File::open(vk_path)?, &params)?;
+            >(&mut std::fs::File::open(circuit_path)?, &params)?;
             let circuit: NoRickCircuit<pasta_curves::Fp> = Default::default();
             let pk = plonk::keygen_pk(&params, vk, &circuit)?;
             let nrpk = NoRickProvingKey::new(pk, params);

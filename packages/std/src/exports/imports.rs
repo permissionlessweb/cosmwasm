@@ -101,14 +101,16 @@ extern "C" {
     /// greater than 1 in case of error.
     fn ed25519_batch_verify(messages_ptr: u32, signatures_ptr: u32, public_keys_ptr: u32) -> u32;
 
-    /// Verifies proof bytes for a set of public instances with the contract halo2 verifying keys, given a circuit id.
-    /// zkid: circuit ID (passed as direct u32 value)
+    /// Verifies proof bytes for a set of public instances with the contract halo2 verifying keys.
+    /// checksum_ptr: pointer to circuit checksum (32 bytes) in Wasm memory
+    /// checksum_len: length of checksum (should be 32)
     /// proof_ptr: pointer to proof bytes in Wasm memory
     /// proof_len: length of proof bytes
     /// i_ptr: pointer to instance bytes in Wasm memory
     /// i_len: length of instance bytes
     fn halo2_proof_instance_verify(
-        zkid: u32,
+        checksum_ptr: u32,
+        checksum_len: u32,
         proof_ptr: u32,
         proof_len: u32,
         i_ptr: u32,
@@ -723,12 +725,14 @@ impl Api for ExternalApi {
 
     fn halo2_proof_instance_verify(
         &self,
-        zkid: u64,
+        checksum: &[u8],
         proof: &[u8],
         i: &[u8],
     ) -> Result<bool, VerificationError> {
-        // zkid is cast to u32 (circuit IDs fit in u32 range)
-        let zkid_u32 = zkid as u32;
+        // Convert checksum to Wasm memory region
+        let checksum_send = Region::from_slice(checksum);
+        let checksum_send_ptr = checksum_send.as_ptr() as u32;
+        let checksum_len = checksum.len() as u32;
 
         // Convert proof to Wasm memory region
         let proof_send = Region::from_slice(proof);
@@ -740,9 +744,16 @@ impl Api for ExternalApi {
         let i_send_ptr = instances_send.as_ptr() as u32;
         let i_len = i.len() as u32;
 
-        // Call FFI with zkid as direct parameter (no Region needed)
+        // Call FFI with checksum, proof, and instances as memory regions
         let result = unsafe {
-            halo2_proof_instance_verify(zkid_u32, proof_send_ptr, proof_len, i_send_ptr, i_len)
+            halo2_proof_instance_verify(
+                checksum_send_ptr,  // ← Pointer to checksum bytes
+                checksum_len,       // ← Checksum length (32)
+                proof_send_ptr,     // ← Pointer to proof bytes
+                proof_len,
+                i_send_ptr,         // ← Pointer to instances bytes
+                i_len,
+            )
         };
 
         match result {

@@ -299,7 +299,7 @@ where
 
     fn save_circuit_to_disk(&self, vk: &[u8]) -> VmResult<Checksum> {
         let mut cache = self.inner.lock().unwrap();
-        let checksum = save_vk_to_disk(&cache.wasm_path, vk)?;
+        let checksum = save_circuit_to_disk(&cache.wasm_path, vk)?;
         cache.fs_cache.store_circuit(&checksum, vk)?;
         Ok(checksum)
     }
@@ -321,7 +321,8 @@ where
         if wasm {
             remove_wasm_from_disk(&cache.wasm_path, &checksum)?;
         } else {
-            self.remove_vk_from_disk(&cache.wasm_path, &checksum)?;
+            self.remove_circuit_from_disk(&cache.wasm_path, &checksum)?;
+            self.unpin_circuit(&checksum);
         }
 
         Ok(())
@@ -367,7 +368,7 @@ where
 
         match vk {
             true => {
-                if self.has_vk(checksum) {
+                if self.has_circuit(checksum) {
                     drop(cache);
                     return self.pin_circuit(checksum);
                 }
@@ -547,7 +548,7 @@ where
         persist: bool,
     ) -> VmResult<[Checksum; 2]> {
         // TODO: check wasm if exist immediately via; map.checked && checkvk == Some(v,i) || None
-        let (has_wasm, has_vk) = (
+        let (has_wasm, has_circuit) = (
             !code_bundle.wasm.is_empty(),
             code_bundle
                 .verifying_key
@@ -556,7 +557,7 @@ where
         );
 
         // Error if both are empty
-        if !has_wasm || !has_vk {
+        if !has_wasm || !has_circuit {
             return Err(VmError::generic_err("must provide either wasm or vk"));
         }
 
@@ -608,7 +609,9 @@ where
                 let vcs = self.store_circuit_to_disk(&cache.wasm_path, svk)?;
                 // add to pinned vk cache
                 if !cache.pinned_memory_cache.has(&vcs, true) {
-                    if let Some(serialized_vk) = self.load_vk_from_disk(&cache.wasm_path, &vcs)? {
+                    if let Some(serialized_vk) =
+                        self.load_circuit_from_disk(&cache.wasm_path, &vcs)?
+                    {
                         cache.pinned_memory_cache.store_circuit(
                             &vcs,
                             std::sync::Arc::new(VerifyingKey::from_bytes(&serialized_vk.bytes)?),
@@ -624,16 +627,19 @@ where
     }
 
     /// Load a verifying key from disk
-    pub fn load_vk(&self, checksum: &Checksum) -> VmResult<Option<SerializedPlonkishCircuitData>> {
+    pub fn load_circuit(
+        &self,
+        checksum: &Checksum,
+    ) -> VmResult<Option<SerializedPlonkishCircuitData>> {
         let cache = self.inner.lock().unwrap();
-        self.load_vk_from_disk(&cache.wasm_path, checksum)
+        self.load_circuit_from_disk(&cache.wasm_path, checksum)
     }
 
     /// Check if a VK exists for a given checksum
-    pub fn has_vk(&self, checksum: &Checksum) -> bool {
+    pub fn has_circuit(&self, checksum: &Checksum) -> bool {
         let cache = self.inner.lock().unwrap();
-        let vk_path = self.vk_path(&cache.wasm_path, checksum);
-        vk_path.exists()
+        let circuit_path = self.circuit_path(&cache.wasm_path, checksum);
+        circuit_path.exists()
     }
 
     /// Pin a VK in memory
@@ -643,7 +649,7 @@ where
         if cache.pinned_memory_cache.has(checksum, true) {
             return Ok(());
         }
-        if let Some(vkbz) = self.load_vk_from_disk(&cache.wasm_path, checksum)? {
+        if let Some(vkbz) = self.load_circuit_from_disk(&cache.wasm_path, checksum)? {
             let vk = VerifyingKey::from_bytes(&vkbz.bytes)?;
             cache
                 .pinned_memory_cache
@@ -671,7 +677,7 @@ where
     }
 
     /// Get the path where a VK file would be stored
-    fn vk_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
+    fn circuit_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
         dir.into().join(checksum.to_hex()).with_extension("bin")
     }
 
@@ -687,7 +693,7 @@ where
         dir: impl Into<PathBuf>,
         vk: &SerializedPlonkishCircuitData,
     ) -> VmResult<Checksum> {
-        let path = self.vk_path(dir, &vk.hash.into());
+        let path = self.circuit_path(dir, &vk.hash.into());
 
         let mut file_content: Vec<u8> = Vec::with_capacity(vk.bytes.len());
         file_content.extend_from_slice(&vk.bytes);
@@ -707,12 +713,12 @@ where
 
     /// Load a verifying key from disk
     /// Returns None if the VK file doesn't exist
-    fn load_vk_from_disk(
+    fn load_circuit_from_disk(
         &self,
         dir: impl Into<PathBuf>,
         checksum: &Checksum,
     ) -> VmResult<Option<SerializedPlonkishCircuitData>> {
-        let path = self.vk_path(dir, checksum);
+        let path = self.circuit_path(dir, checksum);
 
         if !path.exists() {
             return Ok(None);
@@ -744,8 +750,20 @@ where
     }
 
     /// Remove a VK file from disk if the path exists
-    fn remove_vk_from_disk(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResult<()> {
-        let path = self.vk_path(dir, checksum);
+    fn remove_circuit_from_disk(
+        &self,
+        dir: impl Into<PathBuf>,
+        checksum: &Checksum,
+    ) -> VmResult<()> {
+        let path = self.circuit_path(dir, checksum);
+
+        let circuit_path = path.with_extension("bin");
+
+        let path_exists = path.exists();
+        let circuit_path_exists = circuit_path.exists();
+        if !path_exists && !circuit_path_exists {
+            return Err(VmError::cache_err("Circuit file does not exist"));
+        }
         if path.exists() {
             std::fs::remove_file(&path)
                 .map_err(|e| VmError::cache_err(format!("Error removing VK file: {}", e)))?;
@@ -866,9 +884,8 @@ fn remove_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResu
 /// save stores the wasm code in the given directory and returns an ID for lookup.
 /// It will create the directory if it doesn't exist.
 /// Saving the same byte code multiple times is allowed.
-fn save_vk_to_disk(dir: impl Into<PathBuf>, vk: &[u8]) -> VmResult<Checksum> {
-    let (_, checksum) =
-        crate::check_circuit(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
+fn save_circuit_to_disk(dir: impl Into<PathBuf>, c: &[u8]) -> VmResult<Checksum> {
+    let (_, checksum) = crate::check_circuit(c).map_err(|e| VmError::generic_err(e.to_string()))?;
     // calculate filename
     let filename = checksum.to_hex();
     let filepath = dir.into().join(filename).with_extension("bin");
@@ -881,9 +898,9 @@ fn save_vk_to_disk(dir: impl Into<PathBuf>, vk: &[u8]) -> VmResult<Checksum> {
         .create(true)
         .truncate(true)
         .open(filepath)
-        .map_err(|e| VmError::cache_err(format!("Error opening Wasm file for writing: {e}")))?;
-    file.write_all(vk)
-        .map_err(|e| VmError::cache_err(format!("Error writing Wasm file: {e}")))?;
+        .map_err(|e| VmError::cache_err(format!("Error opening Circuit file for writing: {e}")))?;
+    file.write_all(c)
+        .map_err(|e| VmError::cache_err(format!("Error writing Circuit file: {e}")))?;
 
     Ok(checksum)
 }

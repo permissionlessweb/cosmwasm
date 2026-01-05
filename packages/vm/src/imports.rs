@@ -11,6 +11,7 @@ use cosmwasm_crypto::{
 use cosmwasm_crypto::{
     ECDSA_PUBKEY_MAX_LEN, ECDSA_SIGNATURE_LEN, EDDSA_PUBKEY_LEN, MESSAGE_HASH_MAX_LEN,
 };
+use cosmwasm_std::Checksum;
 use rand_core::OsRng;
 
 #[cfg(feature = "iterator")]
@@ -828,35 +829,60 @@ pub fn do_halo2_proof_instance_verify<
     Q: Querier + 'static,
 >(
     mut env: FunctionEnvMut<Environment<A, S, Q>>,
-    zkid: u32,              // ← Direct u32 parameter
+    checksum_ptr: u32,
+    checksum_len: u32,
     proof_ptr: u32,
     proof_len: u32,
     instances_ptr: u32,
     instances_len: u32,
 ) -> VmResult<u32> {
     eprintln!("[halo2] ========== START PROOF VERIFICATION ==========");
-    eprintln!("[halo2] Received - zkid: {}, proof: 0x{:x}, instances: 0x{:x}", zkid, proof_ptr, instances_ptr);
+    eprintln!(
+        "[halo2] Received - checksum: 0x{:x}, proof: 0x{:x}, instances: 0x{:x}",
+        checksum_ptr, proof_ptr, instances_ptr
+    );
 
     let (data, mut store) = env.data_and_store_mut();
 
     charge_host_call_gas(data, &mut store)?;
 
-    // zkid is received as direct parameter, no need to read from memory
-    eprintln!("[halo2] [1] ✓ zkid = {} (direct parameter)", zkid);
+    // Read checksum from Wasm memory (32 bytes, SHA256 hash)
+    eprintln!(
+        "[halo2] [1] Reading checksum from Wasm memory at 0x{:x} ({} bytes)",
+        checksum_ptr, checksum_len
+    );
+    const CHECKSUM_SIZE: usize = 32;
+    let checksum_bytes = read_region(data, &mut store, checksum_ptr, CHECKSUM_SIZE)?;
+    let checksum = Checksum::from(
+        <[u8; 32]>::try_from(&checksum_bytes[0..32]).expect("checksum must be 32 bytes"),
+    );
+    eprintln!(
+        "[halo2] [1] ✓ checksum = {}",
+        hex::encode(checksum.as_slice())
+    );
 
     // Read proof from WASM memory
-    eprintln!("[halo2] [2] Reading proof from Wasm memory at 0x{:x} ({} bytes requested)", proof_ptr, proof_len);
+    eprintln!(
+        "[halo2] [2] Reading proof from Wasm memory at 0x{:x} ({} bytes requested)",
+        proof_ptr, proof_len
+    );
     const MAX_PROOF_SIZE: usize = 2 * 1024 * 1024; // Safety limit
     let actual_proof_size = std::cmp::min(proof_len as usize, MAX_PROOF_SIZE);
     let proof_bytes = read_region(data, &mut store, proof_ptr, actual_proof_size)?;
     eprintln!("[halo2] [2] ✓ proof {} bytes read", proof_bytes.len());
 
     // Read instances from WASM memory
-    eprintln!("[halo2] [3] Reading instances from Wasm memory at 0x{:x} ({} bytes requested)", instances_ptr, instances_len);
+    eprintln!(
+        "[halo2] [3] Reading instances from Wasm memory at 0x{:x} ({} bytes requested)",
+        instances_ptr, instances_len
+    );
     const MAX_INSTANCES_SIZE: usize = 64 * 1024; // Safety limit
     let actual_instances_size = std::cmp::min(instances_len as usize, MAX_INSTANCES_SIZE);
     let instances_bytes = read_region(data, &mut store, instances_ptr, actual_instances_size)?;
-    eprintln!("[halo2] [3] ✓ instances {} bytes read", instances_bytes.len());
+    eprintln!(
+        "[halo2] [3] ✓ instances {} bytes read",
+        instances_bytes.len()
+    );
 
     // Charge gas
     let gas_info = GasInfo::with_cost(
@@ -867,17 +893,14 @@ pub fn do_halo2_proof_instance_verify<
     process_gas_info(data, &mut store, gas_info)?;
     eprintln!("[halo2] [4] ✓ Gas charged");
 
-    eprintln!("[halo2] [5] Resolving zkid {} to checksum...", zkid);
-    let checksum = data
-        .resolve_zkid_to_checksum(zkid) // ← Lookup: zkid → Checksum
-        .ok_or_else(|| {
-            eprintln!("[halo2] [5] ✗ ERROR: Circuit {} not found in registry!", zkid);
-            VmError::generic_err(format!("ZK circuit {} not found in registry", zkid))
-        })?;
-    eprintln!("[halo2] [5] ✓ checksum = {}", hex::encode(checksum.as_slice()));
+    // Checksum is passed directly, no lookup needed
+    eprintln!("[halo2] [5] ✓ Checksum received directly from contract");
 
     // 5. Load verifying key from app state storage
-    eprintln!("[halo2] [6] Loading VK from app state storage (key: {})", hex::encode(checksum.as_slice()));
+    eprintln!(
+        "[halo2] [6] Loading VK from app state storage (key: {})",
+        hex::encode(checksum.as_slice())
+    );
     let vk_key = checksum.as_slice();
     let (result, _gas_info) = data.with_storage_from_context(|storage| {
         eprintln!("[halo2] [6] Querying storage for VK...");
@@ -889,28 +912,43 @@ pub fn do_halo2_proof_instance_verify<
             eprintln!("[halo2] [6] ✗ Storage error: {}", e);
             VmError::generic_err(format!(
                 "Storage error loading VK for circuit {}: {}",
-                zkid, e
+                checksum, e
             ))
         })?
         .ok_or_else(|| {
-            eprintln!("[halo2] [6] ✗ VK not found for checksum {}!", hex::encode(checksum.as_slice()));
-            VmError::generic_err(format!("VK not stored in app state for circuit {}", zkid))
+            eprintln!(
+                "[halo2] [6] ✗ VK not found for checksum {}!",
+                hex::encode(checksum.as_slice())
+            );
+            VmError::generic_err(format!(
+                "VK not stored in app state for circuit {}",
+                checksum
+            ))
         })?;
-    eprintln!("[halo2] [6] ✓ VK loaded: {} bytes", serialized_vk_bytes.len());
+    eprintln!(
+        "[halo2] [6] ✓ VK loaded: {} bytes",
+        serialized_vk_bytes.len()
+    );
 
     // 6. Deserialize the verifying key
-    eprintln!("[halo2] [7] Deserializing VK from {} bytes...", serialized_vk_bytes.len());
+    eprintln!(
+        "[halo2] [7] Deserializing VK from {} bytes...",
+        serialized_vk_bytes.len()
+    );
     let vk = zk_cosmwasm::VerifyingKey::from_bytes(&serialized_vk_bytes).map_err(|e| {
         eprintln!("[halo2] [7] ✗ Failed to deserialize VK: {}", e);
         VmError::generic_err(format!(
             "Failed to deserialize VK for circuit {}: {}",
-            zkid, e
+            checksum, e
         ))
     })?;
     eprintln!("[halo2] [7] ✓ VK deserialized successfully");
 
     // 7. Verify proof
-    eprintln!("[halo2] [8] Verifying proof with {} instance bytes...", instances_bytes.len());
+    eprintln!(
+        "[halo2] [8] Verifying proof with {} instance bytes...",
+        instances_bytes.len()
+    );
     let instance = Instance::new_from_vm(instances_bytes)?;
     let proof = Proof::new(proof_bytes);
 
@@ -918,14 +956,17 @@ pub fn do_halo2_proof_instance_verify<
         Ok(_) => {
             eprintln!("[halo2] [8] ✓ PROOF VALID");
             0
-        },
+        }
         Err(e) => {
             eprintln!("[halo2] [8] ✗ Proof invalid: {:?}", e);
             1
-        },
+        }
     };
 
-    eprintln!("[halo2] ========== END PROOF VERIFICATION (result: {}) ==========", result);
+    eprintln!(
+        "[halo2] ========== END PROOF VERIFICATION (result: {}) ==========",
+        result
+    );
     Ok(result)
 }
 
