@@ -101,16 +101,15 @@ extern "C" {
     /// greater than 1 in case of error.
     fn ed25519_batch_verify(messages_ptr: u32, signatures_ptr: u32, public_keys_ptr: u32) -> u32;
 
-    /// Verifies proof bytes for a set of public instances with the contract halo2 verifying keys.
-    /// checksum_ptr: pointer to circuit checksum (32 bytes) in Wasm memory
-    /// checksum_len: length of checksum (should be 32)
+    /// Verifies proof bytes for a set of public instances using a circuit's verifying key.
+    /// The circuit is fetched from the x/wasm module using zkid via StargateQuery.
+    /// zkid: the circuit ID (u32 that will be cast to u64 on Go side)
     /// proof_ptr: pointer to proof bytes in Wasm memory
     /// proof_len: length of proof bytes
     /// i_ptr: pointer to instance bytes in Wasm memory
     /// i_len: length of instance bytes
     fn halo2_proof_instance_verify(
-        checksum_ptr: u32,
-        checksum_len: u32,
+        zkid: u32,
         proof_ptr: u32,
         proof_len: u32,
         i_ptr: u32,
@@ -725,14 +724,18 @@ impl Api for ExternalApi {
 
     fn halo2_proof_instance_verify(
         &self,
-        checksum: &[u8],
+        zkid: u64,
         proof: &[u8],
         i: &[u8],
     ) -> Result<bool, VerificationError> {
-        // Convert checksum to Wasm memory region
-        let checksum_send = Region::from_slice(checksum);
-        let checksum_send_ptr = checksum_send.as_ptr() as u32;
-        let checksum_len = checksum.len() as u32;
+        // The handler fetches the circuit VK from the x/wasm module using a StargateQuery.
+        // This avoids storing circuit bytes in each contract's state.
+        //
+        // Usage flow:
+        // 1. Circuit is uploaded to x/wasm module and assigned a zkid
+        // 2. Contract calls this function with zkid, proof, and instances
+        // 3. Handler queries x/wasm module for circuit bytes using zkid
+        // 4. Handler verifies the proof with the fetched VK
 
         // Convert proof to Wasm memory region
         let proof_send = Region::from_slice(proof);
@@ -744,14 +747,14 @@ impl Api for ExternalApi {
         let i_send_ptr = instances_send.as_ptr() as u32;
         let i_len = i.len() as u32;
 
-        // Call FFI with checksum, proof, and instances as memory regions
+        // Call FFI with zkid (as u32), proof, and instances
+        // zkid is passed directly as u32 (safe since zkid sequence won't exceed u32 range)
         let result = unsafe {
             halo2_proof_instance_verify(
-                checksum_send_ptr,  // ← Pointer to checksum bytes
-                checksum_len,       // ← Checksum length (32)
-                proof_send_ptr,     // ← Pointer to proof bytes
+                zkid as u32,    // ← Circuit ID (cast to u64 on Go side)
+                proof_send_ptr, // ← Pointer to proof bytes
                 proof_len,
-                i_send_ptr,         // ← Pointer to instances bytes
+                i_send_ptr,     // ← Pointer to instances bytes
                 i_len,
             )
         };

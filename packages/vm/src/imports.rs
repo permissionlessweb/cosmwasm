@@ -11,7 +11,7 @@ use cosmwasm_crypto::{
 use cosmwasm_crypto::{
     ECDSA_PUBKEY_MAX_LEN, ECDSA_SIGNATURE_LEN, EDDSA_PUBKEY_LEN, MESSAGE_HASH_MAX_LEN,
 };
-use cosmwasm_std::Checksum;
+use cosmwasm_std::{Checksum, CircuitResponse, Empty, QueryRequest, WasmQuery};
 use rand_core::OsRng;
 
 #[cfg(feature = "iterator")]
@@ -821,153 +821,98 @@ pub fn do_ed25519_batch_verify<
     Ok(code)
 }
 
-/// internal function that retrives vk from pinned memory and performs proof verification on instance & proof bytes
-///  we
+/// Fetches VK from x/wasm module via WasmQuery::Circuit and verifies a Halo2 proof.
 pub fn do_halo2_proof_instance_verify<
     A: BackendApi + 'static,
     S: Storage + 'static,
     Q: Querier + 'static,
 >(
     mut env: FunctionEnvMut<Environment<A, S, Q>>,
-    checksum_ptr: u32,
-    checksum_len: u32,
+    zkid: u32,
     proof_ptr: u32,
     proof_len: u32,
     instances_ptr: u32,
     instances_len: u32,
 ) -> VmResult<u32> {
-    eprintln!("[halo2] ========== START PROOF VERIFICATION ==========");
-    eprintln!(
-        "[halo2] Received - checksum: 0x{:x}, proof: 0x{:x}, instances: 0x{:x}",
-        checksum_ptr, proof_ptr, instances_ptr
-    );
-
     let (data, mut store) = env.data_and_store_mut();
-
     charge_host_call_gas(data, &mut store)?;
 
-    // Read checksum from Wasm memory (32 bytes, SHA256 hash)
-    eprintln!(
-        "[halo2] [1] Reading checksum from Wasm memory at 0x{:x} ({} bytes)",
-        checksum_ptr, checksum_len
-    );
-    const CHECKSUM_SIZE: usize = 32;
-    let checksum_bytes = read_region(data, &mut store, checksum_ptr, CHECKSUM_SIZE)?;
-    let checksum = Checksum::from(
-        <[u8; 32]>::try_from(&checksum_bytes[0..32]).expect("checksum must be 32 bytes"),
-    );
-    eprintln!(
-        "[halo2] [1] ✓ checksum = {}",
-        hex::encode(checksum.as_slice())
-    );
+    let zkid_u64 = zkid as u64;
 
-    // Read proof from WASM memory
-    eprintln!(
-        "[halo2] [2] Reading proof from Wasm memory at 0x{:x} ({} bytes requested)",
-        proof_ptr, proof_len
-    );
-    const MAX_PROOF_SIZE: usize = 2 * 1024 * 1024; // Safety limit
-    let actual_proof_size = std::cmp::min(proof_len as usize, MAX_PROOF_SIZE);
-    let proof_bytes = read_region(data, &mut store, proof_ptr, actual_proof_size)?;
-    eprintln!("[halo2] [2] ✓ proof {} bytes read", proof_bytes.len());
+    // Read proof and instances from WASM memory
+    const MAX_PROOF_SIZE: usize = 2 * MI;
+    const MAX_INSTANCES_SIZE: usize = 64 * KI;
+    let proof_bytes = read_region(
+        data,
+        &mut store,
+        proof_ptr,
+        std::cmp::min(proof_len as usize, MAX_PROOF_SIZE),
+    )?;
+    let instances_bytes = read_region(
+        data,
+        &mut store,
+        instances_ptr,
+        std::cmp::min(instances_len as usize, MAX_INSTANCES_SIZE),
+    )?;
 
-    // Read instances from WASM memory
-    eprintln!(
-        "[halo2] [3] Reading instances from Wasm memory at 0x{:x} ({} bytes requested)",
-        instances_ptr, instances_len
-    );
-    const MAX_INSTANCES_SIZE: usize = 64 * 1024; // Safety limit
-    let actual_instances_size = std::cmp::min(instances_len as usize, MAX_INSTANCES_SIZE);
-    let instances_bytes = read_region(data, &mut store, instances_ptr, actual_instances_size)?;
-    eprintln!(
-        "[halo2] [3] ✓ instances {} bytes read",
-        instances_bytes.len()
-    );
-
-    // Charge gas
+    // Charge gas for proof verification
     let gas_info = GasInfo::with_cost(
         data.gas_config
             .halo2_proof_instance_verify_cost
             .total_cost(1)?,
     );
     process_gas_info(data, &mut store, gas_info)?;
-    eprintln!("[halo2] [4] ✓ Gas charged");
 
-    // Checksum is passed directly, no lookup needed
-    eprintln!("[halo2] [5] ✓ Checksum received directly from contract");
+    // Query x/wasm module for circuit data
+    let query_request: QueryRequest<Empty> =
+        QueryRequest::Wasm(WasmQuery::Circuit { zk_id: zkid_u64 });
+    let query_bytes = to_vec(&query_request)
+        .map_err(|e| VmError::generic_err(format!("Failed to serialize circuit query: {:?}", e)))?;
 
-    // 5. Load verifying key from app state storage
-    eprintln!(
-        "[halo2] [6] Loading VK from app state storage (key: {})",
-        hex::encode(checksum.as_slice())
-    );
-    let vk_key = checksum.as_slice();
-    let (result, _gas_info) = data.with_storage_from_context(|storage| {
-        eprintln!("[halo2] [6] Querying storage for VK...");
-        Ok(storage.get(vk_key))
+    const QUERY_GAS_LIMIT: u64 = 1_000_000_000;
+    let (query_result, query_gas_info) = data.with_querier_from_context(|querier| {
+        Ok(querier.query_raw(&query_bytes, QUERY_GAS_LIMIT))
     })?;
+    process_gas_info(data, &mut store, query_gas_info)?;
 
-    let serialized_vk_bytes = result
+    // Parse query response
+    let response_binary = query_result
         .map_err(|e| {
-            eprintln!("[halo2] [6] ✗ Storage error: {}", e);
             VmError::generic_err(format!(
-                "Storage error loading VK for circuit {}: {}",
-                checksum, e
+                "Query backend error for circuit {}: {:?}",
+                zkid_u64, e
             ))
         })?
-        .ok_or_else(|| {
-            eprintln!(
-                "[halo2] [6] ✗ VK not found for checksum {}!",
-                hex::encode(checksum.as_slice())
-            );
+        .into_result()
+        .map_err(|e| {
             VmError::generic_err(format!(
-                "VK not stored in app state for circuit {}",
-                checksum
+                "Query system error for circuit {}: {:?}",
+                zkid_u64, e
             ))
-        })?;
-    eprintln!(
-        "[halo2] [6] ✓ VK loaded: {} bytes",
-        serialized_vk_bytes.len()
-    );
+        })?
+        .into_result()
+        .map_err(|e| VmError::generic_err(format!("Circuit {} not found: {}", zkid_u64, e)))?;
 
-    // 6. Deserialize the verifying key
-    eprintln!(
-        "[halo2] [7] Deserializing VK from {} bytes...",
-        serialized_vk_bytes.len()
-    );
-    let vk = zk_cosmwasm::VerifyingKey::from_bytes(&serialized_vk_bytes).map_err(|e| {
-        eprintln!("[halo2] [7] ✗ Failed to deserialize VK: {}", e);
+    let circuit_response: CircuitResponse =
+        crate::serde::from_slice(&response_binary, response_binary.len()).map_err(|e| {
+            VmError::generic_err(format!("Failed to parse CircuitResponse: {:?}", e))
+        })?;
+
+    // Deserialize VK and verify proof
+    let vk = zk_cosmwasm::VerifyingKey::from_bytes(&circuit_response.data).map_err(|e| {
         VmError::generic_err(format!(
             "Failed to deserialize VK for circuit {}: {}",
-            checksum, e
+            zkid_u64, e
         ))
     })?;
-    eprintln!("[halo2] [7] ✓ VK deserialized successfully");
 
-    // 7. Verify proof
-    eprintln!(
-        "[halo2] [8] Verifying proof with {} instance bytes...",
-        instances_bytes.len()
-    );
     let instance = Instance::new_from_vm(instances_bytes)?;
     let proof = Proof::new(proof_bytes);
 
-    let result = match proof.verify(&vk, &[instance]) {
-        Ok(_) => {
-            eprintln!("[halo2] [8] ✓ PROOF VALID");
-            0
-        }
-        Err(e) => {
-            eprintln!("[halo2] [8] ✗ Proof invalid: {:?}", e);
-            1
-        }
-    };
-
-    eprintln!(
-        "[halo2] ========== END PROOF VERIFICATION (result: {}) ==========",
-        result
-    );
-    Ok(result)
+    match proof.verify(&vk, &[instance]) {
+        Ok(_) => Ok(0),  // Valid proof
+        Err(_) => Ok(1), // Invalid proof
+    }
 }
 
 /// Prints a debug message to console.

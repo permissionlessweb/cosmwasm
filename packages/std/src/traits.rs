@@ -326,13 +326,18 @@ pub trait Api: Any {
     ) -> Result<bool, VerificationError>;
 
     /// Verifies a Halo2 zero-knowledge proof with the given proof bytes and instance data.
-    /// The verifying key is automatically loaded from the contract's pinned VK if available.
+    /// The verifying key is fetched from the x/wasm module using the circuit's zkid.
+    ///
+    /// # Arguments
+    /// * `zkid` - The circuit ID assigned when the circuit was uploaded to the x/wasm module
+    /// * `proof` - The proof bytes to verify
+    /// * `i` - The public instance bytes
     ///
     /// Returns `Ok(true)` if the proof is valid, `Ok(false)` if invalid, or an error if verification fails.
     #[allow(unused_variables)]
     fn halo2_proof_instance_verify(
         &self,
-        checksum: &[u8],
+        zkid: u64,
         proof: &[u8],
         i: &[u8],
     ) -> Result<bool, VerificationError> {

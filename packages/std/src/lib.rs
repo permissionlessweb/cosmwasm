@@ -98,12 +98,13 @@ pub use crate::never::Never;
 pub use crate::pagination::PageRequest;
 pub use crate::query::{
     AllDelegationsResponse, AllDenomMetadataResponse, AllValidatorsResponse, BalanceResponse,
-    BankQuery, BondedDenomResponse, ChannelResponse, CodeInfoResponse, ContractInfoResponse,
-    CustomQuery, DecCoin, Delegation, DelegationResponse, DelegationRewardsResponse,
-    DelegationTotalRewardsResponse, DelegatorReward, DelegatorValidatorsResponse,
-    DelegatorWithdrawAddressResponse, DenomMetadataResponse, DistributionQuery, FullDelegation,
-    GrpcQuery, IbcQuery, PortIdResponse, QueryRequest, RawRangeEntry, RawRangeResponse,
-    StakingQuery, SupplyResponse, Validator, ValidatorMetadata, ValidatorResponse, WasmQuery,
+    BankQuery, BondedDenomResponse, ChannelResponse, CircuitInfoResponse, CircuitResponse,
+    CodeInfoResponse, ContractInfoResponse, CustomQuery, DecCoin, Delegation, DelegationResponse,
+    DelegationRewardsResponse, DelegationTotalRewardsResponse, DelegatorReward,
+    DelegatorValidatorsResponse, DelegatorWithdrawAddressResponse, DenomMetadataResponse,
+    DistributionQuery, FullDelegation, GrpcQuery, IbcQuery, PortIdResponse, QueryRequest,
+    RawRangeEntry, RawRangeResponse, StakingQuery, SupplyResponse, Validator, ValidatorMetadata,
+    ValidatorResponse, WasmQuery,
 };
 
 #[cfg(all(feature = "stargate", feature = "cosmwasm_1_2"))]
