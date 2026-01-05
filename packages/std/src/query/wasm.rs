@@ -66,10 +66,10 @@ pub enum WasmQuery {
         order: crate::Order,
     },
     /// Returns a [`CircuitInfoResponse`] with metadata of the code
-    #[cfg(feature = "cosmwasm_3_0")]
+    // #[cfg(feature = "cosmwasm_3_0")]
     CircuitInfo { zk_id: u64 },
     /// Returns a [`CircuitResponse`] with metadata of the code
-    #[cfg(feature = "cosmwasm_3_0")]
+    // #[cfg(feature = "cosmwasm_3_0")]
     Circuit { zk_id: u64 },
 }
 

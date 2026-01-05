@@ -44,8 +44,13 @@ pub struct CircuitFooter {
     pub vk_len: u32,
     /// Number of selectors in the constraint system
     pub num_selectors: u32,
-    /// Reserved for future extensions
-    pub reserved_2: u32,
+    /// Bitmask indicating which fixed columns have equality enabled (i.e., are part of the copy permutation).
+    ///
+    /// Bit `i` is set if the `i`-th fixed column (in creation order) has `enable_equality` called on it.
+    /// This determines whether that fixed column is included in the permutation argument, which affects
+    /// the number and order of commitments in the verifying key. Only the first 32 fixed columns are supported
+    /// via this mask — sufficient for all practical CosmWasm circuits.
+    pub fixed_equality_mask: u32,
     /// Reserved for future extensions
     pub reserved_3: u32,
     /// CRC32 checksum of params+vk bytes (optional validation)
@@ -64,6 +69,7 @@ impl CircuitFooter {
         params_len: u32,
         vk_len: u32,
         num_selectors: u32,
+        fixed_equality_mask: u32,
         crc32: u32,
     ) -> Self {
         Self {
@@ -78,7 +84,7 @@ impl CircuitFooter {
             params_len,
             vk_len,
             num_selectors,
-            reserved_2: 0,
+            fixed_equality_mask,
             reserved_3: 0,
             crc32,
         }
@@ -98,7 +104,7 @@ impl CircuitFooter {
         bytes[8..12].copy_from_slice(&self.params_len.to_le_bytes());
         bytes[12..16].copy_from_slice(&self.vk_len.to_le_bytes());
         bytes[16..20].copy_from_slice(&self.num_selectors.to_le_bytes());
-        bytes[20..24].copy_from_slice(&self.reserved_2.to_le_bytes());
+        bytes[20..24].copy_from_slice(&self.fixed_equality_mask.to_le_bytes());
         bytes[24..28].copy_from_slice(&self.reserved_3.to_le_bytes());
         bytes[28..32].copy_from_slice(&self.crc32.to_le_bytes());
         bytes
@@ -136,7 +142,7 @@ impl CircuitFooter {
             params_len: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
             vk_len: u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
             num_selectors: u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]),
-            reserved_2: u32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]),
+            fixed_equality_mask: u32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]),
             reserved_3: u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]),
             crc32: u32::from_le_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]),
         })
@@ -150,6 +156,7 @@ pub struct DynamicCircuitConfig {
     pub num_advice_columns: u8,
     pub num_instance_columns: u8,
     pub num_selectors: u32,
+    pub fixed_equality_mask: u32,
 }
 
 // Thread-local storage for circuit config during keygen
@@ -207,6 +214,7 @@ impl DynamicCircuit {
         num_advice_columns: u8,
         num_instance_columns: u8,
         num_selectors: u32,
+        fixed_equality_mask: u32,
     ) -> Self {
         Self {
             config: DynamicCircuitConfig {
@@ -214,6 +222,7 @@ impl DynamicCircuit {
                 num_advice_columns,
                 num_instance_columns,
                 num_selectors,
+                fixed_equality_mask,
             },
         }
     }
@@ -225,6 +234,7 @@ impl DynamicCircuit {
             footer.num_advice_columns,
             footer.num_instance_columns,
             footer.num_selectors,
+            footer.fixed_equality_mask,
         )
     }
 
@@ -280,36 +290,61 @@ impl Circuit<vesta::Scalar> for DynamicCircuit {
              Call circuit.set_as_current() before keygen operations.",
         );
 
-        // Add fixed columns to match the deserialized circuit
-        let mut fixed_cols = Vec::new();
-        for _ in 0..config.num_fixed_columns {
-            fixed_cols.push(meta.fixed_column());
-        }
+        // --------------------------------------------------------------------
+        // Fixed columns
+        // --------------------------------------------------------------------
+        // IMPORTANT:
+        // - These correspond ONLY to meta.fixed_column() calls
+        // - Selectors are NOT included here
+        // - Equality is enabled selectively via fixed_equality_mask
+        let mut fixed_cols = Vec::with_capacity(config.num_fixed_columns as usize);
 
-        // Add advice columns and enable equality
-        let mut advice_cols = Vec::new();
+        for i in 0..config.num_fixed_columns {
+            let col = meta.fixed_column();
+            // Enable equality on this fixed column if requested by the footer
+            if (config.fixed_equality_mask & (1u32 << i)) != 0 {
+                meta.enable_equality(col);
+            }
+            fixed_cols.push(col);
+        }
+        // --------------------------------------------------------------------
+        // Advice columns
+        // --------------------------------------------------------------------
+        // Convention: ALL advice columns have equality enabled
+        let mut advice_cols = Vec::with_capacity(config.num_advice_columns as usize);
         for _ in 0..config.num_advice_columns {
             let col = meta.advice_column();
             meta.enable_equality(col);
             advice_cols.push(col);
         }
+        // --------------------------------------------------------------------
+        // Instance columns
+        // --------------------------------------------------------------------
+        // Convention: ALL instance columns have equality enabled
+        let mut instance_cols = Vec::with_capacity(config.num_instance_columns as usize);
 
-        // Add instance column and enable equality if needed
-        if config.num_instance_columns > 0 {
+        for _ in 0..config.num_instance_columns {
             let col = meta.instance_column();
             meta.enable_equality(col);
+            instance_cols.push(col);
         }
 
-        // Enable constant column for lookups/gates
-        if !fixed_cols.is_empty() {
-            meta.enable_constant(fixed_cols[0]);
+        // --------------------------------------------------------------------
+        // Constant column
+        // --------------------------------------------------------------------
+        // Halo2 convention:
+        // - First fixed column is the constant column *if one exists*
+        // - enable_constant implicitly relies on equality having been enabled
+        if let Some(constant_col) = fixed_cols.first() {
+            meta.enable_constant(*constant_col);
         }
-
-        // Create selectors to match the deserialized circuit
+        // --------------------------------------------------------------------
+        // Selectors
+        // --------------------------------------------------------------------
+        // Selectors are NOT fixed columns and must be recreated explicitly
         for _ in 0..config.num_selectors {
-            let _selector = meta.selector();
+            meta.selector();
         }
-
         // Note: We don't recreate gates here because:
         // 1. The deserialized VerifyingKey already contains all gate definitions
         // 2. halo2's VerifyingKey::read validates gates against this constraint system
@@ -588,8 +623,9 @@ impl VerifyingKey {
 
         // Validate structure
         if params_len + vk_len + 32 != bytes.len() {
+            eprintln!("validation structure error");
             return Err(ZkError::new_err(format!(
-                "VK file size mismatch: {}+{}+32 != {}",
+                "Circuit file size mismatch: {}+{}+32 != {}",
                 params_len,
                 vk_len,
                 bytes.len()
@@ -739,6 +775,7 @@ impl VerifyingKey {
         num_advice_columns: u8,
         num_instance_columns: u8,
         degree: u8,
+        fixed_equality_mask: u8,
     ) -> io::Result<Vec<u8>> {
         let mut params_buf = Vec::new();
         self.params.write(&mut params_buf)?;
@@ -757,6 +794,7 @@ impl VerifyingKey {
             params_buf.len() as u32,
             vk_buf.len() as u32,
             1,
+            fixed_equality_mask.into(),
             0, // CRC32 - can be computed if needed
         );
 
@@ -845,10 +883,13 @@ impl Instance {
             size: i.len(),
         }
     }
+    // TODO: support flexibility in instance scalar_size
     pub fn new_from_vm(i: Vec<u8>) -> ZkResult<Self> {
         const SCALAR_SIZE: usize = 32;
-        if i.len() % SCALAR_SIZE != 0 {
-            return Err(ZkError::new_err("bytes length must be multiple of 32"));
+        if !i.len().is_multiple_of(SCALAR_SIZE) {
+            return Err(ZkError::new_err(format!(
+                "bytes length must be multiple of {SCALAR_SIZE}"
+            )));
         }
         let is = i
             .chunks_exact(SCALAR_SIZE)

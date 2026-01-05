@@ -159,71 +159,82 @@ pub fn deserialize_circuit_data(data: &[u8]) -> ZkResult<SerializedPlonkishCircu
 
 /// Validates that a combined params+VK blob matches expected structure
 /// This validates the file format written by `build_and_write`
+/// Validates that a combined params+VK+footer blob matches the expected structure
+/// and extracts the actual CircuitFooter metadata.
+///
+/// This is used both at runtime (in the VM) and during build/validation to ensure
+/// the file format is correct and can be used generically without knowing the circuit type.
 pub fn check_circuit(bytes: &[u8]) -> ZkResult<(CircuitFooter, Checksum)> {
-    const FOOTER_SIZE: usize = 32; // New 32-byte footer format
+    const FOOTER_SIZE: usize = 32;
 
     if bytes.len() < FOOTER_SIZE {
         return Err(ZkError::new_err(format!(
-            "VK file too short: need at least {} bytes for footer",
+            "Circuit file too short: {} bytes, need at least {} for footer",
+            bytes.len(),
             FOOTER_SIZE
         )));
     }
 
-    // Extract and parse the 32-byte footer
+    // Extract the footer (last 32 bytes)
     let footer_bytes = &bytes[bytes.len() - FOOTER_SIZE..];
-    let footer = CircuitFooter::from_bytes(footer_bytes)?;
+    let footer = CircuitFooter::from_bytes(footer_bytes)
+        .map_err(|e| ZkError::new_err(format!("Failed to parse CircuitFooter: {}", e)))?;
 
-    let p_len = footer.params_len as usize;
-    let v_len = footer.vk_len as usize;
-
-    // Validate file structure
-    let expected_total = p_len + v_len + FOOTER_SIZE;
-    if bytes.len() != expected_total {
-        return Err(ZkError::from_io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "VK file size mismatch: got {} bytes, expected {} (params:{} + vk:{} + footer:{})",
-                bytes.len(),
-                expected_total,
-                p_len,
-                v_len,
-                FOOTER_SIZE
-            ),
-        )));
-    }
-
-    // Validate VK exists and has minimum content
-    if v_len == 0 {
-        return Err(ZkError::from_io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "VK length cannot be 0",
-        )));
-    }
-
-    let vk_bytes = &bytes[p_len..p_len + v_len];
-
-    // VK bytes should exist
-    if vk_bytes.is_empty() {
-        return Err(ZkError::from_io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "No VK bytes recognized",
-        )));
-    }
-
-    let footer = CircuitFooter::new(
-        CircuitType::Plonkish,
-        1, // instance_count: 1
-        2, // num_fixed_columns (NoRickCircuit: 1 constant + 1 selector)
-        2, // num_advice_columns (NoRickCircuit: 2 advice columns)
-        1, // num_instance_columns
-        3, // degree (typical for plonk gates)
-        p_len as u32,
-        v_len as u32,
-        1, // num_selectors (NoRickCircuit: 1 selector for multiply gate)
-        0, // crc32 (not computed for now)
+    eprintln!(
+        "✓ Parsed CircuitFooter: instance_count={}, fixed={}, advice={}, instance={}, degree={}, selectors={}",
+        footer.instance_count,
+        footer.num_fixed_columns,
+        footer.num_advice_columns,
+        footer.num_instance_columns,
+        footer.degree,
+        footer.num_selectors
     );
 
-    Ok((footer, Checksum::generate(vk_bytes)))
+    let params_len = footer.params_len as usize;
+    let vk_len = footer.vk_len as usize;
+
+    // Validate total length matches declared sections
+    let expected_total = params_len + vk_len + FOOTER_SIZE;
+    if bytes.len() != expected_total {
+        return Err(ZkError::new_err(format!(
+            "Circuit file size mismatch: got {} bytes, expected {} (params: {} + vk: {} + footer: {})",
+            bytes.len(),
+            expected_total,
+            params_len,
+            vk_len,
+            FOOTER_SIZE
+        )));
+    }
+
+    // Basic sanity checks
+    if params_len == 0 {
+        return Err(ZkError::new_err("Params section cannot be empty"));
+    }
+    if vk_len == 0 {
+        return Err(ZkError::new_err("Verifying key section cannot be empty"));
+    }
+
+    // Extract VK bytes for checksum
+    let vk_bytes = &bytes[params_len..params_len + vk_len];
+
+    // Optional: additional validation (e.g., version, circuit type)
+    if footer.circuit_type != CircuitType::Plonkish {
+        return Err(ZkError::new_err(format!(
+            "Unsupported circuit type: {:?}",
+            footer.circuit_type
+        )));
+    }
+
+    if footer.footer_version != 1 {
+        return Err(ZkError::new_err(format!(
+            "Unsupported footer version: {}",
+            footer.footer_version
+        )));
+    }
+
+    let checksum = Checksum::generate(vk_bytes);
+
+    Ok((footer, checksum))
 }
 
 #[cfg(test)]
@@ -275,6 +286,7 @@ mod tests {
             params_len,
             vk_len,
             0, // num_selectors
+            1, // num_selectors
             0, // crc32
         );
 

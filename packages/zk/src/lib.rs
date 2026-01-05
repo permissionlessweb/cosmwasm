@@ -15,8 +15,7 @@ pub mod example_circuits;
 pub mod suite;
 #[cfg(feature = "interface")]
 pub use suite::{
-    TerpTestPressConfig, TestPressBitwiseInstance, TestPressIpfsInstance,
-    TestPressLaunchpadInstance, TestPressSuite,
+    TerpTestPressConfig, TestPressBitwiseInstance, TestPressLaunchpadInstance, TestPressSuite,
 };
 
 #[cfg(feature = "zk-tests")]

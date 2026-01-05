@@ -2149,7 +2149,7 @@ mod tests {
             &suite,
             path,
             None, // Some(&key_folder),
-            vec![("lrain".to_string(), "rick".into())],
+            vec![("lrain", "rick")],
         )
         .unwrap();
 

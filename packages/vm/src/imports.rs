@@ -897,9 +897,9 @@ pub fn do_halo2_proof_instance_verify<
         crate::serde::from_slice(&response_binary, response_binary.len()).map_err(|e| {
             VmError::generic_err(format!("Failed to parse CircuitResponse: {:?}", e))
         })?;
-
+    let res = crate::zk::deserialize_circuit_data(&circuit_response.data)?;
     // Deserialize VK and verify proof
-    let vk = zk_cosmwasm::VerifyingKey::from_bytes(&circuit_response.data).map_err(|e| {
+    let vk = zk_cosmwasm::VerifyingKey::from_bytes(&res.bytes).map_err(|e| {
         VmError::generic_err(format!(
             "Failed to deserialize VK for circuit {}: {}",
             zkid_u64, e

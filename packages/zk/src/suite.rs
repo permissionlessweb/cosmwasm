@@ -70,7 +70,6 @@ pub struct TerpTestPressConfig {
 pub struct TestPressSuite {}
 impl TestPressBitwiseInstance for TestPressSuite {}
 impl TestPressLaunchpadInstance for TestPressSuite {}
-impl TestPressIpfsInstance for TestPressSuite {}
 impl TestPressSuite {
     /// create new headsatsh suite
     pub fn new() -> Self {
@@ -78,51 +77,11 @@ impl TestPressSuite {
     }
 }
 
-/// # Trait: `TestPressInstance`
-///
-/// implement expected functions for client side interactions headstashes.
-// pub trait TestPressInstance {
-//     type HsErr;
-
-//     /// TODO: wire into network client for headstash market contract state queries
-//     fn find_new_headstashes() -> Result<(), Self::HsErr> {
-//         todo!()
-//     }
-
-//     /// TODO: query ipfs file to retrieve headstash config
-//     fn list_headstash_info() -> Result<(), Self::HsErr> {
-//         todo!()
-//     }
-
-//     /// TODO: read folder and display sum of notes and number of fdi counts
-//     fn list_unspent_notes() -> Vec<Note> {
-//         todo!()
-//     }
-
-//     /// TODO: read folder and display notes spent
-//     fn list_spent_notes() -> Vec<Note> {
-//         todo!()
-//     }
-
-//     /// TODO: select unspent notes used to claim and move note file over into spent,
-//     /// specify method of preparing and harvesting (creating proof) for a given note (either wasm-bindgen invocation,locally via cargo script, or external method invoked with a bash script)
-//     fn prepare_and_harvest_note() -> Result<(), Self::HsErr> {
-//         todo!()
-//     }
-
-//     fn headstash_action() -> Result<(), Self::HsErr> {
-//         todo!()
-//     }
-// }
-
 /// TestPressBitwiseInstance
 pub trait TestPressBitwiseInstance {}
 
-// TestPressIpfsInstance: traits for communicating with ipfs client
-pub trait TestPressIpfsInstance: TestPressBitwiseInstance {}
-
 /// launchpad
-pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsInstance {
+pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
     /// `gen_test_circuit_keys`: generate or load test circuit keys and create multiple proofs for NoRickCircuit
     /// - `generate_keys`: if true, generates new keys per spec of zk-wasmvm vk serialization, and writes to `path`; if false, loads keys from `key_path`
     /// - `key_path`: path to load keys from if `generate_keys` is false
@@ -132,7 +91,7 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsIn
         &self,
         path: &Path,
         key_path: Option<&Path>,
-        proof_specs: Vec<(String, String)>,
+        proof_specs: Vec<(&str, &str)>,
     ) -> Result<Vec<crate::example_circuits::NoRickProof>, BoxError> {
         use crate::example_circuits::{
             NoRickCircuit, NoRickInstance, NoRickProof, NoRickProvingKey,
@@ -183,7 +142,7 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsIn
                 .collect();
             let circuit: NoRickCircuit<pasta_curves::Fp> = NoRickCircuit { priv_input };
             let instance = NoRickInstance {
-                word: forbidden_word,
+                word: forbidden_word.into(),
             };
             let proof: NoRickProof = NoRickProof::create(&pk, &[circuit], &[instance], &mut rng)?;
             proofs.push(proof);
@@ -196,14 +155,20 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsIn
     /// Follows specification of zk-wasmvm
     #[cfg(feature = "zk-tests")]
     fn gen_no_rick_circuit_keys(&self, base_path: &Path) -> Result<(), BoxError> {
+        use halo2_proofs::plonk::Circuit;
+
         use crate::example_circuits::NoRickCircuit;
         use std::io::{self, Seek};
-        const K: u32 = 10;
-        const V: u8 = 0;
         const I: u8 = 1;
+        const V: CircuitType = CircuitType::Plonkish;
+        const K: u32 = 10;
 
         eprintln!("  📝 Generating NoRickCircuit keys...");
-        let circuit: NoRickCircuit<Fp> = Default::default();
+        let mut cs = plonk::ConstraintSystem::<Fp>::default();
+        NoRickCircuit::<Fp>::configure(&mut cs); // Run configure to build cs
+                                                 // Compute fixed_equality_mask
+        println!("cs.pinned: {:#?}", cs.pinned());
+        let circuit: NoRickCircuit<Fp> = NoRickCircuit::default();
         let p = halo2_proofs::poly::commitment::Params::<vesta::Affine>::new(K);
         let vk = plonk::keygen_vk(&p, &circuit).map_err(|e| format!("VK: {:?}", e))?;
         let pk = plonk::keygen_pk(&p, vk.clone(), &circuit).map_err(|e| format!("PK: {:?}", e))?;
@@ -252,18 +217,37 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsIn
         eprintln!("norick: ✓ Verifying key size: {} bytes", vk_len);
         combined_file.write_all(&temp)?;
 
+        // Compute fixed_equality_mask
+        let mut fixed_equality_mask: u32 = 0;
+        for col in cs.get_permutation_columns().iter() {
+            use halo2_proofs::plonk::Any;
+            if let Any::Fixed = col.column_type() {
+                let idx = col.get_index();
+                if idx < 32 {
+                    fixed_equality_mask |= 1 << idx;
+                } else {
+                    panic!("idx > 32")
+                }
+            }
+        }
+        eprintln!(
+            "norick: ✓ fixed_equality_mask size: {} len",
+            fixed_equality_mask
+        );
+
         // WRITE EXTENDED 32-BYTE METADATA FOOTER using CircuitFooter
         use crate::cosmwasm_circuit::{CircuitFooter, CircuitType};
         let footer = CircuitFooter::new(
-            CircuitType::Plonkish,
-            I, // instance_count: 1
-            2, // num_fixed_columns (NoRickCircuit: 1 constant + 1 selector)
-            2, // num_advice_columns (NoRickCircuit: 2 advice columns)
-            1, // num_instance_columns
-            3, // degree (typical for plonk gates)
+            V,
+            I,
+            cs.get_num_fixed_columns(),
+            cs.get_num_advice(),
+            cs.get_num_instance_columns(),
+            cs.degree() as u8,
             params_len,
             vk_len,
-            1, // num_selectors (NoRickCircuit: 1 selector for multiply gate)
+            cs.get_num_selectors(), // num_selectors (NoRickCircuit: 1 selector for multiply gate)
+            fixed_equality_mask,
             0, // crc32 (not computed for now)
         );
 
@@ -273,9 +257,9 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance + TestPressIpfsIn
         let actual_metadata_len = (metadata_end - metadata_start) as usize;
 
         assert_eq!(
-            actual_metadata_len, 32,
-            "norick: Metadata size mismatch: wrote {} bytes, expected 32",
-            actual_metadata_len
+            actual_metadata_len, COSMWASM_METADATA_LENGTH,
+            "norick: Metadata size mismatch: wrote {} bytes, expected {}",
+            actual_metadata_len, COSMWASM_METADATA_LENGTH
         );
         eprintln!(
             "norick: CircuitFooter written: {} bytes (extended format)",

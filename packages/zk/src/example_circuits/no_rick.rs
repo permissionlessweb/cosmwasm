@@ -111,7 +111,6 @@ impl<F: Field> FieldChip<F> {
             meta.enable_equality(*column);
         }
         let s_mul = meta.selector();
-
         // Define our multiplication gate!
         meta.create_gate("mul", |meta| {
             // To implement multiplication, we need three advice cells and a selector
@@ -147,6 +146,17 @@ impl<F: Field> FieldChip<F> {
             instance,
             s_mul,
         }
+    }
+    fn constrain_equal(
+        &self,
+        mut layouter: impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+        b: &AssignedCell<F, F>,
+    ) -> Result<(), Error> {
+        layouter.assign_region(
+            || "constrain equal",
+            |mut region| region.constrain_equal(a.cell(), b.cell()),
+        )
     }
 }
 // ANCHOR_END: chip-config
@@ -309,11 +319,8 @@ impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         eprintln!("📋 NoRickCircuit::configure called - THIS SHOULD ALWAYS RUN");
         let advice = [meta.advice_column(), meta.advice_column()];
-        eprintln!("  ✓ Created 2 advice columns");
         let instance = meta.instance_column();
-        eprintln!("  ✓ Created instance column");
         let constant = meta.fixed_column();
-        eprintln!("  ✓ Created fixed column");
         eprintln!("  Before FieldChip::configure: columns exist");
         let config = FieldChip::configure(meta, advice, instance, constant);
         eprintln!("  ✓ FieldChip::configure returned");
@@ -391,10 +398,12 @@ impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
 
         // Load constant 1
         let one = chip.load_constant(layouter.namespace(|| "load one"), F::ONE)?;
-
         // Constrain product_times_inv to equal 1 by binding both to the same instance cell
-        layouter.constrain_instance(product_times_inv.0.cell(), chip.config().instance, 0)?;
-        layouter.constrain_instance(one.0.cell(), chip.config().instance, 0)?;
+        chip.constrain_equal(
+            layouter.namespace(|| "enforce product_times_inv == 1"),
+            &product_times_inv.0,
+            &one.0,
+        )?;
 
         Ok(())
     }
@@ -627,7 +636,7 @@ fn test_rick_circuit() {
     let mut circuit: NoRickCircuit<pallas::Base> = NoRickCircuit { priv_input };
     // === THE CONSTRAINT===:
     // set to 1 as we inverse constraint (if result == 0 , we know that the private input has "rick in it")
-    let public_input = vec![Fp::one(), str_to_field("rick")];
+    let public_input = vec![str_to_field("rick")];
 
     let prover1 = MockProver::run(circuit_rows, &circuit, vec![public_input.clone()]).unwrap();
     assert!(prover1.verify().is_err());
@@ -663,34 +672,5 @@ fn test_rick_circuit() {
     let public_inputs3 = vec![Fp::one(), str_to_field("rick")];
     let prover3 = MockProver::run(circuit_rows, &circuit, vec![public_inputs3]).unwrap();
     assert!(prover3.verify().is_ok());
-
-    // Create the area you want to draw on.
-    // Use SVGBackend if you want to render to .svg instead.
-    // use plotters::prelude::*;
-    // let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
-    // root.fill(&WHITE).unwrap();
-    // let root = root
-    //     .titled("Example Circuit Layout", ("sans-serif", 60))
-    //     .unwrap();
-
-    // halo2_proofs::dev::CircuitLayout::default()
-    //     .show_equality_constraints(true)
-    //     // You can optionally render only a section of the circuit.
-    //     // .view_width()
-    //     // .view_height(0..16)
-    //     // You can hide labels, which can be useful with smaller areas.
-    //     .show_labels(true);
-    // // Render the circuit onto your area!
-    // // The first argument is the size parameter for the circuit.
-    // .render(10, &circuit, &root)
-    // .unwrap();
-
-    // Generate the DOT graph string.
-    // let dot_string = halo2_proofs::dev::circuit_dot_graph(&circuit);
-
-    // Now you can either handle it in Rust, or just
-    // print it out to use with command-line tools.
-    // println!("{}", dot_string);
-    // ANCHOR_END: test-circuit
 }
 // ANCHOR_END: dev-graph
