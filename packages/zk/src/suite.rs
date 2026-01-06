@@ -155,7 +155,10 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
     /// Generate keys for NoRickCircuit example.
     /// Follows specification of zk-wasmvm
     #[cfg(feature = "zk-tests")]
-    fn gen_no_rick_circuit_keys(&self, base_path: &Path) -> Result<crate::example_circuits::NoRickProvingKey, BoxError> {
+    fn gen_no_rick_circuit_keys(
+        &self,
+        base_path: &Path,
+    ) -> Result<crate::example_circuits::NoRickProvingKey, BoxError> {
         use crate::example_circuits::NoRickCircuit;
         use halo2_proofs::plonk::Circuit;
         use std::io::{self, Seek};
@@ -165,10 +168,12 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
         const K: u32 = 10;
         let cd = base_path.join("no_rick");
         fs::create_dir_all(&cd)?;
+
         let mut cs = plonk::ConstraintSystem::<Fp>::default();
-        NoRickCircuit::<Fp>::configure(&mut cs); // Run configure to build cs
-        println!("cs.pinned: {:#?}", cs.pinned());
         let circuit: NoRickCircuit<Fp> = NoRickCircuit::default();
+        NoRickCircuit::<Fp>::configure(&mut cs);
+        println!("cs.pinned: {:#?}", cs.pinned());
+
         let p = halo2_proofs::poly::commitment::Params::<vesta::Affine>::new(K);
         let vk = plonk::keygen_vk(&p, &circuit).map_err(|e| format!("VK: {:?}", e))?;
         let pk = plonk::keygen_pk(&p, vk.clone(), &circuit).map_err(|e| format!("PK: {:?}", e))?;
@@ -380,7 +385,110 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
 mod test {
     use super::*;
 
-    use serde_json::Value;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use serde_json::{json, Value};
     use std::boxed::Box;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
+
+    // cargo test --package zk-cosmwasm --features interface test_proof_verification -- --nocapture
+    #[test]
+    pub fn test_proof_verification() -> Result<(), BoxError> {
+        use crate::example_circuits::{NoRickInstance, NoRickProof, NoRickVerifyingKey};
+
+        // Create temp directory for test files
+        let temp_dir = Path::new("./test_temp_proofs");
+        fs::create_dir_all(temp_dir)?;
+
+        let suite = TestPressSuite::new();
+
+        // Generate circuit keys and proofs
+        let proofs = suite.gen_test_circuit_keys(temp_dir, None, vec![("randy", "rick")])?;
+
+        // Load verifying key from file
+        let vk_path = temp_dir.join("no_rick").join("verifying_key.bin");
+        let params_path = temp_dir.join("no_rick").join("params.bin");
+
+        let mut params_file = fs::File::open(params_path)?;
+        let params =
+            halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(&mut params_file)?;
+
+        let mut vk_file = fs::File::open(vk_path)?;
+        let vk = plonk::VerifyingKey::<vesta::Affine>::read::<
+            File,
+            crate::example_circuits::NoRickCircuit<pasta_curves::Fp>,
+        >(&mut vk_file, &params)?;
+
+        let verifying_key = NoRickVerifyingKey { params, vk };
+
+        // Build proof map
+        let mut proof_by_word: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        proof_by_word.insert("rick".to_string(), proofs[0].bytes().clone());
+
+        // Words to include in JSON
+        let words = vec!["rick"];
+
+        // Create JSON output
+        let mut output = serde_json::Map::new();
+        for word in words.clone() {
+            let proof_b64 = proof_by_word
+                .get(word)
+                .map(|bytes| STANDARD.encode(bytes))
+                .unwrap_or_else(|| format!("ADD_{}_PROOF_HERE", word.to_uppercase()));
+
+            // Instance scalar: 32 bytes (matching terp-core script)
+            let scalar_bytes = [0u8; 32];
+            let scalar_b64 = STANDARD.encode(scalar_bytes);
+
+            output.insert(
+                word.to_string(),
+                json!({
+                    "proof": proof_b64,
+                    "scalar": scalar_b64
+                }),
+            );
+        }
+
+        let json_output = serde_json::to_string_pretty(&Value::Object(output))?;
+        let json_file = temp_dir.join("proofs.json");
+        fs::write(&json_file, json_output)?;
+
+        // Now read back and verify
+        let json_content = fs::read_to_string(&json_file)?;
+        let parsed: Value = serde_json::from_str(&json_content)?;
+
+        for word in words.clone() {
+            let word_data = parsed.get(word).unwrap().as_object().unwrap();
+            let proof_b64 = word_data.get("proof").unwrap().as_str().unwrap();
+            let scalar_b64 = word_data.get("scalar").unwrap().as_str().unwrap();
+
+            // Decode base64
+            let proof_bytes = STANDARD.decode(proof_b64)?;
+
+            // Create proof and instance
+            let proof = NoRickProof::new(proof_bytes);
+            let instance = NoRickInstance {
+                word: word.to_string(),
+            };
+
+            // Verify proof
+            proof.verify(&verifying_key, &[instance])?;
+            println!("proof verified ::)");
+        }
+
+        // Test with bad proof
+        let bad_proof_bytes = vec![0u8; 1024]; // Invalid proof data
+        let bad_proof = NoRickProof::new(bad_proof_bytes);
+        let bad_instance = NoRickInstance {
+            word: "rick".to_string(),
+        };
+        assert!(
+            bad_proof.verify(&verifying_key, &[bad_instance]).is_err(),
+            "Invalid proof should fail verification"
+        );
+        println!("bad proof correctly failed verification ::)");
+
+        // Clean up
+        fs::remove_dir_all(temp_dir)?;
+        Ok(())
+    }
 }
