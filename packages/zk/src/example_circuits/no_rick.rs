@@ -321,10 +321,7 @@ impl<F: PrimeField> Circuit<F> for NoRickCircuit<F> {
         let advice = [meta.advice_column(), meta.advice_column()];
         let instance = meta.instance_column();
         let constant = meta.fixed_column();
-        eprintln!("  Before FieldChip::configure: columns exist");
-        let config = FieldChip::configure(meta, advice, instance, constant);
-        eprintln!("  ✓ FieldChip::configure returned");
-        config
+        FieldChip::configure(meta, advice, instance, constant)
     }
 
     fn synthesize(

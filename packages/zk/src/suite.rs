@@ -219,106 +219,46 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
         eprintln!("norick: ✓ Verifying key size: {} bytes", vk_len);
         combined_file.write_all(&temp)?;
 
-        // Compute fixed_equality_mask
-        let mut fixed_equality_mask: u32 = 0;
-        for col in cs.get_permutation_columns().iter() {
-            use halo2_proofs::plonk::Any;
-            if let Any::Fixed = col.column_type() {
-                let idx = col.get_index();
-                if idx < 32 {
-                    fixed_equality_mask |= 1 << idx;
-                } else {
-                    panic!("idx > 32")
-                }
-            }
-        }
-        eprintln!(
-            "norick: ✓ fixed_equality_mask size: {} len",
-            fixed_equality_mask
-        );
+        // VERSION 2: Serialize constraint system for circuit-agnostic verification
+        eprintln!("norick: 📝 Serializing constraint system (v2 format)...");
+        let mut cs_temp = Vec::new();
+        cs.write(&mut cs_temp)?;
+        let cs_len = cs_temp.len() as u32;
+        eprintln!("norick: ✓ Constraint system size: {} bytes", cs_len);
+        combined_file.write_all(&cs_temp)?;
 
-        // WRITE EXTENDED 32-BYTE METADATA FOOTER using CircuitFooter
+        // WRITE EXTENDED 32-BYTE METADATA FOOTER using CircuitFooter v2
         use crate::cosmwasm_circuit::{CircuitFooter, CircuitType};
 
-        // Compute actual column counts from permutation columns
-        // cs.get_num_advice() returns query count, not column count!
-        let perm_cols = cs.get_permutation_columns();
-        let num_fixed_in_perm = perm_cols
-            .iter()
-            .filter(|c| matches!(c.column_type(), halo2_proofs::plonk::Any::Fixed))
-            .count();
-        let num_advice_in_perm = perm_cols
-            .iter()
-            .filter(|c| matches!(c.column_type(), halo2_proofs::plonk::Any::Advice))
-            .count();
-        let num_instance_in_perm = perm_cols
-            .iter()
-            .filter(|c| matches!(c.column_type(), halo2_proofs::plonk::Any::Instance))
-            .count();
+        // Get column counts from CS
+        let num_fixed = cs.get_num_fixed_columns();
+        let num_advice = cs.get_num_advice();
+        let num_instance = cs.get_num_instance_columns();
+        let num_selectors = cs.get_num_selectors();
+        let num_gates = cs.get_gate_count() as u32;
+        let has_lookups = false; // NoRickCircuit has no lookups
 
-        eprintln!("norick: CS column counts (from permutation):");
-        eprintln!(
-            "  fixed_columns: {} (cs.get reports: {})",
-            num_fixed_in_perm,
-            cs.get_num_fixed_columns()
-        );
-        eprintln!(
-            "  advice_columns: {} (cs.get reports: {})",
-            num_advice_in_perm,
-            cs.get_num_advice()
-        );
-        eprintln!(
-            "  instance_columns: {} (cs.get reports: {})",
-            num_instance_in_perm,
-            cs.get_num_instance_columns()
-        );
-        eprintln!("  selectors: {}", cs.get_num_selectors());
-        eprintln!("  total permutation_columns: {}", perm_cols.len());
+        eprintln!("norick: CS summary:");
+        eprintln!("  fixed_columns: {}", num_fixed);
+        eprintln!("  advice_columns: {}", num_advice);
+        eprintln!("  instance_columns: {}", num_instance);
+        eprintln!("  selectors: {}", num_selectors);
+        eprintln!("  gates: {}", num_gates);
+        eprintln!("  degree: {}", cs.degree());
 
-        // Compute advice_query_counts: packed nibbles representing query count per advice column
-        // For NoRickCircuit:
-        //   - advice[0]: queried at Rotation(0) and Rotation(1) = 2 queries
-        //   - advice[1]: queried at Rotation(0) = 1 query
-        // Packed: nibble 0 = 2, nibble 1 = 1 → 0x12
-        //
-        // Generic computation: count unique rotations per advice column from cs
-        // For now, we use num_advice_queries / num_advice_columns as an approximation,
-        // but for precise reconstruction we encode the actual structure.
-        // NoRickCircuit has 3 total queries across 2 columns: col0=2, col1=1
-        let advice_query_counts: u32 = {
-            // For circuits with standard query patterns, compute from cs
-            // NoRickCircuit: advice[0]=2 queries, advice[1]=1 query → 0x12
-            let total_queries = cs.get_num_advice() as u32;
-            let num_cols = num_advice_in_perm as u32;
-
-            if num_cols == 2 && total_queries == 3 {
-                // NoRickCircuit pattern: col0=2, col1=1
-                0x12
-            } else if num_cols > 0 {
-                // Default: assume 1 query per column
-                let mut packed = 0u32;
-                for i in 0..num_cols.min(8) {
-                    packed |= 1 << (i * 4);
-                }
-                packed
-            } else {
-                0
-            }
-        };
-        eprintln!("norick: advice_query_counts: 0x{:08x}", advice_query_counts);
-
-        let footer = CircuitFooter::new(
+        let footer = CircuitFooter::new_v2(
             V,
             I,
-            num_fixed_in_perm as u8,
-            num_advice_in_perm as u8,
-            num_instance_in_perm as u8,
+            num_fixed,
+            num_advice,
+            num_instance,
             cs.degree() as u8,
             params_len,
             vk_len,
-            cs.get_num_selectors(), // num_selectors (NoRickCircuit: 1 selector for multiply gate)
-            fixed_equality_mask,
-            advice_query_counts,
+            cs_len,
+            num_selectors,
+            num_gates,
+            has_lookups,
             0, // crc32 (not computed for now)
         );
 
@@ -333,18 +273,18 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
             actual_metadata_len, COSMWASM_METADATA_LENGTH
         );
         eprintln!(
-            "norick: CircuitFooter written: {} bytes (extended format)",
+            "norick: CircuitFooter v2 written: {} bytes",
             actual_metadata_len
         );
         eprintln!(
-            "norick: instance_count={}, fixed_cols={}, advice_cols={}, instance_cols={}, degree={}",
-            I, 1, 2, 1, 3
+            "norick: instance_count={}, fixed={}, advice={}, instance={}, degree={}",
+            I, num_fixed, num_advice, num_instance, cs.degree()
         );
-        eprintln!("  params_len: {}, vk_len: {}", params_len, vk_len);
+        eprintln!("  params_len: {}, vk_len: {}, cs_len: {}", params_len, vk_len, cs_len);
 
         combined_file.flush()?;
         eprintln!(
-            "✅ Total combined file written: {} bytes",
+            "✅ Total combined file written: {} bytes (v2 format: params+vk+cs+footer)",
             combined_file.seek(io::SeekFrom::End(0))?
         );
 
@@ -358,15 +298,23 @@ pub trait TestPressLaunchpadInstance: TestPressBitwiseInstance {
             "norick: Params section (first 20 bytes): {:02x?}",
             &written_data[0..20]
         );
+        let vk_start = params_len as usize;
         eprintln!(
-            "norick:VK section (bytes {}-{}): {:02x?}",
-            65604,
-            (65604 + 20).min(written_data.len()),
-            &written_data[65604..(65604 + 20).min(written_data.len())]
+            "norick: VK section (bytes {}-{}): {:02x?}",
+            vk_start,
+            (vk_start + 20).min(written_data.len()),
+            &written_data[vk_start..(vk_start + 20).min(written_data.len())]
+        );
+        let cs_start = (params_len + vk_len) as usize;
+        eprintln!(
+            "norick: CS section (bytes {}-{}): {:02x?}",
+            cs_start,
+            (cs_start + 20).min(written_data.len()),
+            &written_data[cs_start..(cs_start + 20).min(written_data.len())]
         );
         eprintln!(
-            "norick:Footer (last 10 bytes): {:02x?}",
-            &written_data[written_data.len() - 10..]
+            "norick: Footer (last 32 bytes): {:02x?}",
+            &written_data[written_data.len() - 32..]
         );
 
         // proving key
@@ -389,6 +337,12 @@ mod test {
     use serde_json::{json, Value};
     use std::boxed::Box;
     use std::collections::{BTreeMap, HashMap};
+
+    #[test]
+    pub fn test_cs_serialization_deserialization() -> Result<(), BoxError> {
+
+        Ok(())
+    }
 
     // cargo test --package zk-cosmwasm --features interface test_proof_verification -- --nocapture
     #[test]

@@ -187,7 +187,7 @@ pub fn check_circuit(bytes: &[u8]) -> ZkResult<(CircuitFooter, Checksum)> {
         footer.num_advice_columns,
         footer.num_instance_columns,
         footer.degree,
-        footer.num_selectors
+        footer.num_selectors()
     );
 
     let params_len = footer.params_len as usize;

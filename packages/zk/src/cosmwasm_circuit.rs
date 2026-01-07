@@ -13,13 +13,24 @@ use pasta_curves::vesta;
 /// Custom section name for embedded verifying keys
 /// Contracts can embed their VK in a WASM custom section with this name
 pub const VK_CUSTOM_SECTION_NAME: &str = "cosmwasm_zk_vk";
-pub const VK_VERSION: i32 = 0x01;
 
 /// Thread-safe handle to a pinned verifying key
 pub type PinnedCircuit = Arc<VerifyingKey>;
 
+/// Footer flags bit definitions
+pub mod footer_flags {
+    /// Constraint system section is present (must be 1 for version 2)
+    pub const HAS_CS: u8 = 0b0000_0001;
+    /// Circuit contains lookup arguments
+    pub const HAS_LOOKUPS: u8 = 0b0000_0010;
+}
+
 /// Circuit footer metadata - 32 bytes containing complete constraint system specification
 /// This enables generic deserialization via DynamicCircuit without needing the original circuit type
+///
+/// ## Version History
+/// - **Version 1**: Original format with fixed_equality_mask and advice_query_counts
+/// - **Version 2**: CS-inclusive format with cs_len and num_gates fields
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CircuitFooter {
     /// Circuit type identifier (currently only Plonkish=0)
@@ -34,36 +45,29 @@ pub struct CircuitFooter {
     pub num_instance_columns: u8,
     /// Maximum gate degree in the constraint system (typically 2-4)
     pub degree: u8,
-    /// Footer format version (currently 1)
+    /// Footer format version (1 = original, 2 = CS-inclusive)
     pub footer_version: u8,
-    /// Feature flags for compression, custom gates, etc.
+    /// Feature flags (bit 0: HAS_CS, bit 1: HAS_LOOKUPS)
     pub flags: u8,
     /// Length of serialized params section (u32 LE)
     pub params_len: u32,
     /// Length of serialized verifying key section (u32 LE)
     pub vk_len: u32,
-    /// Number of selectors in the constraint system
-    pub num_selectors: u32,
-    /// Bitmask indicating which fixed columns have equality enabled (i.e., are part of the copy permutation).
-    ///
-    /// Bit `i` is set if the `i`-th fixed column (in creation order) has `enable_equality` called on it.
-    /// This determines whether that fixed column is included in the permutation argument, which affects
-    /// the number and order of commitments in the verifying key. Only the first 32 fixed columns are supported
-    /// via this mask — sufficient for all practical CosmWasm circuits.
-    pub fixed_equality_mask: u32,
-    /// Packed advice query counts per column.
-    /// Each nibble (4 bits) represents the number of queries for that advice column.
-    /// Nibble 0 (bits 0-3) = column 0 query count
-    /// Nibble 1 (bits 4-7) = column 1 query count
-    /// ... up to 8 columns supported (columns 0-7)
-    /// Example: 0x12 means column 0 has 2 queries, column 1 has 1 query
-    pub advice_query_counts: u32,
-    /// CRC32 checksum of params+vk bytes (optional validation)
+    /// Version 2: Length of serialized constraint system section (u32 LE)
+    /// Version 1: Number of selectors in the constraint system
+    pub cs_len_or_num_selectors: u32,
+    /// Version 2: Number of selectors in the constraint system (quick reference)
+    /// Version 1: Bitmask indicating which fixed columns have equality enabled
+    pub num_selectors_or_fixed_mask: u32,
+    /// Version 2: Number of gates in the constraint system (quick reference)
+    /// Version 1: Packed advice query counts per column
+    pub num_gates_or_advice_counts: u32,
+    /// CRC32 checksum of params+vk+cs bytes (optional validation)
     pub crc32: u32,
 }
 
 impl CircuitFooter {
-    /// Create a new circuit footer
+    /// Create a new version 1 circuit footer (backward compatibility)
     pub fn new(
         circuit_type: CircuitType,
         instance_count: u8,
@@ -89,10 +93,103 @@ impl CircuitFooter {
             flags: 0,
             params_len,
             vk_len,
-            num_selectors,
-            fixed_equality_mask,
-            advice_query_counts,
+            cs_len_or_num_selectors: num_selectors,
+            num_selectors_or_fixed_mask: fixed_equality_mask,
+            num_gates_or_advice_counts: advice_query_counts,
             crc32,
+        }
+    }
+
+    /// Create a new version 2 circuit footer (CS-inclusive format)
+    pub fn new_v2(
+        circuit_type: CircuitType,
+        instance_count: u8,
+        num_fixed_columns: u8,
+        num_advice_columns: u8,
+        num_instance_columns: u8,
+        degree: u8,
+        params_len: u32,
+        vk_len: u32,
+        cs_len: u32,
+        num_selectors: u32,
+        num_gates: u32,
+        has_lookups: bool,
+        crc32: u32,
+    ) -> Self {
+        let mut flags = footer_flags::HAS_CS;
+        if has_lookups {
+            flags |= footer_flags::HAS_LOOKUPS;
+        }
+        Self {
+            circuit_type,
+            instance_count,
+            num_fixed_columns,
+            num_advice_columns,
+            num_instance_columns,
+            degree,
+            footer_version: 2,
+            flags,
+            params_len,
+            vk_len,
+            cs_len_or_num_selectors: cs_len,
+            num_selectors_or_fixed_mask: num_selectors,
+            num_gates_or_advice_counts: num_gates,
+            crc32,
+        }
+    }
+
+    /// Check if this footer is version 2 (CS-inclusive)
+    pub fn is_v2(&self) -> bool {
+        self.footer_version >= 2
+    }
+
+    /// Check if constraint system section is present
+    pub fn has_cs(&self) -> bool {
+        self.flags & footer_flags::HAS_CS != 0
+    }
+
+    /// Get the constraint system length (version 2 only)
+    pub fn cs_len(&self) -> Option<u32> {
+        if self.is_v2() {
+            Some(self.cs_len_or_num_selectors)
+        } else {
+            None
+        }
+    }
+
+    /// Get the number of selectors
+    pub fn num_selectors(&self) -> u32 {
+        if self.is_v2() {
+            self.num_selectors_or_fixed_mask
+        } else {
+            self.cs_len_or_num_selectors
+        }
+    }
+
+    /// Get the number of gates (version 2 only)
+    pub fn num_gates(&self) -> Option<u32> {
+        if self.is_v2() {
+            Some(self.num_gates_or_advice_counts)
+        } else {
+            None
+        }
+    }
+
+    /// Get the fixed equality mask (version 1 only)
+    pub fn fixed_equality_mask(&self) -> Option<u32> {
+        if !self.is_v2() {
+            Some(self.num_selectors_or_fixed_mask)
+        } else {
+            None
+        }
+    }
+
+    /// Get the advice query counts (version 1 only)
+    pub fn advice_query_counts(&self) -> Option<u32> {
+        if !self.is_v2() {
+            Some(self.num_gates_or_advice_counts)
+        } else {
+            None
         }
     }
 
@@ -109,9 +206,9 @@ impl CircuitFooter {
         bytes[7] = self.flags;
         bytes[8..12].copy_from_slice(&self.params_len.to_le_bytes());
         bytes[12..16].copy_from_slice(&self.vk_len.to_le_bytes());
-        bytes[16..20].copy_from_slice(&self.num_selectors.to_le_bytes());
-        bytes[20..24].copy_from_slice(&self.fixed_equality_mask.to_le_bytes());
-        bytes[24..28].copy_from_slice(&self.advice_query_counts.to_le_bytes());
+        bytes[16..20].copy_from_slice(&self.cs_len_or_num_selectors.to_le_bytes());
+        bytes[20..24].copy_from_slice(&self.num_selectors_or_fixed_mask.to_le_bytes());
+        bytes[24..28].copy_from_slice(&self.num_gates_or_advice_counts.to_le_bytes());
         bytes[28..32].copy_from_slice(&self.crc32.to_le_bytes());
         bytes
     }
@@ -129,9 +226,9 @@ impl CircuitFooter {
             .ok_or_else(|| ZkError::new_err("Invalid circuit type in footer"))?;
 
         let footer_version = bytes[6];
-        if footer_version != 1 {
+        if footer_version != 1 && footer_version != 2 {
             return Err(ZkError::new_err(format!(
-                "Unsupported footer version: {}",
+                "Unsupported footer version: {} (supported: 1, 2)",
                 footer_version
             )));
         }
@@ -147,9 +244,15 @@ impl CircuitFooter {
             flags: bytes[7],
             params_len: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
             vk_len: u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
-            num_selectors: u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]),
-            fixed_equality_mask: u32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]),
-            advice_query_counts: u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]),
+            cs_len_or_num_selectors: u32::from_le_bytes([
+                bytes[16], bytes[17], bytes[18], bytes[19],
+            ]),
+            num_selectors_or_fixed_mask: u32::from_le_bytes([
+                bytes[20], bytes[21], bytes[22], bytes[23],
+            ]),
+            num_gates_or_advice_counts: u32::from_le_bytes([
+                bytes[24], bytes[25], bytes[26], bytes[27],
+            ]),
             crc32: u32::from_le_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]),
         })
     }
@@ -243,9 +346,9 @@ impl DynamicCircuit {
             footer.num_fixed_columns,
             footer.num_advice_columns,
             footer.num_instance_columns,
-            footer.num_selectors,
-            footer.fixed_equality_mask,
-            footer.advice_query_counts,
+            footer.num_selectors(),
+            footer.fixed_equality_mask().unwrap_or(0),
+            footer.advice_query_counts().unwrap_or(0),
         )
     }
 
@@ -309,7 +412,6 @@ impl Circuit<vesta::Scalar> for DynamicCircuit {
         // - Selectors are NOT included here
         // - Equality is enabled selectively via fixed_equality_mask
         let mut fixed_cols = Vec::with_capacity(config.num_fixed_columns as usize);
-
         for i in 0..config.num_fixed_columns {
             let col = meta.fixed_column();
             // Enable equality on this fixed column if requested by the footer
@@ -604,12 +706,24 @@ pub struct VerifyingKey {
 
 impl VerifyingKey {
     /// Builds the verifying key from an existing VK.
+    /// WARNING: This creates new random params - only use for fresh key generation.
+    /// For deserialization, use `new_with_params` to preserve the original params.
     pub fn new(vk: plonk::VerifyingKey<vesta::Affine>, k: u32, i: usize) -> Self {
         VerifyingKey {
             params: poly::commitment::Params::new(k),
             vk,
             i,
         }
+    }
+
+    /// Builds the verifying key with existing params.
+    /// Use this when deserializing to preserve the original params used during proving.
+    pub fn new_with_params(
+        params: poly::commitment::Params<vesta::Affine>,
+        vk: plonk::VerifyingKey<vesta::Affine>,
+        i: usize,
+    ) -> Self {
+        VerifyingKey { params, vk, i }
     }
 
     /// Builds the verifying key from a concrete circuit.
@@ -696,8 +810,11 @@ impl VerifyingKey {
         ))
     }
 
-    /// Deserialize a VerifyingKey from raw bytes using DynamicCircuit
-    /// This works with ANY circuit - the constraint system structure is embedded in the footer
+    /// Deserialize a VerifyingKey from raw bytes
+    ///
+    /// Supports two formats:
+    /// - **Version 1**: `[params][vk][footer]` - uses DynamicCircuit to reconstruct CS
+    /// - **Version 2**: `[params][vk][cs][footer]` - uses serialized CS for circuit-agnostic verification
     pub fn from_bytes(bytes: &[u8]) -> ZkResult<Self> {
         eprintln!("📦 from_bytes called with {} bytes total", bytes.len());
 
@@ -712,7 +829,8 @@ impl VerifyingKey {
         let footer = CircuitFooter::from_bytes(footer_bytes)?;
 
         eprintln!(
-            "✓ Footer parsed: instance_count={}, fixed={}, advice={}, instance={}, degree={}",
+            "✓ Footer parsed: version={}, instance_count={}, fixed={}, advice={}, instance={}, degree={}",
+            footer.footer_version,
             footer.instance_count,
             footer.num_fixed_columns,
             footer.num_advice_columns,
@@ -723,7 +841,12 @@ impl VerifyingKey {
         let params_len = footer.params_len as usize;
         let vk_len = footer.vk_len as usize;
 
-        // Validate structure
+        // Handle version 2 with embedded constraint system
+        if footer.is_v2() && footer.has_cs() {
+            return Self::from_bytes_v2(bytes, &footer);
+        }
+
+        // Version 1: Validate structure for [params][vk][footer]
         if params_len + vk_len + 32 != bytes.len() {
             return Err(ZkError::new_err(format!(
                 "VK file size mismatch: {}+{}+32 != {}",
@@ -744,7 +867,7 @@ impl VerifyingKey {
         eprintln!("✓ Params deserialized (k={})", params.k());
 
         // Create DynamicCircuit from footer metadata
-        eprintln!("🔧 Creating DynamicCircuit from footer...");
+        eprintln!("🔧 Creating DynamicCircuit from footer (v1)...");
         let circuit = DynamicCircuit::from_footer(&footer);
 
         // RAII guard ensures cleanup even if deserialization panics
@@ -772,9 +895,90 @@ impl VerifyingKey {
         // Guard automatically cleans up when dropped at scope end
         drop(_guard);
 
-        Ok(VerifyingKey::new(
+        // IMPORTANT: Use new_with_params to preserve the deserialized params!
+        // Using new() would create new random params, causing verification to fail.
+        Ok(VerifyingKey::new_with_params(
+            params,
             vk,
-            params.k(),
+            footer.instance_count as usize,
+        ))
+    }
+
+    /// Deserialize a VerifyingKey from version 2 format with embedded constraint system
+    /// Format: `[params][vk][cs][footer]`
+    fn from_bytes_v2(bytes: &[u8], footer: &CircuitFooter) -> ZkResult<Self> {
+        eprintln!("📦 from_bytes_v2: using embedded constraint system");
+
+        let params_len = footer.params_len as usize;
+        let vk_len = footer.vk_len as usize;
+        let cs_len = footer
+            .cs_len()
+            .ok_or_else(|| ZkError::new_err("Version 2 footer missing cs_len"))?
+            as usize;
+
+        // Validate structure for [params][vk][cs][footer]
+        let expected_len = params_len + vk_len + cs_len + 32;
+        if expected_len != bytes.len() {
+            return Err(ZkError::new_err(format!(
+                "V2 file size mismatch: {}+{}+{}+32 = {} != {}",
+                params_len,
+                vk_len,
+                cs_len,
+                expected_len,
+                bytes.len()
+            )));
+        }
+
+        // Extract sections
+        let params_bytes = &bytes[..params_len];
+        let vk_bytes = &bytes[params_len..params_len + vk_len];
+        let cs_bytes = &bytes[params_len + vk_len..params_len + vk_len + cs_len];
+
+        // Deserialize params
+        eprintln!("🔄 Deserializing params ({} bytes)...", params_len);
+        let mut params_reader = Cursor::new(params_bytes);
+        let params = poly::commitment::Params::<vesta::Affine>::read(&mut params_reader)?;
+        eprintln!("✓ Params deserialized (k={})", params.k());
+
+        // Deserialize constraint system
+        eprintln!("🔧 Deserializing constraint system ({} bytes)...", cs_len);
+        let mut cs_reader = Cursor::new(cs_bytes);
+        let cs = ConstraintSystem::<vesta::Scalar>::read(&mut cs_reader)
+            .map_err(|e| ZkError::from_io(e))?;
+        eprintln!(
+            "✓ CS deserialized: gates={}, selectors={}",
+            cs.get_gate_count(),
+            cs.get_num_selectors()
+        );
+
+        // For now, we pass empty selectors - the actual selector assignments
+        // are in the VK's selector section
+        let empty_selectors: Vec<Vec<bool>> = vec![];
+
+        // Deserialize vk using the pre-built constraint system
+        eprintln!(
+            "🔑 Deserializing VK ({} bytes) with read_with_cs...",
+            vk_len
+        );
+        let mut vk_reader = Cursor::new(vk_bytes);
+        let vk = halo2_proofs::plonk::VerifyingKey::<vesta::Affine>::read_with_cs(
+            &mut vk_reader,
+            &params,
+            cs,
+            empty_selectors,
+        )
+        .map_err(|e| {
+            eprintln!("❌ VK deserialization failed: {:?}", e);
+            ZkError::from_io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{:?}", e),
+            ))
+        })?;
+        eprintln!("✓ VK deserialized successfully (v2)");
+
+        Ok(VerifyingKey::new_with_params(
+            params,
+            vk,
             footer.instance_count as usize,
         ))
     }
@@ -817,9 +1021,10 @@ impl VerifyingKey {
             &params,
         )?;
 
-        Ok(VerifyingKey::new(
+        // IMPORTANT: Use new_with_params to preserve the deserialized params!
+        Ok(VerifyingKey::new_with_params(
+            params,
             vk,
-            params.k(),
             footer.instance_count as usize,
         ))
     }
