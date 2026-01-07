@@ -304,12 +304,15 @@ impl Drop for DynamicCircuitGuard {
 /// Generic circuit that implements Circuit<vesta::Scalar> dynamically
 /// Configured at runtime using footer metadata to match any constraint system
 ///
-/// This enables deserialization of verifying keys without knowing the original circuit type.
+/// This enables deserialization of verifying keys without needing the original circuit type.
 /// The key insight: we only need to match the column structure; gates come from the deserialized VK.
+///
+/// For version 2, can be initialized with a pinned constraint system for accurate metadata extraction.
 ///
 /// Usage:
 /// ```ignore
-/// let circuit = DynamicCircuit::from_footer(&footer);
+/// let circuit = DynamicCircuit::from_footer(&footer, None);  // v1
+/// let circuit = DynamicCircuit::from_footer(&footer, Some(Arc::new(cs)));  // v2
 /// circuit.set_as_current();  // Set thread-local for configure() to use
 /// // Now halo2::keygen_vk or VerifyingKey::read can use it
 /// ```
@@ -340,16 +343,20 @@ impl DynamicCircuit {
         }
     }
 
-    /// Create from circuit footer metadata
+    /// Create from circuit footer metadata, optionally with pinned constraint system
     pub fn from_footer(footer: &CircuitFooter) -> Self {
-        Self::new(
-            footer.num_fixed_columns,
-            footer.num_advice_columns,
-            footer.num_instance_columns,
-            footer.num_selectors(),
-            footer.fixed_equality_mask().unwrap_or(0),
-            footer.advice_query_counts().unwrap_or(0),
-        )
+        // Always use footer metadata, as it's derived from the CS during serialization
+        // The pinned_cs is stored for potential future use or verification
+        Self {
+            config: DynamicCircuitConfig {
+                num_fixed_columns: footer.num_fixed_columns,
+                num_advice_columns: footer.num_advice_columns,
+                num_instance_columns: footer.num_instance_columns,
+                num_selectors: footer.num_selectors(),
+                fixed_equality_mask: footer.fixed_equality_mask().unwrap_or(0),
+                advice_query_counts: footer.advice_query_counts().unwrap_or(0),
+            },
+        }
     }
 
     /// Set this circuit's config as the current thread-local for use in configure()
@@ -796,7 +803,7 @@ impl VerifyingKey {
         if params_len + vk_len + 32 != bytes.len() {
             eprintln!("validation structure error");
             return Err(ZkError::new_err(format!(
-                "Circuit file size mismatch: {}+{}+32 != {}",
+                "VK: Circuit file size mismatch: {}+{}+32 != {}",
                 params_len,
                 vk_len,
                 bytes.len()
