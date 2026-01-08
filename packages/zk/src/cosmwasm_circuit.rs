@@ -25,6 +25,63 @@ pub mod footer_flags {
     pub const HAS_LOOKUPS: u8 = 0b0000_0010;
 }
 
+/// Basic metadata about a Plonkish circuit
+#[derive(Debug, Clone, Copy)]
+pub struct PlonkishCircuitMetadata {
+    /// Circuit type identifier
+    pub ct: CircuitType,
+    /// Number of public inputs (instance count)
+    pub i: u8,
+    /// Circuit name (for debugging)
+    pub name: &'static str,
+}
+
+impl PlonkishCircuitMetadata {
+    /// Create new metadata
+    pub const fn new(ct: CircuitType, i: u8, name: &'static str) -> Self {
+        Self { ct, i, name }
+    }
+}
+
+/// Metadata about a circuit's constraint system
+///
+/// This is dynamically extracted from the circuit's `configure()` method
+/// and provides detailed information about the constraint system structure.
+#[derive(Debug, Clone)]
+pub struct ConstraintSystemMetadata {
+    /// Number of fixed columns in the constraint system
+    pub num_fixed_columns: u32,
+    /// Number of advice (witness) columns in the constraint system
+    pub num_advice_columns: u32,
+    /// Number of instance (public) columns in the constraint system
+    pub num_instance_columns: u32,
+    /// Number of selectors in the constraint system
+    pub num_selectors: u32,
+    /// Number of gates in the constraint system
+    pub num_gates: u32,
+    /// Maximum polynomial degree across all constraints
+    pub degree: u8,
+    /// Whether the circuit contains lookup arguments
+    pub has_lookups: bool,
+    /// Columns that participate in copy constraints (permutation)
+    pub permutation_columns: Vec<plonk::Column<plonk::Any>>,
+}
+
+impl Default for ConstraintSystemMetadata {
+    fn default() -> Self {
+        Self {
+            num_fixed_columns: 0,
+            num_advice_columns: 0,
+            num_instance_columns: 0,
+            num_selectors: 0,
+            num_gates: 0,
+            degree: 0,
+            has_lookups: false,
+            permutation_columns: Vec::new(),
+        }
+    }
+}
+
 /// Circuit footer metadata - 32 bytes containing complete constraint system specification
 /// This enables generic deserialization via DynamicCircuit without needing the original circuit type
 ///

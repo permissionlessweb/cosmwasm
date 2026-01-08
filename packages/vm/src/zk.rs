@@ -4,9 +4,9 @@ use cosmwasm_std::Checksum;
 
 use halo2_proofs::COSMWASM_METADATA_LENGTH;
 pub use zk_cosmwasm::cosmwasm_circuit::{
-    CircuitFooter, CircuitType, CosmwasmCircuit, CosmwasmCircuitFor, DynamicCircuit,
-    DynamicCircuitConfig, PinnedCircuit, Proof, ProvingKey, SerializedPlonkishCircuitData,
-    VerifyingKey,
+    CircuitFooter, CircuitType, ConstraintSystemMetadata, CosmwasmCircuit, CosmwasmCircuitFor,
+    DynamicCircuit, DynamicCircuitConfig, PinnedCircuit, PlonkishCircuitMetadata, Proof,
+    ProvingKey, SerializedPlonkishCircuitData, VerifyingKey,
 };
 /// re-export zk-cosmwasm into vm library
 pub use zk_cosmwasm::*;
