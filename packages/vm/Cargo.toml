@@ -17,6 +17,11 @@ pre-release-replacements = [
     { file = "../../CHANGELOG.md", search = "<!-- next-url -->\n", replace = "<!-- next-url -->\n\n[unreleased]: https://github.com/CosmWasm/cosmwasm/compare/{{tag_name}}...HEAD", exactly = 1 },
 ]
 
+[package.metadata.optimizer]
+standard-build = true
+builds = [  { name = "cosmwasm-vm", default-features = true }]
+
+
 [features]
 default = ["iterator", "staking"]
 # iterator allows us to iterate over all DB items in a given range
@@ -69,11 +74,14 @@ dhat = { version = "0.3.3", optional = true }
 # wasmer-middlewares = { git = "https://github.com/wasmerio/wasmer", rev = "877ce1f7c44fad853c" }
 # wasmer = { path = "../../../wasmer/lib/api", default-features = false, features = ["singlepass"] }
 # wasmer-middlewares = { path = "../../../wasmer/lib/middlewares" }
+# halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
 
 halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
 zk-cosmwasm  = { workspace = true, features = ["interface"]  }
 
-# halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
+tracing = "0.1.38"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
+tracing-profile = "0.10.11"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
