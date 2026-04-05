@@ -52,7 +52,7 @@ cosmwasm-core = { workspace = true }
 cosmwasm-std = { workspace = true, features = ["std"] }
 cosmwasm-crypto = { workspace = true }
 cosmwasm-vm-derive = { workspace = true }
-derive_more = { version = "=1.0.0-beta.6", default-features = false, features = ["debug"] }
+derive_more = { version = "2.0.1", default-features = false, features = ["debug"] }
 hex = "0.4"
 rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { workspace = true }
