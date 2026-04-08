@@ -8,21 +8,20 @@ resolver = "2"
 version = "3.0.3-dev"
 
 [workspace.dependencies]
-cosmwasm-core = { path = "./packages/core" }
-cosmwasm-crypto = { path = "./packages/crypto" }
-cosmwasm-derive = { path = "./packages/derive" }
-cosmwasm-schema = { path = "./packages/schema" }
-cosmwasm-schema-derive = { path = "./packages/schema-derive" }
-cosmwasm-std = { path = "./packages/std", default-features = false }
-cosmwasm-vm = { path = "./packages/vm" }
-zk-cosmwasm = { path = "./packages/zk" }
+cosmwasm-core = { path = "../ZK/cw/zk-cosmwasm/packages/core" }
+cosmwasm-crypto = { path = "../ZK/cw/zk-cosmwasm/packages/crypto" }
+cosmwasm-derive = { path = "../ZK/cw/zk-cosmwasm/packages/derive" }
+cosmwasm-schema = { path = "../ZK/cw/zk-cosmwasm/packages/schema" }
+cosmwasm-schema-derive = { path = "../ZK/cw/zk-cosmwasm/packages/schema-derive" }
+cosmwasm-std = { path = "../ZK/cw/zk-cosmwasm/packages/std" }
+cosmwasm-vm = { path = "../ZK/cw/zk-cosmwasm/packages/vm" }
+zk-cosmwasm = { path = "../ZK/cw/zk-cosmwasm/packages/zk" }
 cosmwasm-vm-derive = { path = "./packages/vm-derive" }
-cw-schema = { path = "./packages/cw-schema" }
-cw-schema-derive = { path = "./packages/cw-schema-derive" }
+cw-schema = { path = "../ZK/cw/zk-cosmwasm/packages/cw-schema" }
+cw-schema-derive = { path = "../ZK/cw/zk-cosmwasm/packages/cw-schema-derive" }
 schemars = "0.8.4"
 serde = { version = "1.0.192", default-features = false, features = ["alloc", "derive"] }
 serde_json = "1.0.140"
 thiserror = "1.0.26"
 
-#zk-test-press = { path = "../../TERPNETWORK/zk-airdrop/genesis-sinsemilla/test-press" }
-zk-test-press = { git = "https:://github.com/hard-nett/airdrop", branch = "genesis-sinsemilla", package = "zk-test-press" }
+zk-test-press = { path = "../ZK/terp-rs/crates/zk/headstash/test-press" }
