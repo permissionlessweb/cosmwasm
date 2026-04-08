@@ -101,6 +101,21 @@ extern "C" {
     /// greater than 1 in case of error.
     fn ed25519_batch_verify(messages_ptr: u32, signatures_ptr: u32, public_keys_ptr: u32) -> u32;
 
+    /// Verifies proof bytes for a set of public instances using a circuit's verifying key.
+    /// The circuit is fetched from the x/wasm module using zkid via StargateQuery.
+    /// zkid: the circuit ID (u32 that will be cast to u64 on Go side)
+    /// proof_ptr: pointer to proof bytes in Wasm memory
+    /// proof_len: length of proof bytes
+    /// i_ptr: pointer to instance bytes in Wasm memory
+    /// i_len: length of instance bytes
+    fn halo2_proof_instance_verify(
+        zkid: u32,
+        proof_ptr: u32,
+        proof_len: u32,
+        i_ptr: u32,
+        i_len: u32,
+    ) -> u32;
+
     /// Writes a debug message (UTF-8 encoded) to the host for debugging purposes.
     /// The host is free to log or process this in any way it considers appropriate.
     /// In production environments it is expected that those messages are discarded.
@@ -703,6 +718,50 @@ impl Api for ExternalApi {
             4 => Err(VerificationError::InvalidSignatureFormat),
             5 => Err(VerificationError::InvalidPubkeyFormat),
             10 => Err(VerificationError::GenericErr),
+            error_code => Err(VerificationError::unknown_err(error_code)),
+        }
+    }
+
+    fn halo2_proof_instance_verify(
+        &self,
+        zkid: u64,
+        proof: &[u8],
+        i: &[u8],
+    ) -> Result<bool, VerificationError> {
+        // The handler fetches the circuit VK from the x/wasm module using a StargateQuery.
+        // This avoids storing circuit bytes in each contract's state.
+        //
+        // Usage flow:
+        // 1. Circuit is uploaded to x/wasm module and assigned a zkid
+        // 2. Contract calls this function with zkid, proof, and instances
+        // 3. Handler queries x/wasm module for circuit bytes using zkid
+        // 4. Handler verifies the proof with the fetched VK
+
+        // Convert proof to Wasm memory region
+        let proof_send = Region::from_slice(proof);
+        let proof_send_ptr = proof_send.as_ptr() as u32;
+        let proof_len = proof.len() as u32;
+
+        // Convert instances to Wasm memory region
+        let instances_send = Region::from_slice(i);
+        let i_send_ptr = instances_send.as_ptr() as u32;
+        let i_len = i.len() as u32;
+
+        // Call FFI with zkid (as u32), proof, and instances
+        // zkid is passed directly as u32 (safe since zkid sequence won't exceed u32 range)
+        let result = unsafe {
+            halo2_proof_instance_verify(
+                zkid as u32,    // ← Circuit ID (cast to u64 on Go side)
+                proof_send_ptr, // ← Pointer to proof bytes
+                proof_len,
+                i_send_ptr,     // ← Pointer to instances bytes
+                i_len,
+            )
+        };
+
+        match result {
+            0 => Ok(true),
+            1 => Ok(false),
             error_code => Err(VerificationError::unknown_err(error_code)),
         }
     }

@@ -3,6 +3,7 @@ use std::fmt::{Debug, Display};
 use thiserror::Error;
 
 use cosmwasm_crypto::CryptoError;
+use zk_cosmwasm::ZkError;
 
 use super::communication_error::CommunicationError;
 use crate::backend::BackendError;
@@ -30,6 +31,8 @@ pub enum VmError {
         input: String,
         backtrace: BT,
     },
+    #[error("ZkError error: {}", source)]
+    ZkError { source: ZkError, backtrace: BT },
     #[error("Crypto error: {}", source)]
     CryptoErr { source: CryptoError, backtrace: BT },
     #[error("Ran out of gas during contract execution")]
@@ -140,6 +143,12 @@ impl VmError {
 
     pub(crate) fn crypto_err(original: CryptoError) -> Self {
         VmError::CryptoErr {
+            source: original,
+            backtrace: BT::capture(),
+        }
+    }
+    pub(crate) fn zk_err(original: ZkError) -> Self {
+        VmError::ZkError {
             source: original,
             backtrace: BT::capture(),
         }
@@ -273,6 +282,12 @@ impl From<BackendError> for VmError {
 impl From<CryptoError> for VmError {
     fn from(original: CryptoError) -> Self {
         VmError::crypto_err(original)
+    }
+}
+
+impl From<ZkError> for VmError {
+    fn from(original: ZkError) -> Self {
+        VmError::zk_err(original)
     }
 }
 

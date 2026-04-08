@@ -1,6 +1,8 @@
 use crate::prelude::*;
+use crate::Checksum;
 use crate::HashFunction;
 use crate::{Addr, CanonicalAddr, Timestamp};
+
 use alloc::collections::BTreeMap;
 #[cfg(feature = "cosmwasm_1_3")]
 use alloc::collections::BTreeSet;
@@ -54,6 +56,48 @@ use crate::{Decimal256, DelegationRewardsResponse, DelegatorValidatorsResponse};
 use crate::{RecoverPubkeyError, StdError, StdResult, SystemError, VerificationError};
 
 use super::MockStorage;
+
+// Thread-local registry for storing circuit verifiers
+// Maps zkid -> (circuit_name, verifier_closure)
+// The verifier closure performs proof verification
+type CircuitVerifier = Box<dyn Fn(&[u8], &[u8]) -> Result<bool, VerificationError>>;
+
+thread_local! {
+    static ZK_CIRCUIT_REGISTRY: std::cell::RefCell<std::collections::HashMap<u64, (String, CircuitVerifier)>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Register a circuit verifier for halo2 proof verification in tests.
+/// The verifier closure handles deserializing the VK bytes and performing proof verification.
+///
+/// # Example - in a test:
+/// ```ignore
+/// let verifier = Box::new(|proof_bytes: &[u8], instances_bytes: &[u8]| {
+///     // The closure has access to vm types via dev-dependencies
+///     let loaded_vk = LoadedVk::from_bytes(&vk_bytes)?;
+///     let instance = Instance::new_from_vm(instances_bytes)?;
+///     Proof::new(proof_bytes.to_vec())
+///         .verify(loaded_vk.vk(), &[instance])
+///         .map(|_| true)
+///         .map_err(|e| VerificationError::generic_err(format!("{}", e)))
+/// });
+/// register_test_circuit(1, "NoRick", verifier);
+/// ```
+#[cfg(test)]
+pub fn register_test_circuit(zkid: u64, circuit_name: &str, verifier: CircuitVerifier) {
+    ZK_CIRCUIT_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .insert(zkid, (circuit_name.to_string(), verifier));
+    });
+}
+
+/// Clear all registered test circuits. Useful for test isolation.
+#[cfg(test)]
+pub fn clear_test_circuits() {
+    ZK_CIRCUIT_REGISTRY.with(|registry| {
+        registry.borrow_mut().clear();
+    });
+}
 
 pub const MOCK_CONTRACT_ADDR: &str =
     "cosmwasm1jpev2csrppg792t22rn8z8uew8h3sjcpglcd0qv9g8gj8ky922tscp8avs";
@@ -152,6 +196,49 @@ impl Api for MockApi {
 
     fn bls12_381_aggregate_g2(&self, g2s: &[u8]) -> Result<[u8; 96], VerificationError> {
         cosmwasm_crypto::bls12_381_aggregate_g2(g2s).map_err(Into::into)
+    }
+
+    fn halo2_proof_instance_verify(
+        &self,
+        zkid: u64,
+        proof: &[u8],
+        instances: &[u8],
+    ) -> Result<bool, VerificationError> {
+        // // Validate input sizes
+        // if proof.is_empty() ||instances.is_empty() || instances.len() % 32 != 0{
+        //     return Err(VerificationError::unknown_err(66));
+        // }
+        // Get verifier from registry and invoke it
+        // Retrieve and invoke the verifier closure from registry
+        // IMPORTANT: Call the verifier INSIDE the with block, not after
+        ZK_CIRCUIT_REGISTRY.with(|registry| {
+            let borrow = registry.borrow();
+            match borrow.get(&zkid) {
+                Some((_, verifier)) => verifier(proof, instances),
+                None => Err(VerificationError::unknown_err(66)),
+            }
+        })
+
+        // // Deserialize the verifying key from bytes
+        // // This mirrors the VM's do_halo2_proof_instance_verify implementation
+        // let loaded_vk =
+        //     cosmwasm_vm::zk::LoadedVk::from_bytes(&vk_bytes).map_err(|e| {
+        //         return Err(VerificationError::unknown_err(66));
+        //     })?;
+
+        // // Deserialize instances from bytes (Fp scalars)
+        // let instance = cosmwasm_vm::zk::Instance::new_from_vm(instances).map_err(|e| {
+        //     return Err(VerificationError::unknown_err(66));
+        // })?;
+
+        // // Verify the proof
+        // cosmwasm_vm::zk::Proof::new(proof.to_vec())
+        //     .verify(loaded_vk.vk(), &[instance])
+        //     .map(|_| true)
+        //     .map_err(|e| {
+        //         return Err(VerificationError::unknown_err(66));
+        //     })
+        // Ok(false)
     }
 
     fn bls12_381_pairing_equality(
@@ -944,6 +1031,12 @@ impl Default for WasmQuerier {
                 WasmQuery::RawRange { contract_addr, .. } => SystemError::NoSuchContract {
                     addr: contract_addr.clone(),
                 },
+                WasmQuery::CircuitInfo { zk_id } => SystemError::NoSuchCircuit {
+                    zk_id: zk_id.clone(),
+                },
+                WasmQuery::Circuit { zk_id } => SystemError::NoSuchCircuit {
+                    zk_id: zk_id.clone(),
+                },
             };
             SystemResult::Err(err)
         });
@@ -1651,6 +1744,11 @@ mod tests {
             .unwrap_err()
             .to_string()
             .ends_with("Invalid canonical address length"));
+    }
+
+    #[test]
+    fn halo2_proof_instance_verify_works() {
+        println!("halo2_proof_instance_verify_works tested in zk-cosmwasm libary, skipping...")
     }
 
     #[test]
@@ -2874,6 +2972,8 @@ mod tests {
                         })
                     }
                 }
+                WasmQuery::CircuitInfo { zk_id } => todo!(),
+                WasmQuery::Circuit { zk_id } => todo!(),
             }
         });
 

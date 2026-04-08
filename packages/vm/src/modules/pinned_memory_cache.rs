@@ -12,10 +12,19 @@ pub struct InstrumentedModule {
     /// The actual cached module
     pub module: CachedModule,
 }
+/// Struct storing some additional metadata, which is only of interest for the pinned cache,
+/// alongside the cached module.
+pub struct InstrumentedCircuit {
+    /// Number of loads from memory this module received
+    pub hits: u32,
+    /// The actual cached module
+    pub circuit: zk_cosmwasm::PinnedCircuit,
+}
 
 /// An pinned in memory module cache
 pub struct PinnedMemoryCache {
     modules: HashMap<Checksum, InstrumentedModule>,
+    circuits: HashMap<Checksum, InstrumentedCircuit>,
 }
 
 impl PinnedMemoryCache {
@@ -23,6 +32,7 @@ impl PinnedMemoryCache {
     pub fn new() -> Self {
         PinnedMemoryCache {
             modules: HashMap::new(),
+            circuits: HashMap::new(),
         }
     }
 
@@ -42,10 +52,27 @@ impl PinnedMemoryCache {
         Ok(())
     }
 
+    pub fn store_circuit(
+        &mut self,
+        checksum: &Checksum,
+        circuit: zk_cosmwasm::PinnedCircuit,
+    ) -> VmResult<()> {
+        self.circuits
+            .insert(*checksum, InstrumentedCircuit { hits: 0, circuit });
+        Ok(())
+    }
+
     /// Removes a module from the cache
     /// Not found modules are silently ignored. Potential integrity errors (wrong checksum) are not checked / enforced
-    pub fn remove(&mut self, checksum: &Checksum) -> VmResult<()> {
-        self.modules.remove(checksum);
+    pub fn remove(&mut self, checksum: &Checksum, zk: bool) -> VmResult<()> {
+        match zk {
+            true => {
+                self.circuits.remove(checksum);
+            }
+            false => {
+                self.modules.remove(checksum);
+            }
+        };
         Ok(())
     }
 
@@ -59,26 +86,52 @@ impl PinnedMemoryCache {
             None => Ok(None),
         }
     }
+    /// Looks up a module in the cache and creates a new module
+    pub fn load_circuit(
+        &mut self,
+        checksum: &Checksum,
+    ) -> VmResult<Option<zk_cosmwasm::PinnedCircuit>> {
+        match self.circuits.get_mut(checksum) {
+            Some(cached) => {
+                cached.hits = cached.hits.saturating_add(1);
+                Ok(Some(cached.circuit.clone()))
+            }
+            None => Ok(None),
+        }
+    }
 
     /// Returns true if and only if this cache has an entry identified by the given checksum
-    pub fn has(&self, checksum: &Checksum) -> bool {
-        self.modules.contains_key(checksum)
+    pub fn has(&self, checksum: &Checksum, zk: bool) -> bool {
+        match zk {
+            true => self.circuits.contains_key(checksum),
+            false => self.modules.contains_key(checksum),
+        }
     }
 
     /// Returns the number of elements in the cache.
     pub fn len(&self) -> usize {
-        self.modules.len()
+        self.circuits.len() + self.modules.len()
     }
-
     /// Returns cumulative size of all elements in the cache.
     ///
     /// This is based on the values provided with `store`. No actual
     /// memory size is measured here.
     pub fn size(&self) -> usize {
-        self.modules
+        // Sum module sizes: key (address) + module size estimate
+        let module_size: usize = self
+            .modules
             .iter()
             .map(|(key, module)| std::mem::size_of_val(key) + module.module.size_estimate)
-            .sum()
+            .sum();
+
+        // Sum circuit sizes: key (address) + circuit actual size
+        let circuit_size: usize = self
+            .circuits
+            .iter()
+            .map(|(key, zk)| std::mem::size_of_val(key) + zk.circuit.actual_size_bytes())
+            .sum();
+
+        module_size + circuit_size
     }
 }
 
@@ -169,7 +222,7 @@ mod tests {
         .unwrap();
         let checksum = Checksum::generate(&wasm);
 
-        assert!(!cache.has(&checksum));
+        assert!(!cache.has(&checksum, false));
 
         // Add
         let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
@@ -181,12 +234,12 @@ mod tests {
         };
         cache.store(&checksum, module).unwrap();
 
-        assert!(cache.has(&checksum));
+        assert!(cache.has(&checksum, false));
 
         // Remove
-        cache.remove(&checksum).unwrap();
+        cache.remove(&checksum, false).unwrap();
 
-        assert!(!cache.has(&checksum));
+        assert!(!cache.has(&checksum, false));
     }
 
     #[test]
@@ -206,7 +259,7 @@ mod tests {
         .unwrap();
         let checksum = Checksum::generate(&wasm);
 
-        assert!(!cache.has(&checksum));
+        assert!(!cache.has(&checksum, false));
 
         // Add
         let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
@@ -266,7 +319,7 @@ mod tests {
         assert_eq!(cache.len(), 1);
 
         // Remove
-        cache.remove(&checksum).unwrap();
+        cache.remove(&checksum, false).unwrap();
 
         assert_eq!(cache.len(), 0);
     }
@@ -322,11 +375,11 @@ mod tests {
         assert_eq!(cache.size(), 532 + 332);
 
         // Remove 1
-        cache.remove(&checksum1).unwrap();
+        cache.remove(&checksum1, false).unwrap();
         assert_eq!(cache.size(), 332);
 
         // Remove 2
-        cache.remove(&checksum2).unwrap();
+        cache.remove(&checksum2, false).unwrap();
         assert_eq!(cache.size(), 0);
     }
 }

@@ -12,6 +12,7 @@ use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, M
 
 use crate::backend::{BackendApi, GasInfo, Querier, Storage};
 use crate::errors::{VmError, VmResult};
+use cosmwasm_std::Checksum;
 
 /// Keep this as low as necessary to avoid deepy nested errors like this:
 ///
@@ -55,6 +56,8 @@ pub struct GasConfig {
     pub bls12_381_hash_to_g2_cost: u64,
     /// bls12-381 pairing equality check cost
     pub bls12_381_pairing_equality_cost: LinearGasCost,
+    /// halo2 proof verification cost
+    pub halo2_proof_instance_verify_cost: LinearGasCost,
     /// cost for writing memory regions
     pub write_region_cost: LinearGasCost,
     /// cost for reading memory regions <= 8MB
@@ -106,6 +109,10 @@ impl Default for GasConfig {
             bls12_381_pairing_equality_cost: LinearGasCost {
                 base: 2112 * GAS_PER_US,
                 per_item: 163 * GAS_PER_US,
+            },
+            halo2_proof_instance_verify_cost: LinearGasCost {
+                base: 1000,
+                per_item: 163,
             },
             write_region_cost: LinearGasCost {
                 base: 230000,
@@ -234,6 +241,10 @@ impl<A: BackendApi, S: Storage, Q: Querier> Clone for Environment<A, S, Q> {
 
 impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
     pub fn new(api: A, gas_limit: u64) -> Self {
+        Self::new_with_vk(api, gas_limit)
+    }
+
+    pub fn new_with_vk(api: A, gas_limit: u64) -> Self {
         Environment {
             memory: None,
             api,
@@ -495,6 +506,59 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
             (context_data.storage.take(), context_data.querier.take())
         })
     }
+
+    /// Query storage to get `zkid → checksum` mapping
+    ///
+    /// Resolves a zkid to its corresponding checksum in app state
+    /// The checksum mapping is stored by the application layer during store_circuit
+    pub fn resolve_zkid_to_checksum(&self, zkid: u32) -> Option<Checksum> {
+        let zkid_key = zkid.to_le_bytes();
+        eprintln!(
+            "[halo2] [5] Looking up zkid {} with key: {:02x?}",
+            zkid, zkid_key
+        );
+
+        // storage.get() returns BackendResult which is (Result<..>, GasInfo)
+        let (result, _gas_info) = self
+            .with_storage_from_context(|storage| {
+                eprintln!("[halo2] [5] Querying storage for zkid→checksum mapping...");
+                Ok(storage.get(&zkid_key))
+            })
+            .ok()?;
+
+        // Extract the Option<Vec<u8>> from the Result
+        let bytes_opt = match result {
+            Ok(opt) => {
+                eprintln!(
+                    "[halo2] [5] Storage query returned: {:?}",
+                    opt.as_ref().map(|b| format!("{} bytes", b.len()))
+                );
+                opt
+            }
+            Err(e) => {
+                eprintln!("[halo2] [5] ✗ Storage error: {}", e);
+                return None;
+            }
+        };
+
+        // Checksum is 32 bytes (256-bit hash)
+        bytes_opt.and_then(|bytes| {
+            if bytes.len() == 32 {
+                eprintln!(
+                    "[halo2] [5] ✓ Found checksum for zkid {}: {}",
+                    zkid,
+                    hex::encode(&bytes)
+                );
+                Some(Checksum::from(<[u8; 32]>::try_from(&bytes[..]).ok()?))
+            } else {
+                eprintln!(
+                    "[halo2] [5] ✗ Invalid checksum length: expected 32, got {}",
+                    bytes.len()
+                );
+                None
+            }
+        })
+    }
 }
 
 pub struct ContextData<S, Q> {
@@ -557,6 +621,7 @@ mod tests {
     use crate::wasm_backend::{compile, make_compiling_engine};
     use cosmwasm_std::{
         coin, coins, from_json, to_json_vec, BalanceResponse, BankQuery, Empty, QueryRequest,
+        WasmQuery,
     };
     use wasmer::{imports, Function, Instance as WasmerInstance, Store};
 
@@ -1003,6 +1068,28 @@ mod tests {
                     address: INIT_ADDR.to_string(),
                     denom: INIT_DENOM.to_string(),
                 });
+                let (result, _gas_info) =
+                    querier.query_raw(&to_json_vec(&req).unwrap(), DEFAULT_QUERY_GAS_LIMIT);
+                Ok(result.unwrap())
+            })
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let balance: BalanceResponse = from_json(res).unwrap();
+
+        assert_eq!(balance.amount, coin(INIT_AMOUNT, INIT_DENOM));
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn with_querier_from_context_works_for_cirucits() {
+        let (env, _store, _instance) = make_instance(TESTING_GAS_LIMIT);
+        leave_default_data(&env);
+
+        let res = env
+            .with_querier_from_context::<_, _>(|querier| {
+                let req: QueryRequest<Empty> =
+                    QueryRequest::Wasm(WasmQuery::CircuitInfo { zk_id: 1 });
                 let (result, _gas_info) =
                     querier.query_raw(&to_json_vec(&req).unwrap(), DEFAULT_QUERY_GAS_LIMIT);
                 Ok(result.unwrap())

@@ -311,7 +311,7 @@ fn bench_cache(c: &mut Criterion) {
         let cache: Cache<MockApi, MockStorage, MockQuerier> =
             unsafe { Cache::new(options.clone()).unwrap() };
         // Load into pinned memory
-        cache.pin(&checksum).unwrap();
+        cache.pin(&checksum, false).unwrap();
 
         b.iter(|| {
             let backend = mock_backend(&[]);
@@ -488,7 +488,7 @@ fn bench_combined(c: &mut Criterion) {
             unsafe { Cache::new(options.clone()).unwrap() };
 
         // Load into pinned memory
-        cache.pin(&checksum).unwrap();
+        cache.pin(&checksum, true).unwrap();
 
         b.iter(|| {
             let backend = mock_backend(&[]);

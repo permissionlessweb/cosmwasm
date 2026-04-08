@@ -65,6 +65,12 @@ pub enum WasmQuery {
         /// The order in which you want to receive the key-value pairs.
         order: crate::Order,
     },
+    /// Returns a [`CircuitInfoResponse`] with metadata of the code
+    // #[cfg(feature = "cosmwasm_3_0")]
+    CircuitInfo { zk_id: u64 },
+    /// Returns a [`CircuitResponse`] with metadata of the code
+    // #[cfg(feature = "cosmwasm_3_0")]
+    Circuit { zk_id: u64 },
 }
 
 impl WasmQuery {
@@ -152,6 +158,56 @@ impl_hidden_constructor!(
 
 impl QueryResponseType for CodeInfoResponse {}
 
+/// The essential data from wasmd's [Circuit]/[CircuitResponse].
+///
+/// `code_hash`/`data_hash` was renamed to `checksum` to follow the CosmWasm
+/// convention and naming in `instantiate2_address`.
+///
+/// [CircuitInfo]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/types.proto#L62-L72
+/// [CircuitInfoResponse]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/query.proto#L184-L199
+#[non_exhaustive]
+#[derive(
+    Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema, cw_schema::Schemaifier,
+)]
+pub struct CircuitResponse {
+    pub data: Binary,
+}
+
+impl_hidden_constructor!(
+    CircuitResponse,
+    data: Binary
+);
+
+impl QueryResponseType for CircuitResponse {}
+
+/// The essential data from wasmd's [CircuitInfo]/[CircuitInfoResponse].
+///
+/// `code_hash`/`data_hash` was renamed to `checksum` to follow the CosmWasm
+/// convention and naming in `instantiate2_address`.
+///
+/// [CircuitInfo]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/types.proto#L62-L72
+/// [CircuitInfoResponse]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/query.proto#L184-L199
+#[non_exhaustive]
+#[derive(
+    Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema, cw_schema::Schemaifier,
+)]
+pub struct CircuitInfoResponse {
+    pub zk_id: u64,
+    /// The address that initially stored the code
+    pub creator: Addr,
+    /// The hash of the Wasm blob
+    pub checksum: Checksum,
+}
+
+impl_hidden_constructor!(
+    CircuitInfoResponse,
+    zk_id: u64,
+    creator: Addr,
+    checksum: Checksum
+);
+
+impl QueryResponseType for CircuitInfoResponse {}
+
 #[non_exhaustive]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 pub struct RawRangeResponse {
@@ -231,6 +287,25 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&json),
             r#"{"code_id":67,"creator":"jane","checksum":"f7bb7b18fb01bbf425cf4ed2cd4b7fb26a019a7fc75a4dc87e8a0b768c501f00"}"#,
+        );
+    }
+    #[test]
+    #[cfg(feature = "cosmwasm_3_0")]
+    fn circuit_info_response_serialization() {
+        use crate::Checksum;
+
+        let response = CircuitInfoResponse {
+            zk_id: 67,
+            creator: Addr::unchecked("jane"),
+            checksum: Checksum::from_hex(
+                "f7bb7b18fb01bbf425cf4ed2cd4b7fb26a019a7fc75a4dc87e8a0b768c501f00",
+            )
+            .unwrap(),
+        };
+        let json = to_json_binary(&response).unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&json),
+            r#"{"zk_id":67,"creator":"jane","checksum":"f7bb7b18fb01bbf425cf4ed2cd4b7fb26a019a7fc75a4dc87e8a0b768c501f00"}"#,
         );
     }
 

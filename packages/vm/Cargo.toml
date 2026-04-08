@@ -17,6 +17,11 @@ pre-release-replacements = [
     { file = "../../CHANGELOG.md", search = "<!-- next-url -->\n", replace = "<!-- next-url -->\n\n[unreleased]: https://github.com/CosmWasm/cosmwasm/compare/{{tag_name}}...HEAD", exactly = 1 },
 ]
 
+[package.metadata.optimizer]
+standard-build = true
+builds = [  { name = "cosmwasm-vm", default-features = true }]
+
+
 [features]
 default = ["iterator", "staking"]
 # iterator allows us to iterate over all DB items in a given range
@@ -38,7 +43,6 @@ ibc2 = ["cosmwasm-std/ibc2"]
 bench = false
 
 [dependencies]
-bytes = "1.4.0"     # need a higher version than the one required by Wasmer for the Bytes -> Vec<u8> implementation
 clru = "0.6.1"
 crc32fast = "1.3.2"
 bech32 = "0.11.0"
@@ -48,7 +52,7 @@ cosmwasm-core = { workspace = true }
 cosmwasm-std = { workspace = true, features = ["std"] }
 cosmwasm-crypto = { workspace = true }
 cosmwasm-vm-derive = { workspace = true }
-derive_more = { version = "=1.0.0-beta.6", default-features = false, features = ["debug"] }
+derive_more = { version = "2.0.1", default-features = false, features = ["debug"] }
 hex = "0.4"
 rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { workspace = true }
@@ -59,19 +63,25 @@ thiserror = "1.0.26"
 wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass"] }
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
+rand = "0.8"
 strum = { version = "0.26.2", default-features = false, features = ["derive"] }
 # For heap profiling. Only used in the "heap_profiling" example. This has to be a non-dev dependency
 # because cargo currently does not support optional dev-dependencies.
 dhat = { version = "0.3.3", optional = true }
-
-# Dependencies that we do not use ourselves. We add those entries to bump the min version of them.
-tracing = "0.1.32"
 
 # Wasmer git/local (used for quick local debugging or patching)
 # wasmer = { git = "https://github.com/wasmerio/wasmer", rev = "877ce1f7c44fad853c", default-features = false, features = ["singlepass"] }
 # wasmer-middlewares = { git = "https://github.com/wasmerio/wasmer", rev = "877ce1f7c44fad853c" }
 # wasmer = { path = "../../../wasmer/lib/api", default-features = false, features = ["singlepass"] }
 # wasmer-middlewares = { path = "../../../wasmer/lib/middlewares" }
+# halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
+
+halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
+zk-cosmwasm  = { workspace = true, features = ["interface"]  }
+
+tracing = "0.1.38"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
+tracing-profile = "0.10.11"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }

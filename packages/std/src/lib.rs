@@ -50,7 +50,6 @@ mod utils;
 
 /// This module is to simplify no_std imports
 pub(crate) mod prelude;
-
 /// This modules is very advanced and will not be used directly by the vast majority of users.
 /// We want to offer it to ensure a stable storage key composition system but don't encourage
 /// contract devs to use it directly.
@@ -99,12 +98,13 @@ pub use crate::never::Never;
 pub use crate::pagination::PageRequest;
 pub use crate::query::{
     AllDelegationsResponse, AllDenomMetadataResponse, AllValidatorsResponse, BalanceResponse,
-    BankQuery, BondedDenomResponse, ChannelResponse, CodeInfoResponse, ContractInfoResponse,
-    CustomQuery, DecCoin, Delegation, DelegationResponse, DelegationRewardsResponse,
-    DelegationTotalRewardsResponse, DelegatorReward, DelegatorValidatorsResponse,
-    DelegatorWithdrawAddressResponse, DenomMetadataResponse, DistributionQuery, FullDelegation,
-    GrpcQuery, IbcQuery, PortIdResponse, QueryRequest, RawRangeEntry, RawRangeResponse,
-    StakingQuery, SupplyResponse, Validator, ValidatorMetadata, ValidatorResponse, WasmQuery,
+    BankQuery, BondedDenomResponse, ChannelResponse, CircuitInfoResponse, CircuitResponse,
+    CodeInfoResponse, ContractInfoResponse, CustomQuery, DecCoin, Delegation, DelegationResponse,
+    DelegationRewardsResponse, DelegationTotalRewardsResponse, DelegatorReward,
+    DelegatorValidatorsResponse, DelegatorWithdrawAddressResponse, DenomMetadataResponse,
+    DistributionQuery, FullDelegation, GrpcQuery, IbcQuery, PortIdResponse, QueryRequest,
+    RawRangeEntry, RawRangeResponse, StakingQuery, SupplyResponse, Validator, ValidatorMetadata,
+    ValidatorResponse, WasmQuery,
 };
 
 #[cfg(all(feature = "stargate", feature = "cosmwasm_1_2"))]

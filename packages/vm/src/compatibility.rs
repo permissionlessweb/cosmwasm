@@ -32,6 +32,7 @@ const SUPPORTED_IMPORTS: &[&str] = &[
     "env.secp256r1_recover_pubkey",
     "env.ed25519_verify",
     "env.ed25519_batch_verify",
+    "env.halo2_proof_instance_verify",
     "env.debug",
     "env.query_chain",
     #[cfg(feature = "iterator")]

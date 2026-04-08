@@ -11,11 +11,13 @@ use cosmwasm_crypto::{
 use cosmwasm_crypto::{
     ECDSA_PUBKEY_MAX_LEN, ECDSA_SIGNATURE_LEN, EDDSA_PUBKEY_LEN, MESSAGE_HASH_MAX_LEN,
 };
+use cosmwasm_std::{Checksum, CircuitResponse, Empty, QueryRequest, WasmQuery};
 use rand_core::OsRng;
 
 #[cfg(feature = "iterator")]
 use cosmwasm_std::Order;
 use wasmer::{AsStoreMut, FunctionEnvMut};
+use zk_cosmwasm::{Instance, Proof};
 
 use crate::backend::{BackendApi, BackendError, Querier, Storage};
 use crate::conversion::{ref_to_u32, to_u32};
@@ -61,6 +63,9 @@ const MAX_LENGTH_DEBUG: usize = 2 * MI;
 
 /// Max length for an abort message
 const MAX_LENGTH_ABORT: usize = 2 * MI;
+
+/// Max length for an zk-id
+pub const ZKID_MAX_LEN: usize = 64;
 
 #[inline(always)]
 fn charge_host_call_gas<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
@@ -816,6 +821,117 @@ pub fn do_ed25519_batch_verify<
     Ok(code)
 }
 
+/// Fetches VK from x/wasm module via WasmQuery::Circuit and verifies a Halo2 proof.
+pub fn do_halo2_proof_instance_verify<
+    A: BackendApi + 'static,
+    S: Storage + 'static,
+    Q: Querier + 'static,
+>(
+    mut env: FunctionEnvMut<Environment<A, S, Q>>,
+    zkid: u32,
+    proof_ptr: u32,
+    proof_len: u32,
+    instances_ptr: u32,
+    instances_len: u32,
+) -> VmResult<u32> {
+    let (data, mut store) = env.data_and_store_mut();
+    charge_host_call_gas(data, &mut store)?;
+
+    let zkid_u64 = zkid as u64;
+
+    // Read proof and instances from WASM memory
+    const MAX_PROOF_SIZE: usize = 2 * MI;
+    const MAX_INSTANCES_SIZE: usize = 64 * KI;
+    let proof_bytes = read_region(
+        data,
+        &mut store,
+        proof_ptr,
+        std::cmp::min(proof_len as usize, MAX_PROOF_SIZE),
+    )?;
+    let instances_bytes = read_region(
+        data,
+        &mut store,
+        instances_ptr,
+        std::cmp::min(instances_len as usize, MAX_INSTANCES_SIZE),
+    )?;
+
+    // Charge gas for proof verification
+    let gas_info = GasInfo::with_cost(
+        data.gas_config
+            .halo2_proof_instance_verify_cost
+            .total_cost(1)?,
+    );
+    process_gas_info(data, &mut store, gas_info)?;
+
+    // Query x/wasm module for circuit data
+    let query_request: QueryRequest<Empty> =
+        QueryRequest::Wasm(WasmQuery::Circuit { zk_id: zkid_u64 });
+    let query_bytes = to_vec(&query_request)
+        .map_err(|e| VmError::generic_err(format!("Failed to serialize circuit query: {:?}", e)))?;
+
+    const QUERY_GAS_LIMIT: u64 = 1_000_000_000;
+    let (query_result, query_gas_info) = data.with_querier_from_context(|querier| {
+        Ok(querier.query_raw(&query_bytes, QUERY_GAS_LIMIT))
+    })?;
+    process_gas_info(data, &mut store, query_gas_info)?;
+
+    // Parse query response
+    let response_binary = query_result
+        .map_err(|e| {
+            VmError::generic_err(format!(
+                "Query backend error for circuit {}: {:?}",
+                zkid_u64, e
+            ))
+        })?
+        .into_result()
+        .map_err(|e| {
+            VmError::generic_err(format!(
+                "Query system error for circuit {}: {:?}",
+                zkid_u64, e
+            ))
+        })?
+        .into_result()
+        .map_err(|e| VmError::generic_err(format!("Circuit {} not found: {}", zkid_u64, e)))?;
+
+    let circuit_response: CircuitResponse =
+        crate::serde::from_slice(&response_binary, response_binary.len()).map_err(|e| {
+            VmError::generic_err(format!("Failed to parse CircuitResponse: {:?}", e))
+        })?;
+    let res = crate::zk::deserialize_circuit_data(&circuit_response.data)?;
+    // Deserialize VK and verify proof
+    let vk = zk_cosmwasm::VerifyingKey::from_bytes(&res.bytes).map_err(|e| {
+        VmError::generic_err(format!(
+            "Failed to deserialize VK for circuit {}: {}",
+            zkid_u64, e
+        ))
+    })?;
+
+    let instance = Instance::new_from_vm(instances_bytes.clone())?;
+    let proof = Proof::new(proof_bytes.clone());
+
+    // Debug: print verification inputs
+    eprintln!("🔍 Proof verification debug:");
+    eprintln!("  zkid: {}", zkid_u64);
+    eprintln!("  proof_bytes len: {}", proof_bytes.len());
+    eprintln!("  instances_bytes len: {}", instances_bytes.len());
+    eprintln!(
+        "  instances_bytes (hex): {:02x?}",
+        &instances_bytes[..std::cmp::min(64, instances_bytes.len())]
+    );
+    eprintln!("  instance.size: {}", instance.get_size());
+
+    match proof.verify(&vk, &[instance]) {
+        Ok(_) => {
+            eprintln!("✅ Proof verification succeeded!");
+            Ok(0)
+        }
+        Err(e) => {
+            eprintln!("❌ Proof verification failed: {:?}", e);
+            Ok(1)
+        }
+    }
+}
+
 /// Prints a debug message to console.
 /// Debug printing should be disabled when used in a blockchain module.
 pub fn do_debug<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
@@ -1095,6 +1211,7 @@ mod tests {
                 "secp256k1_recover_pubkey" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u64 { 0 }),
                 "secp256r1_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "secp256r1_recover_pubkey" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u64 { 0 }),
+                "halo2_proof_instance_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32,_d: u32,_e: u32| -> u64 { 0 }),
                 "ed25519_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "ed25519_batch_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "debug" => Function::new_typed(&mut store, |_a: u32| {}),
