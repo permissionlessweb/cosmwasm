@@ -21,11 +21,11 @@ incremental = false
 overflow-checks = true
 
 [dependencies]
-cosmwasm-schema = { path = "../../../ZK/cw/zk-cosmwasm/packages/schema" }
-cosmwasm-std = { path = "../../../ZK/cw/zk-cosmwasm/packages/std", default-features = false, features = ["cosmwasm_1_3", "exports", "std"] }
+cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
+cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false, features = ["cosmwasm_1_3", "exports", "std"] }
 rust-argon2 = "2.1"
 thiserror = "1.0.26"
 
 [dev-dependencies]
-cosmwasm-vm = { path = "../../../ZK/cw/zk-cosmwasm/packages/vm", default-features = false }
+cosmwasm-vm = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false }
 tempfile = "3.1.0"

@@ -28,11 +28,11 @@ optimize = """docker run --rm -v "$(pwd)":/code \
 """
 
 [dependencies]
-cosmwasm-schema = { path = "../../../../ZK/cw/zk-cosmwasm/packages/schema" }
+cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
 # Enable "cosmwasm_2_0" feature if you only deploy to chains that have CosmWasm 2.0 or higher.
-cosmwasm-std = { path = "../../../../ZK/cw/zk-cosmwasm/packages/std", features = ["cosmwasm_1_4"] }
-cw-storage-plus = { path = "../../../../ZK/cw/zk-storage-plus" }
-cw2 = { path = "../../../../ZK/cw/zk-cw-minus/packages/cw2" }
+cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", features = ["cosmwasm_1_4"] }
+cw-storage-plus = { git = "https://github.com/permissionlessweb/cw-storage-plus", branch = "zk-mvp" }
+cw2 = { git = "https://github.com/permissionlessweb/cw-minus", branch = "zk-mvp" }
 schemars = "0.8.16"
 serde = { version = "1.0.197", default-features = false, features = ["derive"] }
 thiserror = { version = "1.0.58" }

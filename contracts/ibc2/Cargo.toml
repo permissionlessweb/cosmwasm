@@ -21,8 +21,8 @@ incremental = false
 overflow-checks = true
 
 [dependencies]
-cosmwasm-schema = { path = "../../../ZK/cw/zk-cosmwasm/packages/schema" }
-cosmwasm-std = { path = "../../../ZK/cw/zk-cosmwasm/packages/std", features = ["ibc2"] }
+cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
+cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", features = ["ibc2"] }
 schemars = "0.8.3"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = "1.0.26"
