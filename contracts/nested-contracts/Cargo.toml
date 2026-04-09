@@ -39,4 +39,4 @@ thiserror = { version = "1.0.58" }
 inner-contract = { path = "./inner-contract" }
 
 [dev-dependencies]
-cw-multi-test = { path = "../../../cw-multi-test-fork" }
+cw-multi-test = { package = "abstract-cw-multi-test", path = "../../../cw-multi-test-fork" }
