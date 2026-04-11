@@ -7,6 +7,10 @@ description = "A dependency for CosmWasm contracts to generate schema files for 
 repository = "https://github.com/CosmWasm/cosmwasm/tree/main/packages/cw-schema"
 license = "Apache-2.0"
 
+[package.metadata.optimizer]
+standard-build = true
+builds = [  { name = "cw-schema", default-features = true }]
+
 [dependencies]
 cw-schema-derive = { workspace = true }
 indexmap = { version = "2.3.0", default-features = false }

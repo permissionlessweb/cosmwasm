@@ -52,7 +52,7 @@ cosmwasm-core = { workspace = true }
 cosmwasm-std = { workspace = true, features = ["std"] }
 cosmwasm-crypto = { workspace = true }
 cosmwasm-vm-derive = { workspace = true }
-derive_more = { version = "2.0.1", default-features = false, features = ["debug"] }
+derive_more = { version = "1.0.0", default-features = false, features = ["debug"] }
 hex = "0.4"
 rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { workspace = true }
@@ -84,6 +84,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
 tracing-profile = "0.10.11"
 
 [dev-dependencies]
+zk-test-press = { git = "https://github.com/hard-nett/airdrop", branch = "zk-mvp", features = ["interface"] }
 criterion = { version = "0.5.1", features = ["html_reports"] }
 glob = "0.3.1"
 hex-literal = "0.4.1"

@@ -334,8 +334,8 @@ mod tests {
         let cs_len: u32 = 50;
         // Total = 90 + 100 + 50 + 32 = 272 bytes
 
-        // Build 32-byte footer using CircuitFooter::new_v2
-        let footer = CircuitFooter::new_v2(
+        // Build 32-byte footer using CircuitFooter::new
+        let footer = CircuitFooter::new(
             CircuitType::Plonkish,
             2, // instance_count
             2, // num_fixed_columns

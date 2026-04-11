@@ -6,8 +6,29 @@ edition = "2021"
 publish = false
 license = "Apache-2.0"
 
+[package.metadata.scripts]
+optimize = """docker run --rm -v "$(pwd)":/code \
+  --mount type=volume,source="$(basename "$(pwd)")_cache",target=/target \
+  --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
+  cosmwasm/optimizer:0.15.0
+"""
+
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
+# Enable "cosmwasm_2_0" feature if you only deploy to chains that have CosmWasm 2.0 or higher.
+cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", features = ["cosmwasm_1_4"] }
+cw-storage-plus = { git = "https://github.com/permissionlessweb/cw-storage-plus", branch = "zk-mvp" }
+cw2 = { git = "https://github.com/permissionlessweb/cw-minus", branch = "zk-mvp" }
+inner-contract = { path = "./inner-contract" }
+schemars = "0.8.16"
+serde = { version = "1.0.197", default-features = false, features = ["derive"] }
+thiserror = { version = "1.0.58" }
+
+[dev-dependencies]
+cw-multi-test = { package = "abstract-cw-multi-test", git = "https://github.com/permissionlessweb/cw-multi-test-fork", branch = "zk-mvp" }
 
 [profile.release]
 opt-level = 3
@@ -19,24 +40,3 @@ codegen-units = 1
 panic = 'abort'
 incremental = false
 overflow-checks = true
-
-[package.metadata.scripts]
-optimize = """docker run --rm -v "$(pwd)":/code \
-  --mount type=volume,source="$(basename "$(pwd)")_cache",target=/target \
-  --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
-  cosmwasm/optimizer:0.15.0
-"""
-
-[dependencies]
-cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
-# Enable "cosmwasm_2_0" feature if you only deploy to chains that have CosmWasm 2.0 or higher.
-cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", features = ["cosmwasm_1_4"] }
-cw-storage-plus = { git = "https://github.com/permissionlessweb/cw-storage-plus", branch = "zk-mvp" }
-cw2 = { git = "https://github.com/permissionlessweb/cw-minus", branch = "zk-mvp" }
-schemars = "0.8.16"
-serde = { version = "1.0.197", default-features = false, features = ["derive"] }
-thiserror = { version = "1.0.58" }
-inner-contract = { path = "./inner-contract" }
-
-[dev-dependencies]
-cw-multi-test = { package = "abstract-cw-multi-test", path = "../../../cw-multi-test-fork" }

@@ -1,7 +1,7 @@
-//! Zk-CosmWasm: zk-struct specific for interacting with zk-circuoit binaries
+//! Zk-CosmWasm: zk-struct specific for interacting with zk-circuit binaries
 pub mod cosmwasm_circuit;
 pub use cosmwasm_circuit::{
-    CircuitFooter, CircuitType, ConstraintSystemMetadata, CosmwasmCircuit, CosmwasmCircuitFor,
+    CircuitType, ConstraintSystemMetadata, CosmwasmCircuit, CosmwasmCircuitFor,
     DynamicCircuit, DynamicCircuitConfig, Instance, PinnedCircuit, PlonkishCircuitMetadata, Proof,
     ProvingKey, SerializedPlonkishCircuitData, VerifyingKey,
 };
@@ -9,15 +9,5 @@ pub use cosmwasm_circuit::{
 pub mod errors;
 pub use errors::{ZkError, ZkResult};
 
-#[cfg(feature = "zk-tests")]
-pub mod example_circuits;
-
-#[cfg(feature = "interface")]
-pub mod suite;
-#[cfg(feature = "interface")]
-pub use suite::{
-    TerpTestPressConfig, TestPressBitwiseInstance, TestPressLaunchpadInstance, TestPressSuite,
-};
-
-#[cfg(feature = "zk-tests")]
-pub mod testing;
+pub mod footer;
+pub use footer::CircuitFooter;

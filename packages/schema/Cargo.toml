@@ -10,6 +10,10 @@ description = "A dev-dependency for CosmWasm contracts to generate JSON Schema f
 repository = "https://github.com/CosmWasm/cosmwasm/tree/main/packages/schema"
 license = "Apache-2.0"
 
+[package.metadata.optimizer]
+standard-build = true
+builds = [  { name = "cosmwasm-schema", default-features = true }]
+
 [dependencies]
 cosmwasm-schema-derive = { workspace = true }
 cw-schema = { workspace = true }

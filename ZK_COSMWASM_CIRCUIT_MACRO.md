@@ -72,6 +72,7 @@ Trait + Constants Generated
 - **Metadata Constants**: Creates compile-time constants for CS properties
 
 ### Enhanced Trait Interface
+
 - **Serialization Support**: New methods for VM-compatible serialization
 - **CS Metadata Access**: Methods to inspect analyzed constraint system properties
 - **FFI Integration**: Methods for WASM boundary transmission

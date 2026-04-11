@@ -203,7 +203,7 @@ impl CodeGenerator {
 
                 // Note: The length fields (params_len, vk_len, cs_len) are placeholders.
                 // They will be filled in during to_bytes_with_cs() when actual lengths are known.
-                cosmwasm_vm::zk::CircuitFooter::new_v2(
+                cosmwasm_vm::zk::CircuitFooter::new(
                     cosmwasm_vm::zk::CircuitType::from_u8(#ct_byte).expect("Valid circuit type"),
                     #instances,
                     cs_meta.num_fixed_columns as u8,
@@ -230,7 +230,7 @@ impl CodeGenerator {
             ) -> cosmwasm_vm::zk::CircuitFooter {
                 let cs_meta = Self::constraint_system_metadata();
 
-                cosmwasm_vm::zk::CircuitFooter::new_v2(
+                cosmwasm_vm::zk::CircuitFooter::new(
                     cosmwasm_vm::zk::CircuitType::from_u8(#ct_byte).expect("Valid circuit type"),
                     #instances,
                     cs_meta.num_fixed_columns as u8,
