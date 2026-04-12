@@ -11,19 +11,22 @@ license = "Apache-2.0"
 pre-release-hook = []
 pre-release-replacements = []
 
-[features]
-default = [ "zk-tests"]
-interface = []
-zk-tests = []
-
 [lib]
 bench = false
 
+[features]
+default = ["zk-tests"]
+interface = []
+zk-tests = []
+
 [dependencies]
+base64 = "0.22"
 # Uses the path when built locally; uses the given version from crates.io when published
 cosmwasm-vm-derive = { workspace = true }
-base64 = "0.22"
+group = "0.13.0"
 hex = "0.4"
+pasta_curves = "0.5"
+rand = "0.8"
 rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { workspace = true }
 serde_json = "1.0.140"
@@ -32,30 +35,26 @@ thiserror = "1.0.26"
 wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass"] }
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
-pasta_curves = "0.5"
-group = "0.13.0"
-rand = "0.8"
  
-halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
-halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", default-features = false ,features = ["test-dependencies"]  }
+halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", branch = "zk-mvp", default-features = false, features = ["test-dependencies"] }
+halo2_proofs = { package = "halo2_proofs", git = "https://github.com/permissionlessweb/halo2", branch = "zk-mvp" }
 
 # for dev environment
 # halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
 # halo2_gadgets = { path = "../../../../halo2/halo2_gadgets", default-features = false ,features = ["test-dependencies"]  } 
 
-
 [dev-dependencies]
+clap = "4"
 criterion = { version = "0.5.1", features = ["html_reports"] }
 glob = "0.3.1"
 hex-literal = "0.4.1"
-rand = "0.8"
-tempfile = "3.1.0"
-wat = "1.0"
-wasm-encoder = "0.205.0"
-clap = "4"
 leb128 = "0.2"
+rand = "0.8"
 target-lexicon = "0.12"
+tempfile = "3.1.0"
 time = { version = "0.3.35", features = ["formatting"] }
+wasm-encoder = "0.205.0"
+wat = "1.0"
 
 [profile.release]
 debug = 1

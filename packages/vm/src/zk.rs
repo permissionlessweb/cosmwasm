@@ -1,13 +1,7 @@
-use std::io;
-
 use cosmwasm_std::Checksum;
 
 use halo2_proofs::COSMWASM_METADATA_LENGTH;
-pub use zk_cosmwasm::cosmwasm_circuit::{
-    CircuitFooter, CircuitType, ConstraintSystemMetadata, CosmwasmCircuit, CosmwasmCircuitFor,
-    DynamicCircuit, DynamicCircuitConfig, PinnedCircuit, PlonkishCircuitMetadata, Proof,
-    ProvingKey, SerializedPlonkishCircuitData, VerifyingKey,
-};
+pub use zk_cosmwasm::*;
 /// re-export zk-cosmwasm into vm library
 pub use zk_cosmwasm::*;
 
@@ -187,11 +181,11 @@ pub fn check_circuit(bytes: &[u8]) -> ZkResult<(CircuitFooter, Checksum)> {
         footer.num_advice_columns,
         footer.num_instance_columns,
         footer.degree,
-        footer.num_selectors()
+        footer.num_selectors
     );
 
     let params_len = footer.params_len as usize;
-    let cs_len = footer.cs_len().unwrap_or_default() as usize;
+    let cs_len = footer.cs_len as usize;
     let vk_len = footer.vk_len as usize;
 
     // Validate total length matches declared sections
@@ -292,7 +286,8 @@ mod tests {
             0, // num_selectors
             1, // num_selectors
             1,
-            0, // crc32
+            true, // has_lookups
+            0,    // crc32
         );
 
         // Build the full vk blob

@@ -10,6 +10,16 @@ license = "Apache-2.0"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[dependencies]
+cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
+cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false, features = ["cosmwasm_2_2", "exports", "staking", "stargate", "std"] }
+schemars = "0.8.12"
+serde = { version = "1.0.103", default-features = false, features = ["derive"] }
+thiserror = "1.0.26"
+
+[dev-dependencies]
+cosmwasm-vm = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false, features = ["stargate"] }
+
 [profile.release]
 opt-level = 3
 debug = false
@@ -20,13 +30,3 @@ codegen-units = 1
 panic = 'abort'
 incremental = false
 overflow-checks = true
-
-[dependencies]
-cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
-cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false, features = ["cosmwasm_2_2", "exports", "staking", "stargate", "std"] }
-schemars = "0.8.12"
-serde = { version = "1.0.103", default-features = false, features = ["derive"] }
-thiserror = "1.0.26"
-
-[dev-dependencies]
-cosmwasm-vm = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false, features = ["stargate"] }

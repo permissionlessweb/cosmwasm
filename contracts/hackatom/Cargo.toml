@@ -9,17 +9,6 @@ license = "Apache-2.0"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[profile.release]
-opt-level = 3
-debug = false
-rpath = false
-lto = true
-debug-assertions = false
-codegen-units = 1
-panic = 'abort'
-incremental = false
-overflow-checks = true
-
 [dependencies]
 cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
 cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false, features = ["cosmwasm_2_2", "exports", "std"] }
@@ -30,3 +19,14 @@ thiserror = "1.0.26"
 
 [dev-dependencies]
 cosmwasm-vm = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false }
+
+[profile.release]
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+codegen-units = 1
+panic = 'abort'
+incremental = false
+overflow-checks = true

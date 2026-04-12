@@ -1,14 +1,5 @@
-use crate::footer::{flags as footer_flags, CircuitType};
+use crate::cosmwasm_circuit::{footer_flags, CircuitType};
 use crate::errors::{ZkError, ZkResult};
-
-/// Footer flags bit definitions
-pub mod flags {
-    /// Constraint system section is present (must be 1 for v2)
-    pub const HAS_CS: u8 = 0b0000_0001;
-    /// Circuit contains lookup arguments
-    pub const HAS_LOOKUPS: u8 = 0b0000_0010;
-}
-
 
 /// Circuit footer metadata - 32 bytes containing complete constraint system specification.
 /// V2 CS-inclusive format: enables generic deserialization via DynamicCircuit

@@ -19,8 +19,11 @@ pre-release-replacements = [
 
 [package.metadata.optimizer]
 standard-build = true
-builds = [  { name = "cosmwasm-vm", default-features = true }]
+builds = [{ name = "cosmwasm-vm", default-features = true }]
 
+[lib]
+# See https://bheisler.github.io/criterion.rs/book/faq.html#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
+bench = false
 
 [features]
 default = ["iterator", "staking"]
@@ -38,37 +41,32 @@ dhat-heap = ["dep:dhat"]
 # ibc2 enables ibc2-dependent messages, entrypoints and queries
 ibc2 = ["cosmwasm-std/ibc2"]
 
-[lib]
-# See https://bheisler.github.io/criterion.rs/book/faq.html#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
-bench = false
-
 [dependencies]
-clru = "0.6.1"
-crc32fast = "1.3.2"
 bech32 = "0.11.0"
 blake2 = "0.10.6"
+clru = "0.6.1"
 # Uses the path when built locally; uses the given version from crates.io when published
 cosmwasm-core = { workspace = true }
-cosmwasm-std = { workspace = true, features = ["std"] }
 cosmwasm-crypto = { workspace = true }
+cosmwasm-std = { workspace = true, features = ["std"] }
 cosmwasm-vm-derive = { workspace = true }
+crc32fast = "1.3.2"
 derive_more = { version = "1.0.0", default-features = false, features = ["debug"] }
+# For heap profiling. Only used in the "heap_profiling" example. This has to be a non-dev dependency
+# because cargo currently does not support optional dev-dependencies.
+dhat = { version = "0.3.3", optional = true }
 hex = "0.4"
+rand = "0.8"
 rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { workspace = true }
 serde_json = "1.0.140"
 sha2 = "0.10.3"
+strum = { version = "0.26.2", default-features = false, features = ["derive"] }
 thiserror = "1.0.26"
 # We pin wasmer to a specific version because the layout of cached modules can change between patch versions.
 wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass"] }
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
-rand = "0.8"
-strum = { version = "0.26.2", default-features = false, features = ["derive"] }
-# For heap profiling. Only used in the "heap_profiling" example. This has to be a non-dev dependency
-# because cargo currently does not support optional dev-dependencies.
-dhat = { version = "0.3.3", optional = true }
-
 # Wasmer git/local (used for quick local debugging or patching)
 # wasmer = { git = "https://github.com/wasmerio/wasmer", rev = "877ce1f7c44fad853c", default-features = false, features = ["singlepass"] }
 # wasmer-middlewares = { git = "https://github.com/wasmerio/wasmer", rev = "877ce1f7c44fad853c" }
@@ -76,26 +74,26 @@ dhat = { version = "0.3.3", optional = true }
 # wasmer-middlewares = { path = "../../../wasmer/lib/middlewares" }
 # halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
 
-halo2_proofs  = { git = "https://github.com/permissionlessweb/halo2", branch = "mvp", package = "halo2_proofs" }
-zk-cosmwasm  = { workspace = true, features = ["interface"]  }
+halo2_proofs = { package = "halo2_proofs", git = "https://github.com/permissionlessweb/halo2", branch = "zk-mvp" }
+zk-cosmwasm  = { workspace = true, features = ["interface"] }
 
 tracing = "0.1.38"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
 tracing-profile = "0.10.11"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
-zk-test-press = { git = "https://github.com/hard-nett/airdrop", branch = "zk-mvp", features = ["interface"] }
+clap = "4"
 criterion = { version = "0.5.1", features = ["html_reports"] }
 glob = "0.3.1"
 hex-literal = "0.4.1"
-rand = "0.8"
-tempfile = "3.1.0"
-wat = "1.0"
-wasm-encoder = "0.205.0"
-clap = "4"
 leb128 = "0.2"
+rand = "0.8"
 target-lexicon = "0.12"
+tempfile = "3.1.0"
 time = { version = "0.3.35", features = ["formatting"] }
+wasm-encoder = "0.205.0"
+wat = "1.0"
+zk-test-press = { git = "https://github.com/hard-nett/airdrop", branch = "zk-mvp", features = ["interface"] }
 
 [[bench]]
 name = "main"
