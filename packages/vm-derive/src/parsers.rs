@@ -89,18 +89,25 @@ impl syn::parse::Parse for CircuitAttributes {
                 // Support legacy 'i' attribute for backward compatibility
                 "i" => {
                     if instances.is_some() {
-                        return Err(Error::new_spanned(&ident, "Duplicate attribute: i/instances"));
+                        return Err(Error::new_spanned(
+                            &ident,
+                            "Duplicate attribute: i/instances",
+                        ));
                     }
                     let lit = input.parse::<LitInt>()?;
                     instances = Some(lit.base10_parse::<u8>()?);
                 }
                 "circuit_type" => {
                     let lit = input.parse::<LitStr>()?;
-                    circuit_type = CircuitTypeAttr::from_str(&lit.value())
-                        .ok_or_else(|| Error::new_spanned(&lit, format!(
-                            "Unknown circuit_type '{}'. Valid types: Plonkish",
-                            lit.value()
-                        )))?;
+                    circuit_type = CircuitTypeAttr::from_str(&lit.value()).ok_or_else(|| {
+                        Error::new_spanned(
+                            &lit,
+                            format!(
+                                "Unknown circuit_type '{}'. Valid types: Plonkish",
+                                lit.value()
+                            ),
+                        )
+                    })?;
                 }
                 "footer_version" => {
                     let lit = input.parse::<LitInt>()?;

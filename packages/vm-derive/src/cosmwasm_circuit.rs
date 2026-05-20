@@ -14,8 +14,11 @@ pub fn cosmwasm_circuit_impl(
 ) -> Result<TokenStream2, TokenStream2> {
     // Parse attributes from the macro
     let attrs: CircuitAttributes = parse2(attr.clone()).map_err(|e| {
-        Error::new_spanned(&item, format!("Failed to parse cosmwasm_circuit attributes: {}", e))
-            .to_compile_error()
+        Error::new_spanned(
+            &item,
+            format!("Failed to parse cosmwasm_circuit attributes: {}", e),
+        )
+        .to_compile_error()
     })?;
 
     // Parse the struct definition
@@ -23,11 +26,9 @@ pub fn cosmwasm_circuit_impl(
 
     // Validate attributes
     let mut validation = validate_attributes(&attrs, input.span());
-    validation.errors.extend(
-        validate_circuit_struct(&input)
-            .errors
-            .into_iter(),
-    );
+    validation
+        .errors
+        .extend(validate_circuit_struct(&input).errors.into_iter());
 
     if !validation.is_valid {
         return Err(validation.to_compile_error());

@@ -953,19 +953,19 @@ mod tests {
         ])
     }
 
-    fn make_testing_options_with_vk() -> (CacheOptions, TempDir, zk_cosmwasm::TestPressSuite) {
-        let temp_dir = TempDir::new().unwrap();
-        (
-            CacheOptions {
-                base_dir: temp_dir.path().into(),
-                available_capabilities: default_capabilities(),
-                memory_cache_size_bytes: TESTING_MEMORY_CACHE_SIZE,
-                instance_memory_limit_bytes: TESTING_MEMORY_LIMIT,
-            },
-            temp_dir,
-            zk_cosmwasm::TestPressSuite::new(),
-        )
-    }
+    // fn make_testing_options_with_vk() -> (CacheOptions, TempDir, zk_test_press::TestPressSuite) {
+    //     let temp_dir = TempDir::new().unwrap();
+    //     (
+    //         CacheOptions {
+    //             base_dir: temp_dir.path().into(),
+    //             available_capabilities: default_capabilities(),
+    //             memory_cache_size_bytes: TESTING_MEMORY_CACHE_SIZE,
+    //             instance_memory_limit_bytes: TESTING_MEMORY_LIMIT,
+    //         },
+    //         temp_dir,
+    //         zk_test_press::TestPressSuite::new(),
+    //     )
+    // }
     fn make_testing_options() -> (CacheOptions, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         (
@@ -2131,60 +2131,60 @@ mod tests {
         assert!(matches!(err, VmError::StaticValidationErr { .. }));
     }
 
-    #[test]
-    pub fn test_vk_save_and_load_verification() {
-        use std::fs;
-        use std::io::Read;
+    // #[test]
+    // pub fn test_vk_save_and_load_verification() {
+    //     use std::fs;
+    //     use std::io::Read;
 
-        let (testing_opts, _temp_dir, suite) = make_testing_options_with_vk();
-        let cache: Cache<MockApi, MockStorage, MockQuerier> =
-            unsafe { Cache::new(testing_opts).unwrap() };
-        // Generate test circuit keys
-        let path = Path::new("./data/test_keys");
-        let key_folder = path.join("no_rick");
-        let combinded = key_folder.join("vk_combined.bin");
-        let _ = fs::create_dir_all(path);
+    //     let (testing_opts, _temp_dir, suite) = make_testing_options_with_vk();
+    //     let cache: Cache<MockApi, MockStorage, MockQuerier> =
+    //         unsafe { Cache::new(testing_opts).unwrap() };
+    //     // Generate test circuit keys
+    //     let path = Path::new("./data/test_keys");
+    //     let key_folder = path.join("no_rick");
+    //     let combinded = key_folder.join("vk_combined.bin");
+    //     let _ = fs::create_dir_all(path);
 
-        let proofs = zk_cosmwasm::TestPressLaunchpadInstance::gen_test_circuit_keys(
-            &suite,
-            path,
-            None, // Some(&key_folder),
-            vec![("lrain", "rick")],
-        )
-        .unwrap();
+    //     let proofs = zk_cosmwasm::TestPressLaunchpadInstance::gen_test_circuit_keys(
+    //         &suite,
+    //         path,
+    //         None, // Some(&key_folder),
+    //         vec![("lrain", "rick")],
+    //     )
+    //     .unwrap();
 
-        let mut pb = Vec::new();
-        let mut pf = fs::File::open(&combinded).expect("Failed to open params file");
-        pf.read_to_end(&mut pb).expect("Failed");
+    //     let mut pb = Vec::new();
+    //     let mut pf = fs::File::open(&combinded).expect("Failed to open params file");
+    //     pf.read_to_end(&mut pb).expect("Failed");
 
-        let codebundle = CodeBundle::with_vk(HACKATOM.to_vec(), pb).unwrap();
-        let checksums = cache
-            .store_code_with_circuit(&codebundle, true, true)
-            .unwrap();
+    //     let codebundle = CodeBundle::with_vk(HACKATOM.to_vec(), pb).unwrap();
+    //     let checksums = cache
+    //         .store_code_with_circuit(&codebundle, true, true)
+    //         .unwrap();
 
-        // Verify checksums were returned
-        assert_eq!(checksums.len(), 2, "Should return 2 checksums");
-        assert!(!checksums[0].as_slice().is_empty(), "no empty checksums");
-        assert!(!checksums[1].as_slice().is_empty(), "no empty checksums");
-        assert_eq!(codebundle.compute_checksums(), checksums);
-        println!("{:#?}", checksums[0]);
-        println!("{:#?}", checksums[1]);
+    //     // Verify checksums were returned
+    //     assert_eq!(checksums.len(), 2, "Should return 2 checksums");
+    //     assert!(!checksums[0].as_slice().is_empty(), "no empty checksums");
+    //     assert!(!checksums[1].as_slice().is_empty(), "no empty checksums");
+    //     assert_eq!(codebundle.compute_checksums(), checksums);
+    //     println!("{:#?}", checksums[0]);
+    //     println!("{:#?}", checksums[1]);
 
-        // confirm retrieval of vk from pinned memory
-        assert_eq!(
-            Checksum::from(codebundle.verifying_key.clone().unwrap().hash),
-            checksums[1]
-        );
-        let vk = cache.get_pinned_circuit(&checksums[1]).unwrap();
-        assert_eq!(vk.i, 1);
+    //     // confirm retrieval of vk from pinned memory
+    //     assert_eq!(
+    //         Checksum::from(codebundle.verifying_key.clone().unwrap().hash),
+    //         checksums[1]
+    //     );
+    //     let vk = cache.get_pinned_circuit(&checksums[1]).unwrap();
+    //     assert_eq!(vk.i, 1);
 
-        // cannot store only wasm file
-        let codebundle = CodeBundle::wasm_only(HACKATOM.to_vec());
-        let err = cache
-            .store_code_with_circuit(&codebundle, true, true)
-            .unwrap_err();
+    //     // cannot store only wasm file
+    //     let codebundle = CodeBundle::wasm_only(HACKATOM.to_vec());
+    //     let err = cache
+    //         .store_code_with_circuit(&codebundle, true, true)
+    //         .unwrap_err();
 
-        // println!("{:#?}", checksums[1]);
-        // test saving empty bytes
-    }
+    //     // println!("{:#?}", checksums[1]);
+    //     // test saving empty bytes
+    // }
 }

@@ -453,18 +453,11 @@ impl CodeGenerator {
         let circuit_name = &self.circuit_name;
         let const_prefix = circuit_name.to_string().to_uppercase();
 
-        let metadata_const_name = syn::Ident::new(
-            &format!("{}_METADATA", const_prefix),
-            circuit_name.span(),
-        );
-        let k_const_name = syn::Ident::new(
-            &format!("{}_K", const_prefix),
-            circuit_name.span(),
-        );
-        let instances_const_name = syn::Ident::new(
-            &format!("{}_INSTANCES", const_prefix),
-            circuit_name.span(),
-        );
+        let metadata_const_name =
+            syn::Ident::new(&format!("{}_METADATA", const_prefix), circuit_name.span());
+        let k_const_name = syn::Ident::new(&format!("{}_K", const_prefix), circuit_name.span());
+        let instances_const_name =
+            syn::Ident::new(&format!("{}_INSTANCES", const_prefix), circuit_name.span());
 
         let k = self.attrs.k;
         let instances = self.attrs.instances;

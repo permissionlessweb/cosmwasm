@@ -23,5 +23,3 @@ serde = { version = "1.0.192", default-features = false, features = ["alloc", "d
 serde_json = "1.0.140"
 thiserror = "1.0.26"
 zk-cosmwasm = { path = "packages/zk" }
-
-zk-test-press = { git = "https://github.com/hard-nett/airdrop", branch = "zk-mvp" }

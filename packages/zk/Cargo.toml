@@ -36,8 +36,8 @@ wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
  
-halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", branch = "zk-mvp", default-features = false, features = ["test-dependencies"] }
-halo2_proofs = { package = "halo2_proofs", git = "https://github.com/permissionlessweb/halo2", branch = "zk-mvp" }
+halo2_gadgets = { path = "../../../zcash/halo2/halo2_gadgets", default-features = false, features = ["test-dependencies"] }
+halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs" }
 
 # for dev environment
 # halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
@@ -55,6 +55,7 @@ tempfile = "3.1.0"
 time = { version = "0.3.35", features = ["formatting"] }
 wasm-encoder = "0.205.0"
 wat = "1.0"
+zk-test-press = { path = "../../../headstash/test-press" }
 
 [profile.release]
 debug = 1

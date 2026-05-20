@@ -136,7 +136,12 @@ mod tests {
     use crate::parsers::CircuitAttributes;
     use proc_macro2::Span;
 
-    fn make_attrs(k: u32, instances: u8, footer_version: u8, analyze_cs: bool) -> CircuitAttributes {
+    fn make_attrs(
+        k: u32,
+        instances: u8,
+        footer_version: u8,
+        analyze_cs: bool,
+    ) -> CircuitAttributes {
         CircuitAttributes {
             k,
             instances,
@@ -159,7 +164,10 @@ mod tests {
         let attrs = make_attrs(10, 2, 2, true);
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| e.to_string().contains("k must be in range")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.to_string().contains("k must be in range")));
     }
 
     #[test]
@@ -167,7 +175,10 @@ mod tests {
         let attrs = make_attrs(21, 2, 2, true);
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| e.to_string().contains("k must be in range")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.to_string().contains("k must be in range")));
     }
 
     #[test]
@@ -175,7 +186,10 @@ mod tests {
         let attrs = make_attrs(17, 0, 2, true);
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| e.to_string().contains("Instance count must be at least 1")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.to_string().contains("Instance count must be at least 1")));
     }
 
     #[test]
@@ -183,7 +197,10 @@ mod tests {
         let attrs = make_attrs(17, 2, 1, true);
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| e.to_string().contains("footer_version must be >= 2")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.to_string().contains("footer_version must be >= 2")));
     }
 
     #[test]
@@ -199,6 +216,9 @@ mod tests {
         let attrs = make_attrs(17, 2, 3, false);
         let result = validate_attributes(&attrs, Span::call_site());
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| e.to_string().contains("footer_version must be 1 or 2")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.to_string().contains("footer_version must be 1 or 2")));
     }
 }

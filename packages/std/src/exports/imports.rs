@@ -754,7 +754,7 @@ impl Api for ExternalApi {
                 zkid as u32,    // ← Circuit ID (cast to u64 on Go side)
                 proof_send_ptr, // ← Pointer to proof bytes
                 proof_len,
-                i_send_ptr,     // ← Pointer to instances bytes
+                i_send_ptr, // ← Pointer to instances bytes
                 i_len,
             )
         };
