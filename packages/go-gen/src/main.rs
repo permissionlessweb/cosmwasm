@@ -1,4 +1,5 @@
 use anyhow::{bail, ensure, Context, Result};
+use clap::Parser;
 use go::*;
 use heck::ToPascalCase;
 use schema::{documentation, schema_object_type, SchemaExt, TypeContext};
@@ -10,11 +11,40 @@ mod go;
 mod schema;
 mod utils;
 
+#[derive(Parser)]
+#[command(
+    name = "cosmwasm-go-gen",
+    about = "Generate Go types from CosmWasm schemas"
+)]
+struct Cli {
+    /// Path to a JSON schema file to generate Go types from
+    #[arg(long = "schema-file")]
+    schema_file: Option<String>,
+
+    /// Read schema JSON from stdin (pipe mode)
+    #[arg(long = "stdin", default_value_t = false)]
+    stdin: bool,
+}
+
 fn main() -> Result<()> {
-    let root = cosmwasm_schema::schema_for!(cosmwasm_std::RawRangeResponse);
+    let cli = Cli::parse();
+
+    let root: RootSchema = if let Some(path) = &cli.schema_file {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read schema file: {path}"))?;
+        serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse schema JSON: {path}"))?
+    } else if cli.stdin {
+        let mut input = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)?;
+        serde_json::from_str(&input).context("failed to parse schema JSON from stdin")?
+    } else {
+        // Default: generate for cosmwasm_std::RawRangeResponse (backward compat)
+        cosmwasm_schema::schema_for!(cosmwasm_std::RawRangeResponse)
+    };
 
     let code = generate_go(root)?;
-    println!("{}", code);
+    print!("{}", code);
 
     Ok(())
 }

@@ -6,7 +6,6 @@ use serde::{de::DeserializeOwned, Serialize};
 use crate::coin::Coin;
 #[cfg(feature = "iterator")]
 use crate::iterator::{Order, Record};
-use crate::prelude::*;
 #[cfg(feature = "cosmwasm_1_2")]
 use crate::query::CodeInfoResponse;
 #[cfg(feature = "cosmwasm_1_1")]
@@ -26,6 +25,7 @@ use crate::query::{BalanceResponse, BankQuery, CustomQuery, QueryRequest, WasmQu
 use crate::results::{ContractResult, Empty, SystemResult};
 use crate::ContractInfoResponse;
 use crate::{from_json, to_json_binary, to_json_vec, Binary};
+use crate::{prelude::*, CircuitInfoResponse, CircuitResponse};
 use crate::{Addr, CanonicalAddr};
 #[cfg(feature = "cosmwasm_1_3")]
 use crate::{DenomMetadata, PageRequest};
@@ -598,6 +598,17 @@ impl<'a, C: CustomQuery> QuerierWrapper<'a, C> {
             contract_addr: contract_addr.into(),
         }
         .into();
+        self.query(&request)
+    }
+
+    /// Given a contract address, query information about that contract.
+    pub fn query_circuit_info(&self, id: impl Into<u64>) -> StdResult<CircuitInfoResponse> {
+        let request = WasmQuery::CircuitInfo { zk_id: id.into() }.into();
+        self.query(&request)
+    }
+    /// Given a contract address, query information about that contract.
+    pub fn query_circuit(&self, id: impl Into<u64>) -> StdResult<CircuitResponse> {
+        let request = WasmQuery::Circuit { zk_id: id.into() }.into();
         self.query(&request)
     }
 

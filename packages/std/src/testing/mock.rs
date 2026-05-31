@@ -1,5 +1,4 @@
 use crate::prelude::*;
-use crate::Checksum;
 use crate::HashFunction;
 use crate::{Addr, CanonicalAddr, Timestamp};
 

@@ -10,13 +10,13 @@ license = "Apache-2.0"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
-cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false, features = ["cosmwasm_1_3", "exports", "std"] }
+cosmwasm-schema = { path = "../../packages/schema" }
+cosmwasm-std = { path = "../../packages/std", default-features = false, features = ["cosmwasm_1_3", "exports", "std"] }
 rust-argon2 = "2.1"
 thiserror = "1.0.26"
 
 [dev-dependencies]
-cosmwasm-vm = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false }
+cosmwasm-vm = { path = "../../packages/vm", default-features = false }
 tempfile = "3.1.0"
 
 [profile.release]

@@ -17,18 +17,18 @@ optimize = """docker run --rm -v "$(pwd)":/code \
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
+cosmwasm-schema = { path = "../../packages/schema" }
 # Enable "cosmwasm_2_0" feature if you only deploy to chains that have CosmWasm 2.0 or higher.
-cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", features = ["cosmwasm_1_4"] }
-cw-storage-plus = { git = "https://github.com/permissionlessweb/cw-storage-plus", branch = "zk-mvp" }
-cw2 = { git = "https://github.com/permissionlessweb/cw-minus", branch = "zk-mvp" }
+cosmwasm-std = { path = "../../packages/std", features = ["cosmwasm_1_4"] }
+cw-storage-plus = { path = "../../../cw-storage-plus" }
+cw2 = { path = "../../../cw-minus/packages/cw2" }
 inner-contract = { path = "./inner-contract" }
 schemars = "0.8.16"
 serde = { version = "1.0.197", default-features = false, features = ["derive"] }
 thiserror = { version = "1.0.58" }
 
 [dev-dependencies]
-cw-multi-test = { package = "abstract-cw-multi-test", git = "https://github.com/permissionlessweb/cw-multi-test-fork", branch = "zk-mvp" }
+cw-multi-test = { package = "abstract-cw-multi-test", path = "../../../cw-multi-test-fork" }
 
 [profile.release]
 opt-level = 3

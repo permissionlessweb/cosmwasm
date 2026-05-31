@@ -10,15 +10,15 @@ license = "Apache-2.0"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-cosmwasm-schema = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp" }
-cosmwasm-std = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false, features = ["cosmwasm_2_2", "exports", "std"] }
+cosmwasm-schema = { path = "../../packages/schema" }
+cosmwasm-std = { path = "../../packages/std", default-features = false, features = ["cosmwasm_2_2", "exports", "std"] }
 schemars = "0.8.12"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 sha2 = "0.10"
 thiserror = "1.0.26"
 
 [dev-dependencies]
-cosmwasm-vm = { git = "https://github.com/permissionlessweb/cosmwasm", branch = "zk-mvp", default-features = false }
+cosmwasm-vm = { path = "../../packages/vm", default-features = false }
 
 [profile.release]
 opt-level = 3

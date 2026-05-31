@@ -235,19 +235,7 @@ impl Circuit<vesta::Scalar> for DynamicCircuit {
     }
 }
 
-/// Trait implemented by circuits derived with #[cosmwasm_circuit].
-/// Provides metadata and helper methods for VM-compatible circuits.
-pub trait CosmwasmCircuitFor<C: Circuit<vesta::Scalar>> {
-    type PlonkishCircuitMetadata;
-    type CircuitType;
-    type VerifyingKey;
-
-    fn circuit_metadata(&self) -> Self::PlonkishCircuitMetadata;
-    fn verifying_key(&self) -> Self::VerifyingKey;
-    fn ct(&self) -> Self::CircuitType;
-    fn instance_count(&self) -> u8;
-    fn is_compatible(i: &[vesta::Scalar]) -> bool;
-}
+//
 
 /// Circuit type identifier for VK deserialization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,34 +298,6 @@ where
         layouter: impl Layouter<F>,
     ) -> Result<(), plonk::Error> {
         self.circuit.synthesize(config, layouter)
-    }
-}
-
-impl<C: halo2_proofs::plonk::Circuit<pasta_curves::Fp>> CosmwasmCircuitFor<C>
-    for CosmwasmCircuit<C>
-{
-    type PlonkishCircuitMetadata = ();
-    type CircuitType = ();
-    type VerifyingKey = ();
-
-    fn circuit_metadata(&self) -> Self::PlonkishCircuitMetadata {
-        ()
-    }
-
-    fn verifying_key(&self) -> Self::VerifyingKey {
-        ()
-    }
-
-    fn ct(&self) -> Self::CircuitType {
-        ()
-    }
-
-    fn instance_count(&self) -> u8 {
-        0
-    }
-
-    fn is_compatible(_i: &[vesta::Scalar]) -> bool {
-        true
     }
 }
 
