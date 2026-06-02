@@ -2,6 +2,10 @@ use cosmwasm_std::Checksum;
 use std::collections::HashMap;
 
 use super::cached_module::CachedModule;
+#[cfg(not(feature = "zk"))]
+use crate::VmError;
+#[cfg(feature = "zk")]
+use crate::VmError;
 use crate::VmResult;
 
 /// Struct storing some additional metadata, which is only of interest for the pinned cache,
@@ -14,6 +18,7 @@ pub struct InstrumentedModule {
 }
 /// Struct storing some additional metadata, which is only of interest for the pinned cache,
 /// alongside the cached module.
+#[cfg(feature = "zk")]
 pub struct InstrumentedCircuit {
     /// Number of loads from memory this module received
     pub hits: u32,
@@ -24,6 +29,7 @@ pub struct InstrumentedCircuit {
 /// An pinned in memory module cache
 pub struct PinnedMemoryCache {
     modules: HashMap<Checksum, InstrumentedModule>,
+    #[cfg(feature = "zk")]
     circuits: HashMap<Checksum, InstrumentedCircuit>,
 }
 
@@ -32,6 +38,7 @@ impl PinnedMemoryCache {
     pub fn new() -> Self {
         PinnedMemoryCache {
             modules: HashMap::new(),
+            #[cfg(feature = "zk")]
             circuits: HashMap::new(),
         }
     }
@@ -52,6 +59,7 @@ impl PinnedMemoryCache {
         Ok(())
     }
 
+    #[cfg(feature = "zk")]
     pub fn store_circuit(
         &mut self,
         checksum: &Checksum,
@@ -67,7 +75,12 @@ impl PinnedMemoryCache {
     pub fn remove(&mut self, checksum: &Checksum, zk: bool) -> VmResult<()> {
         match zk {
             true => {
+                #[cfg(feature = "zk")]
                 self.circuits.remove(checksum);
+                #[cfg(not(feature = "zk"))]
+                return Err(VmError::generic_err(
+                    "zk faeture disabled. cannot remove circuit from cache",
+                ));
             }
             false => {
                 self.modules.remove(checksum);
@@ -87,6 +100,7 @@ impl PinnedMemoryCache {
         }
     }
     /// Looks up a module in the cache and creates a new module
+    #[cfg(feature = "zk")]
     pub fn load_circuit(
         &mut self,
         checksum: &Checksum,
@@ -103,14 +117,24 @@ impl PinnedMemoryCache {
     /// Returns true if and only if this cache has an entry identified by the given checksum
     pub fn has(&self, checksum: &Checksum, zk: bool) -> bool {
         match zk {
-            true => self.circuits.contains_key(checksum),
+            true => {
+                #[cfg(feature = "zk")]
+                self.circuits.contains_key(checksum);
+                #[cfg(not(feature = "zk"))]
+                false
+            }
             false => self.modules.contains_key(checksum),
         }
     }
 
     /// Returns the number of elements in the cache.
     pub fn len(&self) -> usize {
-        self.circuits.len() + self.modules.len()
+        let mut l = self.modules.len();
+        #[cfg(feature = "zk")]
+        {
+            l += self.circuits.len();
+        }
+        l
     }
     /// Returns cumulative size of all elements in the cache.
     ///
@@ -125,13 +149,17 @@ impl PinnedMemoryCache {
             .sum();
 
         // Sum circuit sizes: key (address) + circuit actual size
-        let circuit_size: usize = self
-            .circuits
-            .iter()
-            .map(|(key, zk)| std::mem::size_of_val(key) + zk.circuit.actual_size_bytes())
-            .sum();
+        #[cfg(feature = "zk")]
+        {
+            let circuit_size: usize = self
+                .circuits
+                .iter()
+                .map(|(key, zk)| std::mem::size_of_val(key) + zk.circuit.actual_size_bytes())
+                .sum();
 
-        module_size + circuit_size
+            module_size + circuit_size
+        }
+        module_size
     }
 }
 

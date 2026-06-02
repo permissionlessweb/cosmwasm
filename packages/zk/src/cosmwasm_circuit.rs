@@ -404,12 +404,6 @@ impl VerifyingKey {
     ///
     /// Format: `[params][vk][cs][footer(32)]`
     pub fn parse_bytes(bytes: &[u8]) -> ZkResult<SerializedPlonkishCircuitData> {
-        if bytes.len() < 32 {
-            return Err(ZkError::new_err(
-                "VK data too short - need at least 32 bytes for footer",
-            ));
-        }
-
         let footer_bytes = &bytes[bytes.len() - 32..];
         let footer = CircuitFooter::from_bytes(footer_bytes)?;
 
@@ -479,13 +473,11 @@ impl VerifyingKey {
             .map_err(|e| ZkError::from_io(e))?;
 
         // Deserialize VK using the deserialized CS
-        let empty_selectors: Vec<Vec<bool>> = vec![];
         let mut vk_reader = Cursor::new(vk_bytes);
         let vk = halo2_proofs::plonk::VerifyingKey::<vesta::Affine>::read_with_cs(
             &mut vk_reader,
             &params,
             cs,
-            empty_selectors,
         )
         .map_err(|e| {
             ZkError::from_io(std::io::Error::new(
@@ -780,8 +772,6 @@ impl ProvingKey {
         pk.params.write(&mut writer)?;
         pk.pk.get_vk().write(&mut writer)?;
         io::Write::flush(&mut writer)?;
-
-        // Write v2 VK
         std::fs::write(&vk_path, vk_bytes)?;
 
         Ok(())

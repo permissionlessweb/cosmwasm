@@ -11,13 +11,13 @@ use cosmwasm_crypto::{
 use cosmwasm_crypto::{
     ECDSA_PUBKEY_MAX_LEN, ECDSA_SIGNATURE_LEN, EDDSA_PUBKEY_LEN, MESSAGE_HASH_MAX_LEN,
 };
-use cosmwasm_std::{Checksum, CircuitResponse, Empty, QueryRequest, WasmQuery};
+#[cfg(feature = "zk")]
+use cosmwasm_std::{CircuitResponse, Empty, QueryRequest, WasmQuery};
 use rand_core::OsRng;
 
 #[cfg(feature = "iterator")]
 use cosmwasm_std::Order;
 use wasmer::{AsStoreMut, FunctionEnvMut};
-use zk_cosmwasm::{Instance, Proof};
 
 use crate::backend::{BackendApi, BackendError, Querier, Storage};
 use crate::conversion::{ref_to_u32, to_u32};
@@ -822,6 +822,7 @@ pub fn do_ed25519_batch_verify<
 }
 
 /// Fetches VK from x/wasm module via WasmQuery::Circuit and verifies a Halo2 proof.
+#[cfg(feature = "zk")]
 pub fn do_halo2_proof_instance_verify<
     A: BackendApi + 'static,
     S: Storage + 'static,
@@ -906,20 +907,8 @@ pub fn do_halo2_proof_instance_verify<
         ))
     })?;
 
-    let instance = Instance::new_from_vm(instances_bytes.clone())?;
-    let proof = Proof::new(proof_bytes.clone());
-
-    // Debug: print verification inputs
-    eprintln!("🔍 Proof verification debug:");
-    eprintln!("  zkid: {}", zkid_u64);
-    eprintln!("  proof_bytes len: {}", proof_bytes.len());
-    eprintln!("  instances_bytes len: {}", instances_bytes.len());
-    eprintln!(
-        "  instances_bytes (hex): {:02x?}",
-        &instances_bytes[..std::cmp::min(64, instances_bytes.len())]
-    );
-    eprintln!("  instance.size: {}", instance.get_size());
-
+    let instance = zk_cosmwasm::Instance::new_from_vm(instances_bytes.clone())?;
+    let proof = zk_cosmwasm::Proof::new(proof_bytes.clone());
     match proof.verify(&vk, &[instance]) {
         Ok(_) => {
             eprintln!("✅ Proof verification succeeded!");

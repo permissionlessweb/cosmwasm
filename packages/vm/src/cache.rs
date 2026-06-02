@@ -1,14 +1,14 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+#[cfg(feature = "zk")]
+use crate::{check_circuit, CodeBundle, SerializedPlonkishCircuitData};
+use cosmwasm_std::Checksum;
+use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Mutex;
 use wasmer::{Module, Store};
-
-use cosmwasm_std::Checksum;
-use zk_cosmwasm::*;
 
 use crate::backend::{Backend, BackendApi, Querier, Storage};
 use crate::capabilities::required_capabilities_from_module;
@@ -22,7 +22,6 @@ use crate::parsed_wasm::ParsedWasm;
 use crate::size::Size;
 use crate::static_analysis::{Entrypoint, ExportInfo, REQUIRED_IBC_EXPORTS};
 use crate::wasm_backend::{compile, make_compiling_engine};
-use crate::{check_circuit, CodeBundle, SerializedPlonkishCircuitData};
 
 const STATE_DIR: &str = "state";
 // Things related to the state of the blockchain.
@@ -265,8 +264,9 @@ where
         }
     }
 
+    #[cfg(feature = "zk")]
     pub fn store_circuit(&self, vk: &[u8], persist: bool) -> VmResult<Checksum> {
-        let (svk, hash) = check_circuit(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
+        let (_cf, hash) = check_circuit(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
         if persist {
             let res = self.save_circuit_to_disk(vk)?;
             self.pin_circuit(&hash)?;
@@ -297,6 +297,7 @@ where
         Ok(checksum)
     }
 
+    #[cfg(feature = "zk")]
     fn save_circuit_to_disk(&self, vk: &[u8]) -> VmResult<Checksum> {
         let mut cache = self.inner.lock().unwrap();
         let checksum = save_circuit_to_disk(&cache.wasm_path, vk)?;
@@ -321,8 +322,11 @@ where
         if wasm {
             remove_wasm_from_disk(&cache.wasm_path, &checksum)?;
         } else {
-            self.remove_circuit_from_disk(&cache.wasm_path, &checksum)?;
-            self.unpin_circuit(&checksum);
+            #[cfg(feature = "zk")]
+            {
+                self.remove_circuit_from_disk(&cache.wasm_path, &checksum)?;
+                self.unpin_circuit(&checksum);
+            }
         }
 
         Ok(())
@@ -368,10 +372,11 @@ where
 
         match vk {
             true => {
-                if self.has_circuit(checksum) {
+                #[cfg(feature = "zk")]
+                (if self.has_circuit(checksum) {
                     drop(cache);
                     return self.pin_circuit(checksum);
-                }
+                });
                 return Ok(());
             }
             false => {
@@ -426,7 +431,12 @@ where
     /// on the removed value.
     pub fn unpin(&self, checksum: &Checksum, zk: bool) -> VmResult<()> {
         match zk {
-            true => Ok(self.unpin_circuit(checksum)),
+            true => {
+                #[cfg(feature = "zk")]
+                Ok(self.unpin_circuit(checksum));
+                #[cfg(not(feature = "zk"))]
+                Ok(())
+            }
             false => self
                 .inner
                 .lock()
@@ -541,6 +551,7 @@ where
         Ok((module, store))
     }
 
+    #[cfg(feature = "zk")]
     pub fn store_code_with_circuit(
         &self,
         code_bundle: &CodeBundle,
@@ -614,7 +625,9 @@ where
                     {
                         cache.pinned_memory_cache.store_circuit(
                             &vcs,
-                            std::sync::Arc::new(VerifyingKey::from_bytes(&serialized_vk.bytes)?),
+                            std::sync::Arc::new(zk_cosmwasm::VerifyingKey::from_bytes(
+                                &serialized_vk.bytes,
+                            )?),
                         )?;
                     }
                 }
@@ -627,6 +640,7 @@ where
     }
 
     /// Load a verifying key from disk
+    #[cfg(feature = "zk")]
     pub fn load_circuit(
         &self,
         checksum: &Checksum,
@@ -636,6 +650,7 @@ where
     }
 
     /// Check if a VK exists for a given checksum
+    #[cfg(feature = "zk")]
     pub fn has_circuit(&self, checksum: &Checksum) -> bool {
         let cache = self.inner.lock().unwrap();
         let circuit_path = self.circuit_path(&cache.wasm_path, checksum);
@@ -643,6 +658,7 @@ where
     }
 
     /// Pin a VK in memory
+    #[cfg(feature = "zk")]
     fn pin_circuit(&self, checksum: &Checksum) -> VmResult<()> {
         // pick back up cache
         let mut cache = self.inner.lock().unwrap();
@@ -650,7 +666,7 @@ where
             return Ok(());
         }
         if let Some(vkbz) = self.load_circuit_from_disk(&cache.wasm_path, checksum)? {
-            let vk = VerifyingKey::from_bytes(&vkbz.bytes)?;
+            let vk = zk_cosmwasm::VerifyingKey::from_bytes(&vkbz.bytes)?;
             cache
                 .pinned_memory_cache
                 .store_circuit(checksum, std::sync::Arc::new(vk))?;
@@ -661,13 +677,15 @@ where
     }
 
     /// Unpin a VK from memory
+    #[cfg(feature = "zk")]
     fn unpin_circuit(&self, checksum: &Checksum) {
         let mut cache = self.inner.lock().unwrap();
         cache.pinned_memory_cache.remove(checksum, true).unwrap()
     }
 
     /// Get a pinned VK
-    fn get_pinned_circuit(&self, checksum: &Checksum) -> Option<PinnedCircuit> {
+    #[cfg(feature = "zk")]
+    fn _get_pinned_circuit(&self, checksum: &Checksum) -> Option<zk_cosmwasm::PinnedCircuit> {
         self.inner
             .lock()
             .unwrap()
@@ -677,6 +695,7 @@ where
     }
 
     /// Get the path where a VK file would be stored
+    #[cfg(feature = "zk")]
     fn circuit_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
         dir.into().join(checksum.to_hex()).with_extension("bin")
     }
@@ -688,6 +707,7 @@ where
     }
 
     /// Stores vk keys to their dedicated path in dir.
+    #[cfg(feature = "zk")]
     fn store_circuit_to_disk(
         &self,
         dir: impl Into<PathBuf>,
@@ -713,6 +733,7 @@ where
 
     /// Load a verifying key from disk
     /// Returns None if the VK file doesn't exist
+    #[cfg(feature = "zk")]
     fn load_circuit_from_disk(
         &self,
         dir: impl Into<PathBuf>,
@@ -750,6 +771,7 @@ where
     }
 
     /// Remove a VK file from disk if the path exists
+    #[cfg(feature = "zk")]
     fn remove_circuit_from_disk(
         &self,
         dir: impl Into<PathBuf>,
@@ -884,6 +906,7 @@ fn remove_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResu
 /// save stores the wasm code in the given directory and returns an ID for lookup.
 /// It will create the directory if it doesn't exist.
 /// Saving the same byte code multiple times is allowed.
+#[cfg(feature = "zk")]
 fn save_circuit_to_disk(dir: impl Into<PathBuf>, c: &[u8]) -> VmResult<Checksum> {
     let (_, checksum) = crate::check_circuit(c).map_err(|e| VmError::generic_err(e.to_string()))?;
     // calculate filename
@@ -915,7 +938,6 @@ mod tests {
     use std::fs::{create_dir_all, remove_dir_all};
     use tempfile::TempDir;
     use wasm_encoder::ComponentSection;
-    use CodeBundle;
 
     const TESTING_GAS_LIMIT: u64 = 500_000_000; // ~0.5ms
     const TESTING_MEMORY_LIMIT: Size = Size::mebi(16);

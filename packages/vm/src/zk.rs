@@ -1,8 +1,7 @@
 use cosmwasm_std::Checksum;
 
 use halo2_proofs::COSMWASM_METADATA_LENGTH;
-pub use zk_cosmwasm::*;
-/// re-export zk-cosmwasm into vm library
+
 pub use zk_cosmwasm::*;
 
 /// Code bundle containing WASM and optional verifying key

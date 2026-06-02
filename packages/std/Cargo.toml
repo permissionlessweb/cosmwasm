@@ -58,6 +58,7 @@ cosmwasm_2_2 = ["cosmwasm_2_1"]
 # This enables functionality that is only available on 3.0 chains.
 # It adds `WasmQuery::RawRange`.
 cosmwasm_3_0 = ["cosmwasm_2_2"]
+zk = []
 
 [dependencies]
 base64 = "0.22.0"

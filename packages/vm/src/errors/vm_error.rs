@@ -3,6 +3,7 @@ use std::fmt::{Debug, Display};
 use thiserror::Error;
 
 use cosmwasm_crypto::CryptoError;
+#[cfg(feature = "zk")]
 use zk_cosmwasm::ZkError;
 
 use super::communication_error::CommunicationError;
@@ -31,6 +32,7 @@ pub enum VmError {
         input: String,
         backtrace: BT,
     },
+    #[cfg(feature = "zk")]
     #[error("ZkError error: {}", source)]
     ZkError { source: ZkError, backtrace: BT },
     #[error("Crypto error: {}", source)]
@@ -147,6 +149,8 @@ impl VmError {
             backtrace: BT::capture(),
         }
     }
+
+    #[cfg(feature = "zk")]
     pub(crate) fn zk_err(original: ZkError) -> Self {
         VmError::ZkError {
             source: original,
@@ -285,6 +289,7 @@ impl From<CryptoError> for VmError {
     }
 }
 
+#[cfg(feature = "zk")]
 impl From<ZkError> for VmError {
     fn from(original: ZkError) -> Self {
         VmError::zk_err(original)

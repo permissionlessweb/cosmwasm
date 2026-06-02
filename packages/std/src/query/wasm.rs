@@ -67,9 +67,10 @@ pub enum WasmQuery {
     },
     /// Returns a [`CircuitInfoResponse`] with metadata of the code
     // #[cfg(feature = "cosmwasm_3_0")]
+    #[cfg(feature = "zk")]
     CircuitInfo { zk_id: u64 },
     /// Returns a [`CircuitResponse`] with metadata of the code
-    // #[cfg(feature = "cosmwasm_3_0")]
+    #[cfg(feature = "zk")]
     Circuit { zk_id: u64 },
 }
 
@@ -158,53 +159,59 @@ impl_hidden_constructor!(
 
 impl QueryResponseType for CodeInfoResponse {}
 
-/// The essential data from wasmd's [Circuit]/[CircuitResponse].
-///
-/// `code_hash`/`data_hash` was renamed to `checksum` to follow the CosmWasm
-/// convention and naming in `instantiate2_address`.
-///
-/// [CircuitInfo]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/types.proto#L62-L72
-/// [CircuitInfoResponse]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/query.proto#L184-L199
-#[non_exhaustive]
-#[derive(
-    Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema, cw_schema::Schemaifier,
-)]
-pub struct CircuitResponse {
-    pub data: Binary,
+#[cfg(feature = "zk")]
+pub use zk::{CircuitInfoResponse, CircuitResponse};
+#[cfg(feature = "zk")]
+pub mod zk {
+    use super::*;
+    /// The essential data from wasmd's [Circuit]/[CircuitResponse].
+    ///
+    /// `code_hash`/`data_hash` was renamed to `checksum` to follow the CosmWasm
+    /// convention and naming in `instantiate2_address`.
+    ///
+    /// [CircuitInfo]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/types.proto#L62-L72
+    /// [CircuitInfoResponse]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/query.proto#L184-L199
+    #[non_exhaustive]
+    #[derive(
+        Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema, cw_schema::Schemaifier,
+    )]
+    pub struct CircuitResponse {
+        pub data: Binary,
+    }
+
+    impl_hidden_constructor!(
+        CircuitResponse,
+        data: Binary
+    );
+
+    impl QueryResponseType for CircuitResponse {}
+
+    /// The essential data from wasmd's [CircuitInfo]/[CircuitInfoResponse].
+    ///
+    /// `code_hash`/`data_hash` was renamed to `checksum` to follow the CosmWasm
+    /// convention and naming in `instantiate2_address`.
+    ///
+    /// [CircuitInfo]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/types.proto#L62-L72
+    /// [CircuitInfoResponse]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/query.proto#L184-L199
+    #[non_exhaustive]
+    #[derive(
+        Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema, cw_schema::Schemaifier,
+    )]
+    pub struct CircuitInfoResponse {
+        pub zk_id: u64,
+        /// The address that initially stored the code
+        pub creator: Addr,
+        /// The hash of the Wasm blob
+        pub checksum: Checksum,
+    }
+
+    impl_hidden_constructor!(
+        CircuitInfoResponse,
+        zk_id: u64,
+        creator: Addr,
+        checksum: Checksum
+    );
 }
-
-impl_hidden_constructor!(
-    CircuitResponse,
-    data: Binary
-);
-
-impl QueryResponseType for CircuitResponse {}
-
-/// The essential data from wasmd's [CircuitInfo]/[CircuitInfoResponse].
-///
-/// `code_hash`/`data_hash` was renamed to `checksum` to follow the CosmWasm
-/// convention and naming in `instantiate2_address`.
-///
-/// [CircuitInfo]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/types.proto#L62-L72
-/// [CircuitInfoResponse]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/query.proto#L184-L199
-#[non_exhaustive]
-#[derive(
-    Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema, cw_schema::Schemaifier,
-)]
-pub struct CircuitInfoResponse {
-    pub zk_id: u64,
-    /// The address that initially stored the code
-    pub creator: Addr,
-    /// The hash of the Wasm blob
-    pub checksum: Checksum,
-}
-
-impl_hidden_constructor!(
-    CircuitInfoResponse,
-    zk_id: u64,
-    creator: Addr,
-    checksum: Checksum
-);
 
 impl QueryResponseType for CircuitInfoResponse {}
 

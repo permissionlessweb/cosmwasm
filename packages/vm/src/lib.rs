@@ -26,11 +26,13 @@ mod static_analysis;
 pub mod testing;
 mod wasm_backend;
 
+#[cfg(feature = "zk")]
 pub mod zk;
 
-#[cfg(feature = "zk-tests")]
-pub use crate::zk::example_circuits;
+#[cfg(feature = "zk")]
+pub use zk_cosmwasm::{self};
 
+#[cfg(feature = "zk")]
 pub use crate::zk::{
     check_circuit, CodeBundle, CosmwasmCircuit, Proof, ProvingKey, SerializedPlonkishCircuitData,
     VerifyingKey,

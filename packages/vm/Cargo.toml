@@ -40,6 +40,7 @@ stargate = ["cosmwasm-std/stargate"]
 dhat-heap = ["dep:dhat"]
 # ibc2 enables ibc2-dependent messages, entrypoints and queries
 ibc2 = ["cosmwasm-std/ibc2"]
+zk = ["cosmwasm-std/zk", "dep:zk-cosmwasm"]
 
 [dependencies]
 bech32 = "0.11.0"
@@ -48,7 +49,7 @@ clru = "0.6.1"
 # Uses the path when built locally; uses the given version from crates.io when published
 cosmwasm-core = { workspace = true }
 cosmwasm-crypto = { workspace = true }
-cosmwasm-std = { workspace = true, features = ["std"] }
+cosmwasm-std = { workspace = true, features = ["std", "zk"] }
 cosmwasm-vm-derive = { workspace = true }
 crc32fast = "1.3.2"
 derive_more = { version = "1.0.0", default-features = false, features = ["debug"] }
@@ -69,7 +70,7 @@ wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
 
 halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs" }
-zk-cosmwasm  = { workspace = true, features = ["interface"] }
+zk-cosmwasm  = { workspace = true, features = ["interface"], optional = true }
 
 tracing = "0.1.38"
 tracing-profile = "0.10.11"
