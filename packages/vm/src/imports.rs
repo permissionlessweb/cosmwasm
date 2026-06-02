@@ -64,9 +64,6 @@ const MAX_LENGTH_DEBUG: usize = 2 * MI;
 /// Max length for an abort message
 const MAX_LENGTH_ABORT: usize = 2 * MI;
 
-/// Max length for an zk-id
-pub const ZKID_MAX_LEN: usize = 64;
-
 #[inline(always)]
 fn charge_host_call_gas<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
     env: &Environment<A, S, Q>,

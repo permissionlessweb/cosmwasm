@@ -210,10 +210,10 @@ pub mod zk {
         zk_id: u64,
         creator: Addr,
         checksum: Checksum
-    );
+    )
+    ;
+    impl QueryResponseType for CircuitInfoResponse {}
 }
-
-impl QueryResponseType for CircuitInfoResponse {}
 
 #[non_exhaustive]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]

@@ -119,7 +119,7 @@ impl PinnedMemoryCache {
         match zk {
             true => {
                 #[cfg(feature = "zk")]
-                self.circuits.contains_key(checksum);
+                return self.circuits.contains_key(checksum);
                 #[cfg(not(feature = "zk"))]
                 false
             }
@@ -157,7 +157,7 @@ impl PinnedMemoryCache {
                 .map(|(key, zk)| std::mem::size_of_val(key) + zk.circuit.actual_size_bytes())
                 .sum();
 
-            module_size + circuit_size
+            return module_size + circuit_size;
         }
         module_size
     }

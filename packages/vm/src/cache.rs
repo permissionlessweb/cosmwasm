@@ -433,9 +433,9 @@ where
         match zk {
             true => {
                 #[cfg(feature = "zk")]
-                Ok(self.unpin_circuit(checksum));
+                return Ok(self.unpin_circuit(checksum));
                 #[cfg(not(feature = "zk"))]
-                Ok(())
+                return Err(VmError::generic_err("circuit feature disabled"));
             }
             false => self
                 .inner

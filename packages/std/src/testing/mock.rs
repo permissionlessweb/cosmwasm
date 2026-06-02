@@ -197,6 +197,7 @@ impl Api for MockApi {
         cosmwasm_crypto::bls12_381_aggregate_g2(g2s).map_err(Into::into)
     }
 
+    #[cfg(feature = "zk")]
     fn halo2_proof_instance_verify(
         &self,
         zkid: u64,
@@ -1030,9 +1031,11 @@ impl Default for WasmQuerier {
                 WasmQuery::RawRange { contract_addr, .. } => SystemError::NoSuchContract {
                     addr: contract_addr.clone(),
                 },
+                #[cfg(feature = "zk")]
                 WasmQuery::CircuitInfo { zk_id } => SystemError::NoSuchCircuit {
                     zk_id: zk_id.clone(),
                 },
+                #[cfg(feature = "zk")]
                 WasmQuery::Circuit { zk_id } => SystemError::NoSuchCircuit {
                     zk_id: zk_id.clone(),
                 },
@@ -2971,7 +2974,9 @@ mod tests {
                         })
                     }
                 }
+                #[cfg(feature = "zk")]
                 WasmQuery::CircuitInfo { zk_id } => todo!(),
+                #[cfg(feature = "zk")]
                 WasmQuery::Circuit { zk_id } => todo!(),
             }
         });
