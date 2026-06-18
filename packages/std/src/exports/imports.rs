@@ -108,6 +108,7 @@ extern "C" {
     /// proof_len: length of proof bytes
     /// i_ptr: pointer to instance bytes in Wasm memory
     /// i_len: length of instance bytes
+    #[cfg(feature = "zk")]
     fn halo2_proof_instance_verify(
         zkid: u32,
         proof_ptr: u32,
@@ -722,6 +723,7 @@ impl Api for ExternalApi {
         }
     }
 
+    #[cfg(feature = "zk")]
     fn halo2_proof_instance_verify(
         &self,
         zkid: u64,

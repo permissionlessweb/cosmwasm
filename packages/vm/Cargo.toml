@@ -49,7 +49,7 @@ clru = "0.6.1"
 # Uses the path when built locally; uses the given version from crates.io when published
 cosmwasm-core = { workspace = true }
 cosmwasm-crypto = { workspace = true }
-cosmwasm-std = { workspace = true, features = ["std", "zk"] }
+cosmwasm-std = { workspace = true, features = ["std"] }
 cosmwasm-vm-derive = { workspace = true }
 crc32fast = "1.3.2"
 derive_more = { version = "1.0.0", default-features = false, features = ["debug"] }
