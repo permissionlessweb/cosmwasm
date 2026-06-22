@@ -298,6 +298,7 @@ mod tests {
     }
     #[test]
     #[cfg(feature = "cosmwasm_3_0")]
+    #[cfg(feature = "zk")]
     fn circuit_info_response_serialization() {
         use crate::Checksum;
 

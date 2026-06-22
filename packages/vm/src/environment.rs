@@ -1080,6 +1080,7 @@ mod tests {
         assert_eq!(balance.amount, coin(INIT_AMOUNT, INIT_DENOM));
     }
 
+    #[cfg(feature = "zk")]
     #[test]
     #[allow(deprecated)]
     fn with_querier_from_context_works_for_cirucits() {

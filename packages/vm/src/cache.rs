@@ -975,19 +975,6 @@ mod tests {
         ])
     }
 
-    // fn make_testing_options_with_vk() -> (CacheOptions, TempDir, zk_test_press::TestPressSuite) {
-    //     let temp_dir = TempDir::new().unwrap();
-    //     (
-    //         CacheOptions {
-    //             base_dir: temp_dir.path().into(),
-    //             available_capabilities: default_capabilities(),
-    //             memory_cache_size_bytes: TESTING_MEMORY_CACHE_SIZE,
-    //             instance_memory_limit_bytes: TESTING_MEMORY_LIMIT,
-    //         },
-    //         temp_dir,
-    //         zk_test_press::TestPressSuite::new(),
-    //     )
-    // }
     fn make_testing_options() -> (CacheOptions, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         (
