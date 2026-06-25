@@ -1166,7 +1166,7 @@ mod tests {
         Box<WasmerInstance>,
     ) {
         let gas_limit = TESTING_GAS_LIMIT;
-        let env = Environment::new(api, gas_limit);
+        let env = Environment::new_with_vk(api, gas_limit);
 
         let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
         let module = compile(&engine, HACKATOM).unwrap();

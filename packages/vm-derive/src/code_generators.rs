@@ -50,24 +50,10 @@ impl CodeGenerator {
         let k = self.attrs.k;
         let instances = self.attrs.instances;
         let ct_byte = self.attrs.circuit_type.to_u8();
-        let analyze_cs = self.attrs.analyze_cs;
-
-        // Generate CS analysis code if enabled
+        let _analyze_cs = self.attrs.analyze_cs;
         let cs_metadata_impl = self.generate_cs_metadata_impl();
-
-        // Generate footer implementation
-        let footer_impl = if analyze_cs {
-            self.generate_v2_footer_impl()
-        } else {
-            self.generate_v1_footer_impl()
-        };
-
-        // Generate serialization implementations
-        let serialization_impl = if analyze_cs {
-            self.generate_v2_serialization_impl()
-        } else {
-            self.generate_v1_serialization_impl()
-        };
+        let footer_impl = self.generate_v2_footer_impl();
+        let serialization_impl = self.generate_v2_serialization_impl();
 
         quote! {
             /// Automatically generated trait implementation for CosmWasm circuit compatibility
@@ -169,36 +155,17 @@ impl CodeGenerator {
 
     /// Generate version 2 footer implementation with CS analysis
     fn generate_v2_footer_impl(&self) -> TokenStream {
-        let circuit_name = &self.circuit_name;
-        let k = self.attrs.k;
+        let _circuit_name = &self.circuit_name;
+        let _k = self.attrs.k;
         let instances = self.attrs.instances;
         let ct_byte = self.attrs.circuit_type.to_u8();
 
         quote! {
-            /// Get the circuit footer for serialization (version 2 with CS)
-            ///
-            /// The footer is auto-generated with values computed from circuit analysis.
-            /// Note: params_len, vk_len, and cs_len are set to 0 here and must be
-            /// updated during actual serialization when the byte lengths are known.
             pub fn footer() -> cosmwasm_vm::zk::CircuitFooter {
                 let cs_meta = Self::constraint_system_metadata();
-
-                // Note: The length fields (params_len, vk_len, cs_len) are placeholders.
-                // They will be filled in during to_bytes_with_cs() when actual lengths are known.
                 cosmwasm_vm::zk::CircuitFooter::new(
                     cosmwasm_vm::zk::CircuitType::from_u8(#ct_byte).expect("Valid circuit type"),
                     #instances,
-                    cs_meta.num_fixed_columns as u8,
-                    cs_meta.num_advice_columns as u8,
-                    cs_meta.num_instance_columns as u8,
-                    cs_meta.degree,
-                    0, // params_len - filled during serialization
-                    0, // vk_len - filled during serialization
-                    0, // cs_len - filled during serialization
-                    cs_meta.num_selectors,
-                    cs_meta.num_gates,
-                    cs_meta.has_lookups,
-                    0, // crc32 - computed during serialization
                 )
             }
 
@@ -211,47 +178,9 @@ impl CodeGenerator {
                 crc32: u32,
             ) -> cosmwasm_vm::zk::CircuitFooter {
                 let cs_meta = Self::constraint_system_metadata();
-
                 cosmwasm_vm::zk::CircuitFooter::new(
                     cosmwasm_vm::zk::CircuitType::from_u8(#ct_byte).expect("Valid circuit type"),
                     #instances,
-                    cs_meta.num_fixed_columns as u8,
-                    cs_meta.num_advice_columns as u8,
-                    cs_meta.num_instance_columns as u8,
-                    cs_meta.degree,
-                    params_len,
-                    vk_len,
-                    cs_len,
-                    cs_meta.num_selectors,
-                    cs_meta.num_gates,
-                    cs_meta.has_lookups,
-                    crc32,
-                )
-            }
-        }
-    }
-
-    /// Generate version 1 footer implementation (legacy)
-    fn generate_v1_footer_impl(&self) -> TokenStream {
-        let instances = self.attrs.instances;
-        let ct_byte = self.attrs.circuit_type.to_u8();
-
-        quote! {
-            /// Get the circuit footer for serialization (version 1 legacy)
-            pub fn footer() -> cosmwasm_vm::zk::CircuitFooter {
-                cosmwasm_vm::zk::CircuitFooter::new(
-                    cosmwasm_vm::zk::CircuitType::from_u8(#ct_byte).expect("Valid circuit type"),
-                    #instances,
-                    0, // num_fixed_columns - not tracked in v1
-                    0, // num_advice_columns
-                    0, // num_instance_columns
-                    0, // degree
-                    0, // params_len
-                    0, // vk_len
-                    0, // num_selectors
-                    0, // fixed_equality_mask
-                    0, // advice_query_counts
-                    0, // crc32
                 )
             }
         }
@@ -261,7 +190,7 @@ impl CodeGenerator {
     fn generate_v2_serialization_impl(&self) -> TokenStream {
         let circuit_name = &self.circuit_name;
         let k = self.attrs.k;
-        let instances = self.attrs.instances;
+        let _instances = self.attrs.instances;
 
         quote! {
             /// Serialize the circuit with constraint system (version 2 format)
@@ -270,7 +199,7 @@ impl CodeGenerator {
             ///
             /// This generates a complete circuit file that can be deserialized
             /// without knowing the original circuit type, using the embedded CS.
-            pub fn to_bytes_with_cs() -> Result<Vec<u8>, cosmwasm_vm::zk::ZkError> {
+            pub fn to_bytes() -> Result<Vec<u8>, cosmwasm_vm::zk::ZkError> {
                 use std::io::Write;
                 use halo2_proofs::plonk::Circuit;
 
@@ -304,22 +233,20 @@ impl CodeGenerator {
                 cs.write(&mut cs_buf)
                     .map_err(|e| cosmwasm_vm::zk::ZkError::new_err(format!("Failed to serialize CS: {}", e)))?;
 
-                // Create footer with actual lengths
-                let footer = Self::footer_with_lengths(
-                    params_buf.len() as u32,
-                    vk_buf.len() as u32,
-                    cs_buf.len() as u32,
-                    0, // CRC32 could be computed here if needed
-                );
 
-                // Combine all sections
-                let mut output = Vec::with_capacity(
-                    params_buf.len() + vk_buf.len() + cs_buf.len() + 32
-                );
+
+                let paramlen =  params_buf.len();
+                let cslen = cs_buf.len();
+                let vklen = vk_buf.len();
+                let mut output = Vec::with_capacity(paramlen + vklen + cslen + COSMWASM_FOOTER_LENGTH);
+                // write to output buffer, pad with known object len in ZcashDeserialize fashion
+                output.extend_from_slice(&[paramlen])
                 output.extend_from_slice(&params_buf);
-                output.extend_from_slice(&vk_buf);
+                output.extend_from_slice(&[cslen])
                 output.extend_from_slice(&cs_buf);
-                output.extend_from_slice(&footer.to_bytes());
+                output.extend_from_slice(&[vklen])
+                output.extend_from_slice(&vk_buf);
+                output.extend_from_slice(&CircuitFooter::new(instances,Sha256::digest(output).into()).to_bytes());
 
                 Ok(output)
             }
@@ -327,106 +254,10 @@ impl CodeGenerator {
             /// Deserialize a verifying key from bytes (version 2 format with CS)
             ///
             /// This uses the embedded constraint system for circuit-agnostic deserialization.
-            pub fn from_bytes_with_cs(bytes: &[u8]) -> Result<cosmwasm_vm::zk::VerifyingKey, cosmwasm_vm::zk::ZkError> {
+            pub fn from_bytes(bytes: &[u8]) -> Result<cosmwasm_vm::zk::VerifyingKey, cosmwasm_vm::zk::ZkError> {
                 cosmwasm_vm::zk::VerifyingKey::from_bytes(bytes)
             }
 
-            /// Serialize for VM transmission (FFI format)
-            ///
-            /// Returns a SerializedPlonkishCircuitData ready for WASM boundary transmission.
-            pub fn serialize_for_vm() -> Result<cosmwasm_vm::zk::SerializedPlonkishCircuitData, cosmwasm_vm::zk::ZkError> {
-                use sha2::{Sha256, Digest};
-
-                let bytes = Self::to_bytes_with_cs()?;
-
-                // Compute SHA256 hash of the circuit bytes (excluding footer)
-                let circuit_bytes = &bytes[..bytes.len() - 32];
-                let mut hasher = Sha256::new();
-                hasher.update(circuit_bytes);
-                let hash: [u8; 32] = hasher.finalize().into();
-
-                let footer = Self::footer();
-
-                Ok(cosmwasm_vm::zk::SerializedPlonkishCircuitData::new(
-                    &bytes,
-                    &hash,
-                    &footer.to_bytes(),
-                ))
-            }
-        }
-    }
-
-    /// Generate version 1 serialization implementation (legacy)
-    fn generate_v1_serialization_impl(&self) -> TokenStream {
-        let circuit_name = &self.circuit_name;
-        let k = self.attrs.k;
-
-        quote! {
-            /// Serialize the circuit (version 1 legacy format)
-            ///
-            /// Format: [params bytes][vk bytes][footer (32 bytes)]
-            pub fn to_bytes_with_cs() -> Result<Vec<u8>, cosmwasm_vm::zk::ZkError> {
-                use std::io::Write;
-                use halo2_proofs::plonk::Circuit;
-
-                let circuit = <#circuit_name as Circuit<pasta_curves::vesta::Scalar>>::without_witnesses(
-                    &#circuit_name::default()
-                );
-
-                let params = halo2_proofs::poly::commitment::Params::<pasta_curves::vesta::Affine>::new(#k);
-
-                let mut params_buf = Vec::new();
-                params.write(&mut params_buf)
-                    .map_err(|e| cosmwasm_vm::zk::ZkError::new_err(format!("Failed to serialize params: {}", e)))?;
-
-                let vk = halo2_proofs::plonk::keygen_vk(&params, &circuit)
-                    .map_err(|e| cosmwasm_vm::zk::ZkError::new_err(format!("Failed to generate VK: {:?}", e)))?;
-
-                let mut vk_buf = Vec::new();
-                vk.write(&mut vk_buf)
-                    .map_err(|e| cosmwasm_vm::zk::ZkError::new_err(format!("Failed to serialize VK: {}", e)))?;
-
-                let footer = cosmwasm_vm::zk::CircuitFooter::new(
-                    Self::ct(),
-                    Self::instance_count(),
-                    0, 0, 0, 0,
-                    params_buf.len() as u32,
-                    vk_buf.len() as u32,
-                    0, 0, 0, 0,
-                );
-
-                let mut output = Vec::with_capacity(params_buf.len() + vk_buf.len() + 32);
-                output.extend_from_slice(&params_buf);
-                output.extend_from_slice(&vk_buf);
-                output.extend_from_slice(&footer.to_bytes());
-
-                Ok(output)
-            }
-
-            /// Deserialize a verifying key from bytes
-            pub fn from_bytes_with_cs(bytes: &[u8]) -> Result<cosmwasm_vm::zk::VerifyingKey, cosmwasm_vm::zk::ZkError> {
-                cosmwasm_vm::zk::VerifyingKey::from_bytes(bytes)
-            }
-
-            /// Serialize for VM transmission (FFI format)
-            pub fn serialize_for_vm() -> Result<cosmwasm_vm::zk::SerializedPlonkishCircuitData, cosmwasm_vm::zk::ZkError> {
-                use sha2::{Sha256, Digest};
-
-                let bytes = Self::to_bytes_with_cs()?;
-
-                let circuit_bytes = &bytes[..bytes.len() - 32];
-                let mut hasher = Sha256::new();
-                hasher.update(circuit_bytes);
-                let hash: [u8; 32] = hasher.finalize().into();
-
-                let footer = Self::footer();
-
-                Ok(cosmwasm_vm::zk::SerializedPlonkishCircuitData::new(
-                    &bytes,
-                    &hash,
-                    &footer.to_bytes(),
-                ))
-            }
         }
     }
 

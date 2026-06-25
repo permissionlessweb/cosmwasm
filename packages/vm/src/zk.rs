@@ -1,7 +1,5 @@
 use cosmwasm_std::Checksum;
 
-use halo2_proofs::COSMWASM_FOOTER_LENGTH;
-
 pub use zk_cosmwasm::*;
 
 /// Code bundle containing WASM and optional verifying key
@@ -58,11 +56,13 @@ impl CodeBundle {
     }
 }
 
-/// Serializes SerializedPlonkishCircuitData into a complete binary format for FFI transmission
+use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+
+/// Serializes SerializedPlonkishCircuitData into a complete binary format for FFI transmission.
 pub fn serialize_circuit_data(vk_data: &SerializedPlonkishCircuitData) -> Vec<u8> {
     let mut result = Vec::new();
-    result.extend_from_slice(&vk_data.bytes); // all bytes of (params|cs|vk)
-    result.extend_from_slice(&vk_data.footer); // always 32 byte metadata footer
+    result.extend_from_slice(&vk_data.bytes);
+    result.extend_from_slice(&vk_data.footer);
     result
 }
 
@@ -79,18 +79,6 @@ pub fn deserialize_circuit_data(data: &[u8]) -> ZkResult<SerializedPlonkishCircu
     ))
 }
 
-/// Hash the verifying key bytes using the same method as halo2
-/// halo2 uses Blake2b-256 for circuit hashing
-
-/// Validates that a VK blob can be deserialized
-/// We use a generic circuit marker to avoid needing the actual circuit at validation time
-
-/// Validates that a combined params+VK+(CS)+footer blob matches the expected structure
-/// and extracts the actual CircuitFooter metadata.
-///
-/// Supports both version 1 (params+VK+footer) and version 2 (params+VK+CS+footer) formats.
-/// This is used both at runtime (in the VM) and during build/validation to ensure
-/// the file format is correct and can be used generically without knowing the circuit type.
 pub fn check_circuit(bytes: &[u8]) -> ZkResult<CircuitFooter> {
     let footer_bytes = &bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..];
     let body_bytes = &bytes[0..bytes.len() - COSMWASM_FOOTER_LENGTH];
@@ -143,7 +131,7 @@ mod tests {
         // Total = 90 + 100 + 32 = 222 bytes
 
         // Build 32-byte footer using CircuitFooter
-        let footer = CircuitFooter::new(CircuitType::Plonkish, 2, 2, [0u8; 32]);
+        let footer = CircuitFooter::new(CircuitType::Plonkish, 2, [0u8; 32]);
 
         // Build the full vk blob
         let mut vk_blob = Vec::new();
@@ -182,7 +170,6 @@ mod tests {
         let footer = CircuitFooter::new(
             CircuitType::Plonkish,
             2, // instance_count
-            2, // num_fixed_columns
             [0u8; 32],
         );
 

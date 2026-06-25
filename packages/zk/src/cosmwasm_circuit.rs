@@ -369,7 +369,6 @@ impl VerifyingKey {
         let footer = CircuitFooter::new(
             CircuitType::Plonkish,
             i as u8,
-            meta.num_gates,
             Sha256::digest(&output).into(),
         );
         output.extend_from_slice(&footer.to_bytes());

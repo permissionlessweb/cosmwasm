@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use halo2_proofs::COSMWASM_FOOTER_LENGTH;
 
 use crate::cosmwasm_circuit::CircuitType;
@@ -14,8 +12,6 @@ pub struct CircuitFooter {
     pub circuit_type: CircuitType,
     /// Number of public input scalars required by this circuit
     pub instance_count: u8,
-    /// Number of gates in the constraint system
-    pub num_gates: u32,
     /// checksums
     pub checksum: [u8; 32],
 }
@@ -24,7 +20,6 @@ impl std::fmt::Display for CircuitFooter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!("{:#?},", self.circuit_type.to_u8()))?;
         f.write_str(&format!("{:#?}", self.instance_count))?;
-        f.write_str(&format!("{:#?}", self.num_gates))?;
         f.write_str(&format!(
             "{:#?}, self.circuit_type.to_u8()",
             hex::encode(self.checksum)
@@ -37,16 +32,10 @@ impl CircuitFooter {
         hex::encode(self.checksum)
     }
     /// Create a new v2 circuit footer (CS-inclusive format).
-    pub fn new(
-        circuit_type: CircuitType,
-        instance_count: u8,
-        num_gates: u32,
-        hash: [u8; 32],
-    ) -> Self {
+    pub fn new(circuit_type: CircuitType, instance_count: u8, hash: [u8; 32]) -> Self {
         Self {
             circuit_type,
             instance_count,
-            num_gates,
             checksum: hash,
         }
     }
@@ -56,8 +45,7 @@ impl CircuitFooter {
         let mut bytes = [0u8; COSMWASM_FOOTER_LENGTH];
         bytes[0] = self.circuit_type.to_u8();
         bytes[1] = self.instance_count;
-        bytes[2..6].copy_from_slice(&self.num_gates.to_le_bytes());
-        bytes[6..42].copy_from_slice(&self.checksum.as_slice());
+        bytes[2..COSMWASM_FOOTER_LENGTH].copy_from_slice(&self.checksum.as_slice());
         bytes
     }
 
@@ -70,15 +58,17 @@ impl CircuitFooter {
                 bytes.len()
             )));
         }
-
         let circuit_type = CircuitType::from_u8(bytes[0])
             .ok_or_else(|| ZkError::new_err("Invalid circuit type in footer"))?;
+
+        let checksum: [u8; 32] = bytes[2..COSMWASM_FOOTER_LENGTH]
+            .try_into()
+            .map_err(|_| ZkError::new_err("Failed to parse checksum"))?;
 
         Ok(Self {
             circuit_type,
             instance_count: bytes[1],
-            num_gates: u32::from_le_bytes(bytes[2..5].try_into()?),
-            checksum: bytes[6..41].try_into()?,
+            checksum,
         })
     }
 }
