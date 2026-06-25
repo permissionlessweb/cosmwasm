@@ -11,7 +11,7 @@ use halo2_proofs::{
 };
 use pasta_curves::vesta;
 use sha2::{Digest, Sha256};
-use std::io::{self, Cursor, Write as _};
+use std::io::{self, Cursor};
 
 /// Custom section name for embedded verifying keys
 /// Contracts can embed their VK in a WASM custom section with this name
@@ -298,7 +298,7 @@ pub struct SerializedPlonkishCircuitData {
 impl SerializedPlonkishCircuitData {
     pub fn new(bytes: &[u8], footer: &[u8]) -> Self {
         Self {
-            bytes: bytes.into(),
+            bytes: bytes.to_vec(),
             footer: footer.to_vec(),
         }
     }
@@ -348,7 +348,7 @@ impl VerifyingKey {
     {
         let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::new(k);
         let vk = plonk::keygen_vk(&params, &c).unwrap();
-        let (cs, meta) = Self::extract_cs_metadata::<C>()?;
+        let (cs, _) = Self::extract_cs_metadata::<C>()?;
 
         let mut params_buf = VecDeque::new();
         params.write(&mut params_buf)?;

@@ -16,16 +16,34 @@ impl CodeBundle {
             verifying_key: None,
         }
     }
-
-    /// validates binary structure, returns hash of just verifying key.
-    ///  (mimics release specification of halo2 circuits for interoperability)
     pub fn with_vk(wasm: Vec<u8>, vk_bytes: Vec<u8>) -> ZkResult<Self> {
         let footer = check_circuit(&vk_bytes)?;
-        Ok(Self::with_vk_and_type(wasm, vk_bytes, footer))
+        tracing::debug!("Original vk_bytes len: {}", vk_bytes.len());
+        tracing::debug!(
+            "Body len passed to new(): {}",
+            vk_bytes.len() - COSMWASM_FOOTER_LENGTH
+        );
+
+        let bundle = Self::with_vk_and_type(wasm, vk_bytes, footer);
+
+        if let Some(vk) = &bundle.verifying_key {
+            tracing::debug!("After new() - vk.bytes len: {}", vk.bytes.len());
+            tracing::debug!(
+                "vk checksum: {:02x?}",
+                Checksum::generate(&vk.bytes).as_slice()
+            );
+            tracing::debug!("Stored footer checksum: {:02x?}", footer.checksum);
+        }
+
+        Ok(bundle)
     }
 
     pub fn with_vk_and_type(wasm: Vec<u8>, vk_bytes: Vec<u8>, footer: CircuitFooter) -> Self {
-        let vk = SerializedPlonkishCircuitData::new(&vk_bytes, &footer.to_bytes());
+        let body_len = vk_bytes.len() - COSMWASM_FOOTER_LENGTH;
+        let body = &vk_bytes[0..body_len]; // ← explicit slice
+
+        let vk = SerializedPlonkishCircuitData::new(body, &footer.to_bytes()); // ← pass body only!
+
         CodeBundle {
             wasm,
             verifying_key: Some(vk),
@@ -54,6 +72,12 @@ impl CodeBundle {
     fn dummy_checksum(&self) -> Checksum {
         Checksum::generate(&[])
     }
+
+    pub fn vk_body_checksum(&self) -> Option<Checksum> {
+        self.verifying_key
+            .as_ref()
+            .map(|vk| Checksum::generate(&vk.bytes))
+    }
 }
 
 use halo2_proofs::COSMWASM_FOOTER_LENGTH;
@@ -80,15 +104,29 @@ pub fn deserialize_circuit_data(data: &[u8]) -> ZkResult<SerializedPlonkishCircu
 }
 
 pub fn check_circuit(bytes: &[u8]) -> ZkResult<CircuitFooter> {
-    let footer_bytes = &bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..];
-    let body_bytes = &bytes[0..bytes.len() - COSMWASM_FOOTER_LENGTH];
+    let total_len = bytes.len();
+    if total_len < COSMWASM_FOOTER_LENGTH {
+        return Err(ZkError::new_err("bad circuit size"));
+    };
+    let footer_bytes = &bytes[total_len - COSMWASM_FOOTER_LENGTH..];
+    let body_bytes = &bytes[..total_len - footer_bytes.len()];
+
+    tracing::debug!(
+        "Total len: {}, COSMWASM_FOOTER_LENGTH: {}, footer_bytes.len(): {}, body_bytes.len(): {}",
+        total_len,
+        COSMWASM_FOOTER_LENGTH,
+        footer_bytes.len(),
+        body_bytes.len()
+    );
+
     let footer = CircuitFooter::from_bytes(footer_bytes)
         .map_err(|e| ZkError::new_err(format!("Failed to parse CircuitFooter: {}", e)))?;
-    tracing::debug!("✓ Parsed CircuitFooter: {}", footer);
-    assert_eq!(
-        &Checksum::generate(&body_bytes).as_slice(),
-        &footer.checksum
-    );
+
+    let computed = Checksum::generate(body_bytes);
+
+    tracing::debug!("Parsed footer checksum: {:02x?}", footer.checksum);
+    tracing::debug!("Computed on body:     {:02x?}", computed.as_slice());
+    assert_eq!(&computed.as_slice(), &footer.checksum);
 
     Ok(footer)
 }
@@ -126,83 +164,59 @@ mod tests {
     #[test]
     fn code_bundle_with_vk() {
         let wasm = vec![0u8; 100];
-        let params_len: u32 = 90;
-        let vk_len: u32 = 100;
-        // Total = 90 + 100 + 32 = 222 bytes
-
-        // Build 32-byte footer using CircuitFooter
-        let footer = CircuitFooter::new(CircuitType::Plonkish, 2, [0u8; 32]);
-
-        // Build the full vk blob
-        let mut vk_blob = Vec::new();
-        // params
-        vk_blob.extend(vec![0xAA; params_len as usize]);
-        // vk
-        vk_blob.extend(vec![0xBB; vk_len as usize]);
-        // footer (32 bytes)
-        vk_blob.extend_from_slice(&footer.to_bytes());
-        assert_eq!(vk_blob.len(), 222); // Sanity check: 90 + 100 + 32
-
-        let bundle = CodeBundle::with_vk(wasm.clone(), vk_blob.clone()).unwrap();
-
-        assert_eq!(bundle.wasm, wasm);
-        assert!(bundle.verifying_key.is_some());
-
-        let vk_data = bundle.verifying_key.unwrap();
-
-        assert_eq!(vk_data.bytes, vk_blob);
-
-        // Metadata should contain circuit info (typically 10 bytes for PlonkishCircuitMetadata)
-        assert!(!vk_data.footer.is_empty());
-        assert_eq!(vk_data.bytes.len(), 222); // Total blob length with 32-byte footer
-    }
-
-    #[test]
-    fn code_bundle_with_vk_v2() {
-        let wasm = vec![0u8; 100];
         // Define sizes for v2 format with CS
         let params_len: u32 = 90;
         let vk_len: u32 = 100;
         let cs_len: u32 = 50;
-        // Total = 90 + 100 + 50 + 32 = 272 bytes
 
-        // Build 32-byte footer using CircuitFooter::new
+        let mut vk_blob: Vec<u8> = Vec::new();
+        // params
+        vk_blob.extend(params_len.to_le_bytes());
+        vk_blob.extend(vec![0xAA; params_len as usize]);
+        // cs
+        vk_blob.extend(cs_len.to_le_bytes());
+        vk_blob.extend(vec![0xCC; cs_len as usize]);
+        // vk
+        vk_blob.extend(vk_len.to_le_bytes());
+        vk_blob.extend(vec![0xBB; vk_len as usize]);
         let footer = CircuitFooter::new(
             CircuitType::Plonkish,
             2, // instance_count
-            [0u8; 32],
+            Checksum::generate(&vk_blob)
+                .as_slice()
+                .try_into()
+                .expect("msg"),
         );
-
-        // Build the full vk blob for v2: params + vk + cs + footer
-        let mut vk_blob = Vec::new();
-        // params
-        vk_blob.extend(vec![0xAA; params_len as usize]);
-        // vk
-        vk_blob.extend(vec![0xBB; vk_len as usize]);
-        // cs
-        vk_blob.extend(vec![0xCC; cs_len as usize]);
-        // footer (32 bytes)
         vk_blob.extend_from_slice(&footer.to_bytes());
-        assert_eq!(vk_blob.len(), 272); // Sanity check: 90 + 100 + 50 + 32
+        assert_eq!(
+            vk_blob.len() as u32,
+            (12 + params_len + cs_len + vk_len + COSMWASM_FOOTER_LENGTH as u32)
+        ); // Sanity check: 90 + 100 + 50 + COSMWASM_FOOTER_LENGTH
 
         let bundle = CodeBundle::with_vk(wasm.clone(), vk_blob.clone()).unwrap();
+        let [wasm_ck, vk_ck] = bundle.compute_checksums();
+
+        assert_eq!(wasm_ck, Checksum::generate(&wasm));
+        assert_eq!(
+            vk_ck,
+            Checksum::generate(&vk_blob[..vk_blob.len() - COSMWASM_FOOTER_LENGTH])
+        );
 
         assert_eq!(bundle.wasm, wasm);
         assert!(bundle.verifying_key.is_some());
 
         let vk_data = bundle.verifying_key.unwrap();
-
-        assert_eq!(vk_data.bytes, vk_blob);
+        assert_eq!(
+            &vk_data.bytes,
+            &vk_blob[..vk_blob.len() - COSMWASM_FOOTER_LENGTH]
+        );
 
         // Metadata should contain circuit info
         assert!(!vk_data.footer.is_empty());
-        assert_eq!(vk_data.bytes.len(), 272); // Total blob length with 32-byte footer
-
-        // Hash should not be empty
-        // assert_ne!(
-        //     vk_data.hash.to_vec(),
-        //     cosmwasm_std::Checksum::from([0u8; 32]).as_slice()
-        // );
+        assert_eq!(
+            vk_data.bytes.len() as u32,
+            (12 + params_len + cs_len + vk_len as u32)
+        ); // Total blob length with 32-byte footer
     }
 
     #[test]
@@ -211,10 +225,7 @@ mod tests {
         println!("{:#?}", result);
         assert!(result.is_err());
         // New 32-byte footer format requires at least 32 bytes
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("VK file too short: need at least 32 bytes for footer"));
+        assert!(result.unwrap_err().to_string().contains("bad circuit size"));
     }
 
     /// Helper to create a minimal valid WASM module with a custom section

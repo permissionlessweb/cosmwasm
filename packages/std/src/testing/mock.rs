@@ -2975,9 +2975,31 @@ mod tests {
                     }
                 }
                 #[cfg(feature = "zk")]
-                WasmQuery::CircuitInfo { zk_id } => todo!(),
+                WasmQuery::CircuitInfo { zk_id } => {
+                    if zk_id == &4 {
+                        use crate::{Checksum, CircuitInfoResponse};
+                        let response = CircuitInfoResponse {
+                            zk_id: 4,
+                            creator: Addr::unchecked("lalala"),
+                            checksum: Checksum::generate("lelel".as_bytes()),
+                        };
+                        SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
+                    } else {
+                        SystemResult::Err(SystemError::NoSuchCircuit { zk_id: *zk_id })
+                    }
+                }
                 #[cfg(feature = "zk")]
-                WasmQuery::Circuit { zk_id } => todo!(),
+                WasmQuery::Circuit { zk_id } => {
+                    if zk_id == &4 {
+                        use crate::CircuitResponse;
+                        let response = CircuitResponse {
+                            data: Binary::new(vec![]),
+                        };
+                        SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
+                    } else {
+                        SystemResult::Err(SystemError::NoSuchCircuit { zk_id: *zk_id })
+                    }
+                }
             }
         });
 
