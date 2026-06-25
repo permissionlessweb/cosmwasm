@@ -72,7 +72,7 @@ pub use crate::instance::{DebugInfo, GasReport, Instance, InstanceOptions};
 pub use crate::serde::{from_slice, to_vec};
 pub use crate::size::Size;
 
-pub use halo2_proofs::COSMWASM_METADATA_LENGTH as HALO2_METADATA_LENGTH;
+pub use halo2_proofs::COSMWASM_FOOTER_LENGTH;
 
 pub mod internals {
     #![doc(hidden)]

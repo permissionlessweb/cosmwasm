@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::parsers::{CircuitAttributes, CircuitTypeAttr};
+use crate::parsers::CircuitAttributes;
 
 /// Generates Rust code for a circuit based on its attributes
 ///
@@ -50,15 +50,10 @@ impl CodeGenerator {
         let k = self.attrs.k;
         let instances = self.attrs.instances;
         let ct_byte = self.attrs.circuit_type.to_u8();
-        let footer_version = self.attrs.footer_version;
         let analyze_cs = self.attrs.analyze_cs;
 
         // Generate CS analysis code if enabled
-        let cs_metadata_impl = if analyze_cs {
-            self.generate_cs_metadata_impl()
-        } else {
-            self.generate_legacy_cs_metadata_impl()
-        };
+        let cs_metadata_impl = self.generate_cs_metadata_impl();
 
         // Generate footer implementation
         let footer_impl = if analyze_cs {
@@ -168,19 +163,6 @@ impl CodeGenerator {
                     has_lookups,
                     permutation_columns,
                 }
-            }
-        }
-    }
-
-    /// Generate legacy CS metadata implementation (no analysis)
-    fn generate_legacy_cs_metadata_impl(&self) -> TokenStream {
-        quote! {
-            /// Get constraint system metadata (legacy mode - no analysis)
-            ///
-            /// Returns minimal metadata without dynamic analysis.
-            /// Use analyze_cs = true for full CS analysis.
-            pub fn constraint_system_metadata() -> cosmwasm_vm::zk::ConstraintSystemMetadata {
-                cosmwasm_vm::zk::ConstraintSystemMetadata::default()
             }
         }
     }

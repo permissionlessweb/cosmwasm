@@ -38,6 +38,7 @@ wasmer-types = "=5.0.6"
  
 halo2_gadgets = { path = "../../../zcash/halo2/halo2_gadgets", default-features = false, features = ["test-dependencies"] }
 halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs" }
+sha2 = "0.11.0"
 
 # for dev environment
 # halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }

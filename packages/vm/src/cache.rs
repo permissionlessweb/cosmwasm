@@ -266,10 +266,12 @@ where
 
     #[cfg(feature = "zk")]
     pub fn store_circuit(&self, vk: &[u8], persist: bool) -> VmResult<Checksum> {
-        let (_cf, hash) = check_circuit(vk).map_err(|e| VmError::generic_err(e.to_string()))?;
+        let hash = check_circuit(vk)
+            .map_err(|e| VmError::generic_err(e.to_string()))?
+            .checksum;
         if persist {
             let res = self.save_circuit_to_disk(vk)?;
-            self.pin_circuit(&hash)?;
+            self.pin_circuit(&hash.into())?;
             Ok(res)
         } else {
             let cs: [u8; 32] = hash.as_slice().try_into().expect("store circuit checksum");
@@ -713,10 +715,17 @@ where
         dir: impl Into<PathBuf>,
         vk: &SerializedPlonkishCircuitData,
     ) -> VmResult<Checksum> {
-        let path = self.circuit_path(dir, &vk.hash.into());
+        use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+        let len = vk.bytes.len();
+        // hash is last 32 bytes
+        let hash = &vk.footer[COSMWASM_FOOTER_LENGTH - 32..]
+            .try_into()
+            .map_err(|e: cosmwasm_std::ChecksumError| VmError::cache_err(e.to_string()))?;
+        let path = self.circuit_path(dir, hash);
 
-        let mut file_content: Vec<u8> = Vec::with_capacity(vk.bytes.len());
+        let mut file_content: Vec<u8> = Vec::with_capacity(len + COSMWASM_FOOTER_LENGTH);
         file_content.extend_from_slice(&vk.bytes);
+        file_content.extend_from_slice(&vk.footer);
 
         let mut file = OpenOptions::new()
             .write(true)
@@ -728,7 +737,7 @@ where
         file.write_all(&file_content)
             .map_err(|e| VmError::cache_err(format!("Error writing VK file: {}", e)))?;
 
-        Ok(vk.hash.into())
+        Ok(*hash)
     }
 
     /// Load a verifying key from disk
@@ -760,13 +769,12 @@ where
             bytes
         };
 
-        let (zkm, hash) = crate::check_circuit(&bytes)
-            .map_err(|e| VmError::generic_err(format!("Error reading VK file: {}", e)))?;
+        let footer = crate::check_circuit(&bytes)
+            .map_err(|e| VmError::generic_err(format!("ZK load: {}", e)))?;
 
         Ok(Some(crate::SerializedPlonkishCircuitData::new(
             &bytes,
-            &hash.as_slice(),
-            &zkm.to_bytes(),
+            &footer.to_bytes(),
         )))
     }
 
@@ -908,9 +916,9 @@ fn remove_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResu
 /// Saving the same byte code multiple times is allowed.
 #[cfg(feature = "zk")]
 fn save_circuit_to_disk(dir: impl Into<PathBuf>, c: &[u8]) -> VmResult<Checksum> {
-    let (_, checksum) = crate::check_circuit(c).map_err(|e| VmError::generic_err(e.to_string()))?;
+    let c = crate::check_circuit(c).map_err(|e| VmError::generic_err(e.to_string()))?;
     // calculate filename
-    let filename = checksum.to_hex();
+    let filename = c.checksum_to_hex();
     let filepath = dir.into().join(filename).with_extension("bin");
 
     // write data to file
@@ -922,10 +930,10 @@ fn save_circuit_to_disk(dir: impl Into<PathBuf>, c: &[u8]) -> VmResult<Checksum>
         .truncate(true)
         .open(filepath)
         .map_err(|e| VmError::cache_err(format!("Error opening Circuit file for writing: {e}")))?;
-    file.write_all(c)
+    file.write_all(&c.to_bytes())
         .map_err(|e| VmError::cache_err(format!("Error writing Circuit file: {e}")))?;
 
-    Ok(checksum)
+    Ok(c.checksum.into())
 }
 
 #[cfg(test)]

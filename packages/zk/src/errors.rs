@@ -1,4 +1,4 @@
-use std::io::Error;
+use std::{array::TryFromSliceError, io::Error};
 
 use thiserror::Error;
 
@@ -11,6 +11,8 @@ pub enum ZkError {
     Aborted { msg: String },
     #[error("Aborted: {}", msg)]
     IoErr { msg: Error },
+    #[error("{0}")]
+    TryFromSliceError(#[from] TryFromSliceError),
 }
 
 impl ZkError {

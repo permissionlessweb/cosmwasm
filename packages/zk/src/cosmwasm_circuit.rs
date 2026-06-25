@@ -1,17 +1,17 @@
-use std::io::{self, Cursor};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::{
-    errors::{ZkError, ZkResult},
-    CircuitFooter,
-};
+use crate::errors::{ZkError, ZkResult};
+use crate::CircuitFooter;
 use group::ff::{Field, PrimeField};
+use halo2_proofs::COSMWASM_FOOTER_LENGTH;
 use halo2_proofs::{
     circuit::Layouter,
     plonk::{self, Circuit, ConstraintSystem},
-    poly,
 };
 use pasta_curves::vesta;
+use sha2::{Digest, Sha256};
+use std::io::{self, Cursor, Write as _};
 
 /// Custom section name for embedded verifying keys
 /// Contracts can embed their VK in a WASM custom section with this name
@@ -153,18 +153,6 @@ impl DynamicCircuit {
         }
     }
 
-    /// Create from a v2 circuit footer.
-    pub fn from_footer(footer: &CircuitFooter) -> Self {
-        Self {
-            config: DynamicCircuitConfig {
-                num_fixed_columns: footer.num_fixed_columns,
-                num_advice_columns: footer.num_advice_columns,
-                num_instance_columns: footer.num_instance_columns,
-                num_selectors: footer.num_selectors,
-            },
-        }
-    }
-
     /// Set config and return an RAII guard for automatic cleanup.
     pub fn set_as_current_guarded(&self) -> DynamicCircuitGuard {
         DYNAMIC_CIRCUIT_CONFIG.with(|cfg| {
@@ -301,56 +289,25 @@ where
     }
 }
 
-/// Serialized circuit data: `[params][vk][cs][footer(32)]`
 #[derive(Clone, Debug)]
 pub struct SerializedPlonkishCircuitData {
     pub bytes: Vec<u8>,
-    pub hash: [u8; 32],
     pub footer: Vec<u8>,
 }
 
 impl SerializedPlonkishCircuitData {
-    pub fn new(bytes: &[u8], hash: &[u8], footer: &[u8]) -> Self {
+    pub fn new(bytes: &[u8], footer: &[u8]) -> Self {
         Self {
             bytes: bytes.into(),
-            hash: hash.try_into().expect("hash checksum"),
-            footer: footer.into(),
+            footer: footer.to_vec(),
         }
-    }
-
-    /// Parse from combined format: `[params][vk][cs][footer(32)]`
-    pub fn from_combined(value: &[u8]) -> ZkResult<Self> {
-        const FOOTER_SIZE: usize = 32;
-
-        if value.len() < FOOTER_SIZE {
-            return Err(ZkError::new_err("SerializedPlonkishCircuitData too short"));
-        }
-
-        let footer_bytes = &value[value.len() - FOOTER_SIZE..];
-        let footer = CircuitFooter::from_bytes(footer_bytes)?;
-
-        let params_len = footer.params_len as usize;
-        let vk_len = footer.vk_len as usize;
-        let cs_len = footer.cs_len as usize;
-
-        if params_len + vk_len + cs_len + FOOTER_SIZE != value.len() {
-            return Err(ZkError::new_err(
-                "SerializedPlonkishCircuitData size mismatch",
-            ));
-        }
-
-        Ok(Self {
-            bytes: value.into(),
-            hash: [0u8; 32],
-            footer: footer_bytes.to_vec(),
-        })
     }
 }
 
 /// A verifying key for the zk-wasmvm.
 #[derive(Debug)]
 pub struct VerifyingKey {
-    pub params: poly::commitment::Params<vesta::Affine>,
+    pub params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
     pub vk: plonk::VerifyingKey<vesta::Affine>,
     pub i: usize,
 }
@@ -360,7 +317,7 @@ impl VerifyingKey {
     /// WARNING: creates new random params — only for fresh key generation.
     pub fn new(vk: plonk::VerifyingKey<vesta::Affine>, k: u32, i: usize) -> Self {
         VerifyingKey {
-            params: poly::commitment::Params::new(k),
+            params: halo2_proofs::poly::commitment::Params::new(k),
             vk,
             i,
         }
@@ -368,25 +325,57 @@ impl VerifyingKey {
 
     /// Create with existing params (use when deserializing).
     pub fn new_with_params(
-        params: poly::commitment::Params<vesta::Affine>,
+        params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
         vk: plonk::VerifyingKey<vesta::Affine>,
         i: usize,
     ) -> Self {
         VerifyingKey { params, vk, i }
     }
-
-    /// Build from a concrete circuit.
-    pub fn build<C>(c: C, k: u32, i: usize) -> Self
-    where
-        C: Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
-    {
-        let params = halo2_proofs::poly::commitment::Params::new(k);
-        let vk = plonk::keygen_vk(&params, &c).unwrap();
-        VerifyingKey { params, vk, i }
-    }
 }
 
 impl VerifyingKey {
+    /// Build a verifying key and serialize to v2 format in one shot.
+    /// needs for circuit-agnostic verification. The footer is generated
+    /// automatically from the circuit's constraint system.
+    ///
+    /// # Arguments
+    /// * `c` — circuit instance (used for keygen; consumed)
+    /// * `k` — circuit size parameter (log2 of number of rows)
+    /// * `instance_count` — number of public input scalars
+    pub fn build<C>(c: C, k: u32, i: usize) -> io::Result<Vec<u8>>
+    where
+        C: Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
+    {
+        let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::new(k);
+        let vk = plonk::keygen_vk(&params, &c).unwrap();
+        let (cs, meta) = Self::extract_cs_metadata::<C>()?;
+
+        let mut params_buf = VecDeque::new();
+        params.write(&mut params_buf)?;
+        let paramlen = params_buf.len();
+        params_buf.push_front(paramlen as u8);
+
+        let mut vk_buf = VecDeque::new();
+        vk.write(&mut vk_buf)?;
+        let vklen = vk_buf.len();
+        vk_buf.push_front(vklen as u8);
+
+        let mut output =
+            Vec::with_capacity(paramlen + cs.len() + vk_buf.len() + COSMWASM_FOOTER_LENGTH);
+        output.extend_from_slice(&params_buf.make_contiguous());
+        output.extend_from_slice(&cs);
+        output.extend_from_slice(&vk_buf.make_contiguous());
+
+        let footer = CircuitFooter::new(
+            CircuitType::Plonkish,
+            i as u8,
+            meta.num_gates,
+            Sha256::digest(&output).into(),
+        );
+        output.extend_from_slice(&footer.to_bytes());
+
+        Ok(output)
+    }
     /// Estimate memory footprint for gas/resource accounting.
     pub fn estimate_memory_size(k: u32) -> usize {
         let n = 1usize << k;
@@ -401,81 +390,34 @@ impl VerifyingKey {
     }
 
     /// Parse and validate structure without deserializing.
-    ///
-    /// Format: `[params][vk][cs][footer(32)]`
     pub fn parse_bytes(bytes: &[u8]) -> ZkResult<SerializedPlonkishCircuitData> {
-        let footer_bytes = &bytes[bytes.len() - 32..];
-        let footer = CircuitFooter::from_bytes(footer_bytes)?;
-
-        let params_len = footer.params_len as usize;
-        let vk_len = footer.vk_len as usize;
-        let cs_len = footer.cs_len as usize;
-
-        if params_len + vk_len + cs_len + 32 != bytes.len() {
-            return Err(ZkError::new_err(format!(
-                "VK file size mismatch: {}+{}+{}+32 != {}",
-                params_len,
-                vk_len,
-                cs_len,
-                bytes.len()
-            )));
-        }
-
-        Ok(SerializedPlonkishCircuitData::new(
-            bytes,
-            &[0u8; 32],
-            footer_bytes,
-        ))
+        let height = &bytes.len();
+        let foot = &bytes[height - COSMWASM_FOOTER_LENGTH..];
+        let body = &bytes[0..height - COSMWASM_FOOTER_LENGTH];
+        Ok(SerializedPlonkishCircuitData::new(body, foot))
     }
 
-    /// Deserialize from v2 format: `[params][vk][cs][footer(32)]`.
-    ///
     /// The embedded CS is deserialized and used for VK reconstruction,
     /// giving exact circuit-agnostic verification without the original Rust type.
+    ///     /// before: each object had its own reader, preflight validation
+    /// now: extract just footer from bytes, give and use single reader for all objects
     pub fn from_bytes(bytes: &[u8]) -> ZkResult<Self> {
-        if bytes.len() < 32 {
-            return Err(ZkError::new_err(
-                "VK data too short - need at least 32 bytes for footer",
-            ));
-        }
-
-        let footer_bytes = &bytes[bytes.len() - 32..];
-        let footer = CircuitFooter::from_bytes(footer_bytes)?;
-
-        let params_len = footer.params_len as usize;
-        let vk_len = footer.vk_len as usize;
-        let cs_len = footer.cs_len as usize;
-
-        let expected_len = params_len + vk_len + cs_len + 32;
-        if expected_len != bytes.len() {
-            return Err(ZkError::new_err(format!(
-                "V2 file size mismatch: {}+{}+{}+32 = {} != {}",
-                params_len,
-                vk_len,
-                cs_len,
-                expected_len,
-                bytes.len()
-            )));
-        }
+        let footer_bytes = &bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..];
+        let footer = crate::CircuitFooter::from_bytes(footer_bytes)?;
 
         // Extract sections
-        let params_bytes = &bytes[..params_len];
-        let vk_bytes = &bytes[params_len..params_len + vk_len];
-        let cs_bytes = &bytes[params_len + vk_len..params_len + vk_len + cs_len];
-
-        // Deserialize params
-        let mut params_reader = Cursor::new(params_bytes);
-        let params = poly::commitment::Params::<vesta::Affine>::read(&mut params_reader)?;
+        let mut reader = Cursor::new(bytes);
+        let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(&mut reader)?;
 
         // Deserialize constraint system
-        let mut cs_reader = Cursor::new(cs_bytes);
-        let cs = ConstraintSystem::<vesta::Scalar>::read(&mut cs_reader)
+        // let mut cs_reader = Cursor::new(cs_bytes);
+        let cs = ConstraintSystem::<vesta::Scalar>::read(&mut reader)
             .map_err(|e| ZkError::from_io(e))?;
 
         // Deserialize VK using the deserialized CS
-        let mut vk_reader = Cursor::new(vk_bytes);
+        // let mut vk_reader = Cursor::new(vk_bytes);
         let vk = halo2_proofs::plonk::VerifyingKey::<vesta::Affine>::read_with_cs(
-            &mut vk_reader,
+            &mut reader,
             &params,
             cs,
         )
@@ -493,62 +435,37 @@ impl VerifyingKey {
         ))
     }
 
-    /// Deserialize using a concrete circuit type (legacy helper).
-    pub fn from_bytes_with_circuit<C: Circuit<vesta::Scalar>>(bytes: &[u8]) -> ZkResult<Self> {
-        if bytes.len() < 32 {
-            return Err(ZkError::new_err("VK data too short"));
-        }
-
-        let footer_bytes = &bytes[bytes.len() - 32..];
-        let footer = CircuitFooter::from_bytes(footer_bytes)?;
-
-        let params_len = footer.params_len as usize;
-        let vk_len = footer.vk_len as usize;
-
-        let params_bytes = &bytes[..params_len];
-        let vk_bytes = &bytes[params_len..params_len + vk_len];
-
-        let mut params_reader = Cursor::new(params_bytes);
-        let params = poly::commitment::Params::<vesta::Affine>::read(&mut params_reader)?;
-
-        let mut vk_reader = Cursor::new(vk_bytes);
-        let vk = halo2_proofs::plonk::VerifyingKey::<vesta::Affine>::read::<_, C>(
-            &mut vk_reader,
-            &params,
-        )?;
-
-        Ok(VerifyingKey::new_with_params(
-            params,
-            vk,
-            footer.instance_count as usize,
-        ))
-    }
-
-    /// Serialize to v2 format: `[params][vk][cs][footer(32)]`.
+    // CANONICAL SOURCE OF TRUTH FOR HOW WE SERIALIZE VERIFYING KEYS FOR COSMWASM
     pub fn to_bytes_with_footer(
         &self,
         cs: &ConstraintSystem<vesta::Scalar>,
-        footer: &CircuitFooter,
+        footer: &crate::CircuitFooter,
     ) -> io::Result<Vec<u8>> {
-        let mut params_buf = Vec::new();
-        self.params.write(&mut params_buf)?;
+        let mut parambuf = VecDeque::new();
+        self.params.write(&mut parambuf)?;
+        let paramlen = parambuf.len();
+        parambuf.push_front(paramlen as u8);
 
-        let mut vk_buf = Vec::new();
-        self.vk.write(&mut vk_buf)?;
+        let mut vkbuf = VecDeque::new();
+        self.vk.write(&mut vkbuf)?;
+        let vklen = vkbuf.len();
+        vkbuf.push_front(vklen as u8);
 
-        let mut cs_buf = Vec::new();
-        cs.write(&mut cs_buf)?;
+        let mut csbuf = VecDeque::new();
+        cs.write(&mut csbuf)?;
+        let cslen = csbuf.len();
+        csbuf.push_front(cslen as u8);
 
-        let mut output = Vec::with_capacity(params_buf.len() + vk_buf.len() + cs_buf.len() + 32);
-        output.extend_from_slice(&params_buf);
-        output.extend_from_slice(&vk_buf);
-        output.extend_from_slice(&cs_buf);
+        let mut output = Vec::with_capacity(paramlen + vklen + cslen + COSMWASM_FOOTER_LENGTH);
+
+        output.extend_from_slice(parambuf.make_contiguous());
+        output.extend_from_slice(&vkbuf.make_contiguous());
+        output.extend_from_slice(&csbuf.make_contiguous());
         output.extend_from_slice(&footer.to_bytes());
-
         Ok(output)
     }
 
-    /// Serialize params + VK only (no footer, no CS).
+    /// write
     pub fn to_bytes(&self) -> io::Result<Vec<u8>> {
         let mut output = Vec::new();
         let mut params_buf = Vec::new();
@@ -590,65 +507,7 @@ impl VerifyingKey {
         Ok((cs_buf, meta))
     }
 
-    /// Build a verifying key and serialize to v2 format in one shot.
-    ///
-    /// Produces `[params][vk][cs][footer(32)]` — the minimal file the VM
-    /// needs for circuit-agnostic verification. The footer is generated
-    /// automatically from the circuit's constraint system.
-    ///
-    /// # Arguments
-    /// * `c` — circuit instance (used for keygen; consumed)
-    /// * `k` — circuit size parameter (log2 of number of rows)
-    /// * `instance_count` — number of public input scalars
-    pub fn build_v2<C>(c: C, k: u32, instance_count: usize) -> io::Result<Vec<u8>>
-    where
-        C: Circuit<vesta::Scalar>,
-    {
-        // 1. Generate params + VK
-        let params = poly::commitment::Params::<vesta::Affine>::new(k);
-        let vk = plonk::keygen_vk(&params, &c).unwrap();
-
-        // 2. Capture CS by re-running configure
-        let (cs_buf, meta) = Self::extract_cs_metadata::<C>()?;
-
-        // 3. Serialize params + VK
-        let mut params_buf = Vec::new();
-        params.write(&mut params_buf)?;
-
-        let mut vk_buf = Vec::new();
-        vk.write(&mut vk_buf)?;
-
-        // 4. Build footer from metadata + section lengths
-        let footer = CircuitFooter::new(
-            CircuitType::Plonkish,
-            instance_count as u8,
-            meta.num_fixed_columns as u8,
-            meta.num_advice_columns as u8,
-            meta.num_instance_columns as u8,
-            meta.degree,
-            params_buf.len() as u32,
-            vk_buf.len() as u32,
-            cs_buf.len() as u32,
-            meta.num_selectors,
-            meta.num_gates,
-            meta.has_lookups,
-            0, // CRC32 (reserved)
-        );
-
-        // 5. Concatenate: [params][vk][cs][footer(32)]
-        let mut output = Vec::with_capacity(params_buf.len() + vk_buf.len() + cs_buf.len() + 32);
-        output.extend_from_slice(&params_buf);
-        output.extend_from_slice(&vk_buf);
-        output.extend_from_slice(&cs_buf);
-        output.extend_from_slice(&footer.to_bytes());
-
-        Ok(output)
-    }
-
-    /// Build a verifying key, serialize to v2 format, and write to file.
-    ///
-    /// Convenience wrapper around `build_v2` that writes directly to disk.
-    pub fn build_v2_and_write<C>(
+    pub fn build_and_write<C>(
         path: std::path::PathBuf,
         c: C,
         k: u32,
@@ -657,7 +516,7 @@ impl VerifyingKey {
     where
         C: Circuit<vesta::Scalar>,
     {
-        let bytes = Self::build_v2(c, k, instance_count)?;
+        let bytes = Self::build(c, k, instance_count)?;
         std::fs::write(path, bytes)
     }
 }
@@ -682,100 +541,62 @@ impl ProvingKey {
         ProvingKey { params, pk }
     }
 
-    /// Build and write to file.
-    pub fn build_and_write(
-        path: std::path::PathBuf,
-        k: u32,
-        circuit: impl Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
-    ) -> io::Result<()> {
-        let mut writer = io::BufWriter::new(std::fs::File::create(path)?);
-        let pk = Self::build(k, circuit);
-        pk.params.write(&mut writer)?;
-        pk.pk.get_vk().write(&mut writer)?;
-        io::Write::flush(&mut writer)
-    }
-
     pub fn params(&self) -> halo2_proofs::poly::commitment::Params<vesta::Affine> {
         self.params.clone()
     }
-    /// Build proving key and also write a v2 verifying key file.
-    ///
-    /// This is the recommended way to generate circuit keys: it produces
-    /// both a proving key (for proof generation) and a minimal v2 VK file
-    /// `[params][vk][cs][footer(32)]` ready for VM upload.
-    ///
-    /// The VK file is self-describing — the VM can deserialize and verify
-    /// proofs without the original circuit type.
-    pub fn build_with_vk_v2<C>(
-        k: u32,
-        circuit: C,
-        instance_count: usize,
-    ) -> io::Result<(Self, Vec<u8>)>
-    where
-        C: Circuit<vesta::Scalar>,
-    {
-        // Capture CS before consuming the circuit for keygen
-        let (cs_buf, meta) = VerifyingKey::extract_cs_metadata::<C>()?;
 
-        // Build PK (which includes the VK internally)
-        let params = poly::commitment::Params::<vesta::Affine>::new(k);
-        let wrapped = CosmwasmCircuit::new(circuit);
-        let vk = plonk::keygen_vk(&params, &wrapped).unwrap();
-        let pk = plonk::keygen_pk(&params, vk, &wrapped).unwrap();
+    // /// Build and write to file.
+    // pub fn build_and_write(
+    //     path: std::path::PathBuf,
+    //     k: u32,
+    //     circuit: impl Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
+    // ) -> io::Result<()> {
+    //     let mut writer = io::BufWriter::new(std::fs::File::create(path)?);
+    //     let pk = Self::build(k, circuit);
+    //     pk.params.write(&mut writer)?;
+    //     pk.pk.get_vk().write(&mut writer)?;
+    //     io::Write::flush(&mut writer)
+    // }
 
-        // Serialize VK from the PK
-        let mut params_buf = Vec::new();
-        params.write(&mut params_buf)?;
+    // /// Build proving key and also write a v2 verifying key file.
+    // ///
+    // /// This is the recommended way to generate circuit keys: it produces
+    // /// both a proving key (for proof generation) and a minimal v2 VK file
+    // /// `[params][vk][cs][footer(32)]` ready for VM upload.
+    // ///
+    // /// The VK file is self-describing — the VM can deserialize and verify
+    // /// proofs without the original circuit type.
+    // pub fn build_with_vk_v2<C>(
+    //     k: u32,
+    //     circuit: C,
+    //     instance_count: usize,
+    // ) -> io::Result<(Self, Vec<u8>)>
+    // where
+    //     C: Circuit<vesta::Scalar>,
+    // {
+    //     // Capture CS before consuming the circuit for keygen
+    //     let (cs_buf, meta) = VerifyingKey::extract_cs_metadata::<C>()?;
 
-        let mut vk_buf = Vec::new();
-        pk.get_vk().write(&mut vk_buf)?;
+    //     // Build PK (which includes the VK internally)
+    //     let params = poly::commitment::Params::<vesta::Affine>::new(k);
+    //     let wrapped = CosmwasmCircuit::new(circuit);
+    //     let vk = plonk::keygen_vk(&params, &wrapped).unwrap();
+    //     let pk = plonk::keygen_pk(&params, vk, &wrapped).unwrap();
 
-        // Build footer
-        let footer = CircuitFooter::new(
-            CircuitType::Plonkish,
-            instance_count as u8,
-            meta.num_fixed_columns as u8,
-            meta.num_advice_columns as u8,
-            meta.num_instance_columns as u8,
-            meta.degree,
-            params_buf.len() as u32,
-            vk_buf.len() as u32,
-            cs_buf.len() as u32,
-            meta.num_selectors,
-            meta.num_gates,
-            meta.has_lookups,
-            0,
-        );
+    //     // Serialize VK from the PK
+    //     let mut params_buf = Vec::new();
+    //     params.write(&mut params_buf)?;
 
-        // Assemble v2 VK bytes
-        let mut vk_v2 = Vec::with_capacity(params_buf.len() + vk_buf.len() + cs_buf.len() + 32);
-        vk_v2.extend_from_slice(&params_buf);
-        vk_v2.extend_from_slice(&vk_buf);
-        vk_v2.extend_from_slice(&cs_buf);
-        vk_v2.extend_from_slice(&footer.to_bytes());
+    //     let mut vk_buf = Vec::new();
+    //     pk.get_vk().write(&mut vk_buf)?;
 
-        Ok((ProvingKey { params, pk }, vk_v2))
-    }
+    //     let mut vk_v2 = Vec::with_capacity(params_buf.len() + vk_buf.len() + cs_buf.len() + 32);
+    //     vk_v2.extend_from_slice(&params_buf);
+    //     vk_v2.extend_from_slice(&vk_buf);
+    //     vk_v2.extend_from_slice(&cs_buf);
 
-    /// Build proving key, write it to `pk_path`, and write a v2 VK to `vk_path`.
-    pub fn build_and_write_v2(
-        pk_path: std::path::PathBuf,
-        vk_path: std::path::PathBuf,
-        k: u32,
-        circuit: impl Circuit<vesta::Scalar>,
-        instance_count: usize,
-    ) -> io::Result<()> {
-        let (pk, vk_bytes) = Self::build_with_vk_v2(k, circuit, instance_count)?;
-
-        // Write PK
-        let mut writer = io::BufWriter::new(std::fs::File::create(&pk_path)?);
-        pk.params.write(&mut writer)?;
-        pk.pk.get_vk().write(&mut writer)?;
-        io::Write::flush(&mut writer)?;
-        std::fs::write(&vk_path, vk_bytes)?;
-
-        Ok(())
-    }
+    //     Ok((ProvingKey { params, pk }, vk_v2))
+    // }
 }
 
 /// Public inputs.
