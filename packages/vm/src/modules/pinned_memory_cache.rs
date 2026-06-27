@@ -2,10 +2,6 @@ use cosmwasm_std::Checksum;
 use std::collections::HashMap;
 
 use super::cached_module::CachedModule;
-#[cfg(not(feature = "zk"))]
-use crate::VmError;
-#[cfg(feature = "zk")]
-use crate::VmError;
 use crate::VmResult;
 
 /// Struct storing some additional metadata, which is only of interest for the pinned cache,
@@ -46,6 +42,9 @@ impl PinnedMemoryCache {
     pub fn iter(&self) -> impl Iterator<Item = (&Checksum, &InstrumentedModule)> {
         self.modules.iter()
     }
+    pub fn iter_circuits(&self) -> impl Iterator<Item = (&Checksum, &InstrumentedCircuit)> {
+        self.circuits.iter()
+    }
 
     pub fn store(&mut self, checksum: &Checksum, cached_module: CachedModule) -> VmResult<()> {
         self.modules.insert(
@@ -78,7 +77,7 @@ impl PinnedMemoryCache {
                 #[cfg(feature = "zk")]
                 self.circuits.remove(checksum);
                 #[cfg(not(feature = "zk"))]
-                return Err(VmError::generic_err(
+                return Err(crate::VmError::generic_err(
                     "zk faeture disabled. cannot remove circuit from cache",
                 ));
             }
@@ -143,7 +142,6 @@ impl PinnedMemoryCache {
     pub fn size(&self) -> usize {
         // Sum module sizes: key (address) + module size estimate
         let module_size: usize = self
-            .modules
             .iter()
             .map(|(key, module)| std::mem::size_of_val(key) + module.module.size_estimate)
             .sum();
@@ -152,13 +150,13 @@ impl PinnedMemoryCache {
         #[cfg(feature = "zk")]
         {
             let circuit_size: usize = self
-                .circuits
-                .iter()
+                .iter_circuits()
                 .map(|(key, zk)| std::mem::size_of_val(key) + zk.circuit.actual_size_bytes())
                 .sum();
 
             return module_size + circuit_size;
         }
+        #[cfg(not(feature = "zk"))]
         module_size
     }
 }
@@ -173,6 +171,7 @@ mod tests {
     use wasmer::{imports, Instance as WasmerInstance, Store};
     use wasmer_middlewares::metering::set_remaining_points;
 
+    static NORICK_CIRCUIT: &[u8] = include_bytes!("../../testdata/norick_vk.bin");
     const TESTING_MEMORY_LIMIT: Option<Size> = Some(Size::mebi(16));
     const TESTING_GAS_LIMIT: u64 = 500_000;
 
@@ -268,6 +267,23 @@ mod tests {
         cache.remove(&checksum, false).unwrap();
 
         assert!(!cache.has(&checksum, false));
+
+        #[cfg(feature = "zk")]
+        {
+            use zk_cosmwasm::VerifyingKey;
+
+            let zk = NORICK_CIRCUIT;
+            let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
+            let checksum = Checksum::from(*checksum_footer);
+            assert!(!cache.has(&checksum, true));
+
+            let circuit = zk_cosmwasm::PinnedCircuit::new(VerifyingKey::from_bytes(&zk).unwrap());
+            cache.store_circuit(&checksum, circuit).unwrap();
+            assert!(cache.has(&checksum, true));
+            // Remove
+            cache.remove(&checksum, true).unwrap();
+            assert!(!cache.has(&checksum, false));
+        }
     }
 
     #[test]
@@ -313,6 +329,34 @@ mod tests {
             .unwrap();
 
         assert_eq!(module.hits, 1);
+
+        #[cfg(feature = "zk")]
+        {
+            use zk_cosmwasm::VerifyingKey;
+
+            let zk = NORICK_CIRCUIT;
+            let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
+            let checksum = Checksum::from(*checksum_footer);
+            assert!(!cache.has(&checksum, true));
+
+            let circuit = zk_cosmwasm::PinnedCircuit::new(VerifyingKey::from_bytes(&zk).unwrap());
+            cache.store_circuit(&checksum, circuit).unwrap();
+
+            let (_checksum, circuit) = cache
+                .iter_circuits()
+                .find(|(iter_checksum, _circuit)| **iter_checksum == checksum)
+                .unwrap();
+
+            assert_eq!(circuit.hits, 0);
+
+            let _ = cache.load_circuit(&checksum).unwrap();
+            let (_checksum, circuit) = cache
+                .iter_circuits()
+                .find(|(iter_checksum, _circuit)| **iter_checksum == checksum)
+                .unwrap();
+
+            assert_eq!(circuit.hits, 1);
+        }
     }
 
     #[test]
@@ -350,6 +394,27 @@ mod tests {
         cache.remove(&checksum, false).unwrap();
 
         assert_eq!(cache.len(), 0);
+
+        #[cfg(feature = "zk")]
+        {
+            use zk_cosmwasm::VerifyingKey;
+
+            let zk = NORICK_CIRCUIT;
+            let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
+            let checksum = Checksum::from(*checksum_footer);
+
+            assert_eq!(cache.len(), 0);
+
+            let circuit = zk_cosmwasm::PinnedCircuit::new(VerifyingKey::from_bytes(&zk).unwrap());
+            cache.store_circuit(&checksum, circuit).unwrap();
+
+            assert_eq!(cache.len(), 1);
+
+            // Remove
+            cache.remove(&checksum, true).unwrap();
+
+            assert_eq!(cache.len(), 0);
+        }
     }
 
     #[test]
@@ -399,7 +464,7 @@ mod tests {
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
             size_estimate: 300,
         };
-        cache.store(&checksum2, module).unwrap();
+        cache.store(&checksum2, module.clone()).unwrap();
         assert_eq!(cache.size(), 532 + 332);
 
         // Remove 1
@@ -409,5 +474,32 @@ mod tests {
         // Remove 2
         cache.remove(&checksum2, false).unwrap();
         assert_eq!(cache.size(), 0);
+
+        #[cfg(feature = "zk")]
+        {
+            use zk_cosmwasm::VerifyingKey;
+
+            let zk = NORICK_CIRCUIT;
+            let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
+            let checksum = Checksum::from(*checksum_footer);
+
+            assert_eq!(cache.size(), 0);
+            // Add 1
+            let circuit = zk_cosmwasm::PinnedCircuit::new(VerifyingKey::from_bytes(&zk).unwrap());
+            cache.store_circuit(&checksum, circuit).unwrap();
+            assert_eq!(cache.size(), 66113);
+
+            // Add 2
+            cache.store(&checksum1, module).unwrap();
+            assert_eq!(cache.size(), 332 + 66113);
+
+            // Remove 1
+            cache.remove(&checksum, true).unwrap();
+            assert_eq!(cache.size(), 332);
+
+            // Remove 2
+            cache.remove(&checksum1, false).unwrap();
+            assert_eq!(cache.size(), 0);
+        }
     }
 }

@@ -6,6 +6,7 @@ use std::panic::catch_unwind;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use thiserror::Error;
+use zk_cosmwasm::{PinnedCircuit, VerifyingKey, ZkError};
 
 use wasmer::{DeserializeError, Module, Target};
 
@@ -245,29 +246,70 @@ impl FileSystemCache {
     /// Returns true if the file existed and false if the file did not exist.
     pub fn remove(&mut self, checksum: &Checksum) -> VmResult<bool> {
         let file_path = self.module_file(checksum);
-
+        println!("removing serialized module: ");
+        println!("{} ", file_path.to_str().unwrap());
         if file_path.exists() {
             fs::remove_file(file_path)
                 .map_err(|_e| VmError::cache_err("Error deleting module from disk"))?;
             Ok(true)
         } else {
+            println!("file path does not exist in cache ");
             Ok(false)
+        }
+    }
+}
+
+#[cfg(feature = "zk")]
+impl FileSystemCache {
+    /// Gets the circuit file path for a checksum.
+    fn circuit_file(&self, checksum: &Checksum) -> PathBuf {
+        let mut path = self.modules_path.join(checksum.to_hex());
+        path.set_extension("module");
+        path
+    }
+
+    /// Loads a serialized verifying key from the file system and returns it.
+    pub fn load_circuit(&self, checksum: &Checksum) -> VmResult<Option<PinnedCircuit>> {
+        let file_path = self.circuit_file(checksum);
+
+        let raw_bytes = match std::fs::read(&file_path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => {
+                return Err(VmError::cache_err(format!(
+                    "Error reading circuit file: {e}"
+                )))
+            }
+        };
+
+        // TODO: use shared-buffer or another libarry to safely and effeciently load bytes from file path
+        let result = VerifyingKey::from_bytes(&raw_bytes);
+        match result {
+            Ok(vk) => Ok(Some(vk.into())),
+            Err(ZkError::IoErr { err }) => match err.kind() {
+                io::ErrorKind::NotFound => Ok(None),
+                _ => Err(VmError::cache_err(format!(
+                    "Error opening module file: {err}"
+                ))),
+            },
+            Err(err) => Err(VmError::cache_err(format!(
+                "Error deserializing module: {err}"
+            ))),
         }
     }
 
     /// Stores a serialized verifying key to the file system.
-    pub fn store_circuit(&mut self, checksum: &Checksum, vk: &[u8]) -> VmResult<usize> {
+    pub fn store_circuit(&mut self, checksum: &Checksum, zk: &[u8]) -> VmResult<usize> {
         mkdir_p(&self.modules_path)
             .map_err(|_e| VmError::cache_err("Error creating circuits directory"))?;
 
         let path = self.circuit_file(checksum);
         catch_unwind(|| {
-            fs::write(&path, vk)
+            fs::write(&path, zk)
                 .map_err(|e| VmError::cache_err(format!("Error writing circuit to disk: {e}")))
         })
         .map_err(|_| VmError::cache_err("Could not write circuit to disk"))??;
-
-        Ok(vk.len())
+        Ok(zk.len())
     }
 
     /// Removes a verifying key from the file system.
@@ -279,11 +321,6 @@ impl FileSystemCache {
             })?;
         }
         Ok(())
-    }
-
-    /// Gets the circuit file path for a checksum.
-    fn circuit_file(&self, checksum: &Checksum) -> PathBuf {
-        self.modules_path.join(checksum.to_hex())
     }
 }
 
@@ -329,6 +366,7 @@ mod tests {
 
     const TESTING_MEMORY_LIMIT: Option<Size> = Some(Size::mebi(16));
     const TESTING_GAS_LIMIT: u64 = 500_000;
+    static NORICK_CIRCUIT: &[u8] = include_bytes!("../../testdata/norick_vk.bin");
 
     const SOME_WAT: &str = r#"(module
         (type $t0 (func (param i32) (result i32)))
@@ -379,6 +417,15 @@ mod tests {
             let add_one = instance.exports.get_function("add_one").unwrap();
             let result = add_one.call(&mut store, &[42.into()]).unwrap();
             assert_eq!(result[0].unwrap_i32(), 43);
+        }
+        #[cfg(feature = "zk")]
+        {
+            let zk = NORICK_CIRCUIT;
+            let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
+            let checksum = Checksum::from(*checksum_footer);
+            // Module does not exist
+            let cached = cache.load(&checksum, TESTING_MEMORY_LIMIT).unwrap();
+            assert!(cached.is_none());
         }
     }
 

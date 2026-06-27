@@ -1,11 +1,14 @@
 use clru::{CLruCache, CLruCacheConfig, WeightScale};
 use std::collections::hash_map::RandomState;
 use std::num::NonZeroUsize;
-
+// TODO: implement clru cache for circutis so that we reuse existing cache instead of doubling it (tldr: do not over allocate memory )
 use cosmwasm_std::Checksum;
 
 use super::cached_module::CachedModule;
-use crate::{Size, VmError, VmResult};
+use crate::{
+    modules::cached_module::{CacheEntry, CachedCircuit},
+    Size, VmError, VmResult,
+};
 
 // Minimum module size.
 // Based on `examples/module_size.sh`, and the cosmwasm-plus contracts.
@@ -19,33 +22,57 @@ const MINIMUM_MODULE_SIZE: Size = Size::kibi(250);
 #[derive(Debug)]
 struct SizeScale;
 
-impl WeightScale<Checksum, CachedModule> for SizeScale {
+// Single implementation covering both types via the enum
+impl WeightScale<Checksum, CacheEntry> for SizeScale {
     #[inline]
-    fn weight(&self, key: &Checksum, value: &CachedModule) -> usize {
-        std::mem::size_of_val(key) + value.size_estimate
+    fn weight(&self, key: &Checksum, value: &CacheEntry) -> usize {
+        let val_size = match value {
+            CacheEntry::Module(m) => m.size_estimate,
+            CacheEntry::Circuit(c) => c.size_estimate,
+        };
+        std::mem::size_of_val(key) + val_size
     }
 }
 
-/// An in-memory module cache
+/// An in-memory cache with a strict, unified memory limit
 pub struct InMemoryCache {
-    /// This is where the cached data is stored.
-    ///
-    /// `Some` means the cache is active (i.e. size > 0) and
-    /// `None` means it is inactive (size is 0). This is only needed because
-    /// the currently used `CLruCache` does not support zero capacity construction.
-    /// It can likely be simplified if the underlying implementation supports zero.
-    modules: Option<CLruCache<Checksum, CachedModule, RandomState, SizeScale>>,
+    /// A single LRU cache holding both modules and circuits.
+    /// This guarantees the total memory used never exceeds the configured `Size`.
+    cache: Option<CLruCache<Checksum, CacheEntry, RandomState, SizeScale>>,
+}
+#[cfg(feature = "zk")]
+impl InMemoryCache {
+    pub fn store_circuit(&mut self, checksum: &Checksum, cached_zk: CachedCircuit) -> VmResult<()> {
+        if let Some(zk) = &mut self.cache {
+            zk.put_with_weight(*checksum, CacheEntry::Circuit(cached_zk))
+                .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
+        }
+        Ok(())
+    }
+    /// Looks up a module in the cache and creates a new module
+    pub fn load_circuit(&mut self, checksum: &Checksum) -> VmResult<Option<CachedCircuit>> {
+        if let Some(modules) = &mut self.cache {
+            match modules.get(checksum) {
+                Some(cached) => match cached {
+                    CacheEntry::Module(_) => Ok(None),
+                    CacheEntry::Circuit(zk) => Ok(Some(zk.clone())),
+                },
+                None => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 impl InMemoryCache {
     /// Creates a new cache with the given size (in bytes)
-    /// and pre-allocated entries.
     pub fn new(size: Size) -> Self {
         let preallocated_entries = size.0 / MINIMUM_MODULE_SIZE.0;
-
         let size = NonZeroUsize::new(size.0);
+
         InMemoryCache {
-            modules: size.map(|non_zero_size| {
+            cache: size.map(|non_zero_size| {
                 CLruCache::with_config(
                     CLruCacheConfig::new(non_zero_size)
                         .with_memory(preallocated_entries)
@@ -56,9 +83,9 @@ impl InMemoryCache {
     }
 
     pub fn store(&mut self, checksum: &Checksum, cached_module: CachedModule) -> VmResult<()> {
-        if let Some(modules) = &mut self.modules {
+        if let Some(modules) = &mut self.cache {
             modules
-                .put_with_weight(*checksum, cached_module)
+                .put_with_weight(*checksum, CacheEntry::Module(cached_module))
                 .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
         }
         Ok(())
@@ -66,9 +93,12 @@ impl InMemoryCache {
 
     /// Looks up a module in the cache and creates a new module
     pub fn load(&mut self, checksum: &Checksum) -> VmResult<Option<CachedModule>> {
-        if let Some(modules) = &mut self.modules {
+        if let Some(modules) = &mut self.cache {
             match modules.get(checksum) {
-                Some(cached) => Ok(Some(cached.clone())),
+                Some(cached) => match cached {
+                    CacheEntry::Module(cached) => Ok(Some(cached.clone())),
+                    CacheEntry::Circuit(_) => Ok(None),
+                },
                 None => Ok(None),
             }
         } else {
@@ -78,9 +108,9 @@ impl InMemoryCache {
 
     /// Returns the number of elements in the cache.
     pub fn len(&self) -> usize {
-        self.modules
+        self.cache
             .as_ref()
-            .map(|modules| modules.len())
+            .map(|cache| cache.len())
             .unwrap_or_default()
     }
 
@@ -89,9 +119,9 @@ impl InMemoryCache {
     /// This is based on the values provided with `store`. No actual
     /// memory size is measured here.
     pub fn size(&self) -> usize {
-        self.modules
+        self.cache
             .as_ref()
-            .map(|modules| modules.weight())
+            .map(|cache| cache.weight())
             .unwrap_or_default()
     }
 }

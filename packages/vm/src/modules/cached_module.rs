@@ -7,6 +7,13 @@ pub fn engine_size_estimate() -> usize {
     10 * 1024
 }
 
+// NEW: A unified entry type so modules and circuits can share one LRU cache
+#[derive(Debug)]
+pub enum CacheEntry {
+    Module(CachedModule),
+    Circuit(CachedCircuit),
+}
+
 #[derive(Debug, Clone)]
 pub struct CachedModule {
     pub module: Module,
@@ -26,5 +33,12 @@ pub struct CachedModule {
     /// The majority of the Module size is the Artifact which is why we use the module filesize as the estimate.
     /// Some manual tests on Simon's machine showed that Engine is roughly 3-5 KB big, so give it a constant
     /// estimate: [`engine_size_estimate`].
+    pub size_estimate: usize,
+}
+
+/// NEW: Wrapper to accurately track the memory footprint of the deserialized key
+#[derive(Debug,Clone)]
+pub struct CachedCircuit {
+    pub vk: std::sync::Arc<zk_cosmwasm::VerifyingKey>,
     pub size_estimate: usize,
 }

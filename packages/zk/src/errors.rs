@@ -7,20 +7,22 @@ pub type ZkResult<T> = core::result::Result<T, ZkError>;
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum ZkError {
-    #[error("Aborted: {}", msg)]
-    Aborted { msg: String },
-    #[error("Aborted: {}", msg)]
-    IoErr { msg: Error },
+    #[error("Aborted: {}", err)]
+    Aborted { err: String },
+    #[error("Aborted: {}", err)]
+    IoErr { err: Error },
     #[error("{0}")]
     TryFromSliceError(#[from] TryFromSliceError),
+    #[error("Hash doesn't match stored data")]
+    IntegrityErr {},
 }
 
 impl ZkError {
     pub fn new_err<T: Into<String>>(e: T) -> Self {
-        ZkError::Aborted { msg: e.into() }
+        ZkError::Aborted { err: e.into() }
     }
     pub fn from_io<T: Into<Error>>(e: T) -> Self {
-        ZkError::IoErr { msg: e.into() }
+        ZkError::IoErr { err: e.into() }
     }
 }
 

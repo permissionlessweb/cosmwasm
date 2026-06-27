@@ -20,14 +20,6 @@ pub const VK_CUSTOM_SECTION_NAME: &str = "cosmwasm_zk_vk";
 /// Thread-safe handle to a pinned verifying key
 pub type PinnedCircuit = Arc<VerifyingKey>;
 
-/// Footer flags bit definitions
-pub mod footer_flags {
-    /// Constraint system section is present (must be 1 for v2)
-    pub const HAS_CS: u8 = 0b0000_0001;
-    /// Circuit contains lookup arguments
-    pub const HAS_LOOKUPS: u8 = 0b0000_0010;
-}
-
 /// Basic metadata about a Plonkish circuit
 #[derive(Debug, Clone, Copy)]
 pub struct PlonkishCircuitMetadata {
@@ -291,16 +283,22 @@ where
 
 #[derive(Clone, Debug)]
 pub struct SerializedPlonkishCircuitData {
-    pub bytes: Vec<u8>,
+    pub body: Vec<u8>,
     pub footer: Vec<u8>,
 }
 
 impl SerializedPlonkishCircuitData {
     pub fn new(bytes: &[u8], footer: &[u8]) -> Self {
         Self {
-            bytes: bytes.to_vec(),
+            body: bytes.to_vec(),
             footer: footer.to_vec(),
         }
+    }
+    pub fn serialized_to_vec(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&self.body);
+        buf.extend_from_slice(&self.footer);
+        buf
     }
 }
 
@@ -350,37 +348,32 @@ impl VerifyingKey {
         let vk = plonk::keygen_vk(&params, &c).unwrap();
         let (cs, _) = Self::extract_cs_metadata::<C>()?;
 
-        let mut params_buf = VecDeque::new();
-        params.write(&mut params_buf)?;
-        let paramlen = params_buf.len();
-        params_buf.push_front(paramlen as u8);
+        let mut buf1: Vec<u8> = Vec::new();
+        let mut buf2 = Vec::new();
 
-        let mut vk_buf = VecDeque::new();
-        vk.write(&mut vk_buf)?;
-        let vklen = vk_buf.len();
-        vk_buf.push_front(vklen as u8);
+        params.write(&mut buf1)?;
+        vk.write(&mut buf2)?;
 
-        let mut output =
-            Vec::with_capacity(paramlen + cs.len() + vk_buf.len() + COSMWASM_FOOTER_LENGTH);
-        output.extend_from_slice(&params_buf.make_contiguous());
+        let paramlen = buf1.len();
+        let vklen = buf2.len();
+        let cslen = cs.len();
+
+        let mut output = Vec::with_capacity(paramlen + cslen + vklen + COSMWASM_FOOTER_LENGTH);
+        output.extend_from_slice(&buf1);
         output.extend_from_slice(&cs);
-        output.extend_from_slice(&vk_buf.make_contiguous());
+        output.extend_from_slice(&buf2);
 
         let footer = CircuitFooter::new(
             CircuitType::Plonkish,
             i as u8,
-            Sha256::digest(&output).into(),
+            paramlen as u32,
+            cslen as u32,
+            vklen as u32,
+            Sha256::digest(&output).into(), // does not hash footer content
         );
         output.extend_from_slice(&footer.to_bytes());
 
         Ok(output)
-    }
-    /// Estimate memory footprint for gas/resource accounting.
-    pub fn estimate_memory_size(k: u32) -> usize {
-        let n = 1usize << k;
-        let params_size = (2 * n + 2) * 64;
-        let vk_size = n * 32;
-        params_size + vk_size
     }
 
     /// Get actual memory footprint by serializing.

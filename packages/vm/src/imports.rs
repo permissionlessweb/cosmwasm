@@ -897,7 +897,7 @@ pub fn do_halo2_proof_instance_verify<
         })?;
     let res = crate::zk::deserialize_circuit_data(&circuit_response.data)?;
     // Deserialize VK and verify proof
-    let vk = zk_cosmwasm::VerifyingKey::from_bytes(&res.bytes).map_err(|e| {
+    let vk = zk_cosmwasm::VerifyingKey::from_bytes(&res.body).map_err(|e| {
         VmError::generic_err(format!(
             "Failed to deserialize VK for circuit {}: {}",
             zkid_u64, e
