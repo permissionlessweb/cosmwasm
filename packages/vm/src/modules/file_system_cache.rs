@@ -1,4 +1,6 @@
 use blake2::{digest::consts::U5, Blake2b, Digest};
+#[cfg(feature = "zk")]
+use halo2_proofs::pasta::pallas;
 use std::fs;
 use std::hash::Hash;
 use std::io;
@@ -6,6 +8,8 @@ use std::panic::catch_unwind;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use thiserror::Error;
+#[cfg(feature = "zk")]
+use zk_cosmwasm::CosmwasmCircuit;
 use zk_cosmwasm::{PinnedCircuit, VerifyingKey, ZkError};
 
 use wasmer::{DeserializeError, Module, Target};
@@ -15,6 +19,8 @@ use cosmwasm_std::Checksum;
 use crate::errors::{VmError, VmResult};
 use crate::filesystem::mkdir_p;
 use crate::modules::current_wasmer_module_version;
+#[cfg(feature = "zk")]
+use crate::modules::CachedCircuit;
 use crate::wasm_backend::make_runtime_engine;
 use crate::wasm_backend::COST_FUNCTION_HASH;
 use crate::Size;
@@ -246,14 +252,16 @@ impl FileSystemCache {
     /// Returns true if the file existed and false if the file did not exist.
     pub fn remove(&mut self, checksum: &Checksum) -> VmResult<bool> {
         let file_path = self.module_file(checksum);
-        println!("removing serialized module: ");
-        println!("{} ", file_path.to_str().unwrap());
+        tracing::debug!(
+            "removing serialized module: {}",
+            file_path.to_str().unwrap()
+        );
         if file_path.exists() {
             fs::remove_file(file_path)
                 .map_err(|_e| VmError::cache_err("Error deleting module from disk"))?;
             Ok(true)
         } else {
-            println!("file path does not exist in cache ");
+            tracing::debug!("file path does not exist in cache ");
             Ok(false)
         }
     }
@@ -269,9 +277,10 @@ impl FileSystemCache {
     }
 
     /// Loads a serialized verifying key from the file system and returns it.
-    pub fn load_circuit(&self, checksum: &Checksum) -> VmResult<Option<PinnedCircuit>> {
+    pub fn load_circuit(&self, checksum: &Checksum) -> VmResult<Option<CachedCircuit>> {
+        println!("getting module from fs_cache;");
         let file_path = self.circuit_file(checksum);
-
+        // use cursor to load circuit?
         let raw_bytes = match std::fs::read(&file_path) {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -281,11 +290,23 @@ impl FileSystemCache {
                 )))
             }
         };
+        println!(
+            "deserializing raw bytes from fs_cache::raw_bytes::length::{};",
+            raw_bytes.len()
+        );
+        println!("this is where the error occurs for sure;");
 
-        // TODO: use shared-buffer or another libarry to safely and effeciently load bytes from file path
         let result = VerifyingKey::from_bytes(&raw_bytes);
         match result {
-            Ok(vk) => Ok(Some(vk.into())),
+            Ok(vk) => {
+                let size_estimate = vk.to_bytes().expect("msg").len();
+                println!("deserializing-vk::raw_bytes::length::{};", raw_bytes.len());
+                println!(
+                    "deserializing-vk::size_estimate::length::{};",
+                    size_estimate
+                );
+                Ok(Some(CachedCircuit { vk, size_estimate }))
+            }
             Err(ZkError::IoErr { err }) => match err.kind() {
                 io::ErrorKind::NotFound => Ok(None),
                 _ => Err(VmError::cache_err(format!(
@@ -299,6 +320,7 @@ impl FileSystemCache {
     }
 
     /// Stores a serialized verifying key to the file system.
+    /// serialized_to_vec is used to curate the zk bytes for this function.
     pub fn store_circuit(&mut self, checksum: &Checksum, zk: &[u8]) -> VmResult<usize> {
         mkdir_p(&self.modules_path)
             .map_err(|_e| VmError::cache_err("Error creating circuits directory"))?;

@@ -239,7 +239,7 @@ impl<A: BackendApi, S: Storage, Q: Querier> Clone for Environment<A, S, Q> {
 }
 
 impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
-    pub fn new_with_vk(api: A, gas_limit: u64) -> Self {
+    pub fn new(api: A, gas_limit: u64) -> Self {
         Environment {
             memory: None,
             api,
@@ -587,7 +587,7 @@ mod tests {
         Store,
         Box<WasmerInstance>,
     ) {
-        let env = Environment::new_with_vk(MockApi::default(), gas_limit);
+        let env = Environment::new(MockApi::default(), gas_limit);
 
         let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
         let module = compile(&engine, HACKATOM).unwrap();

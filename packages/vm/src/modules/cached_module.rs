@@ -37,8 +37,8 @@ pub struct CachedModule {
 }
 
 /// NEW: Wrapper to accurately track the memory footprint of the deserialized key
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct CachedCircuit {
-    pub vk: std::sync::Arc<zk_cosmwasm::VerifyingKey>,
+    pub vk: zk_cosmwasm::VerifyingKey,
     pub size_estimate: usize,
 }

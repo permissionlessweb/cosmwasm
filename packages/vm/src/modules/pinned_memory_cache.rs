@@ -2,6 +2,8 @@ use cosmwasm_std::Checksum;
 use std::collections::HashMap;
 
 use super::cached_module::CachedModule;
+#[cfg(feature = "zk")]
+use crate::modules::CachedCircuit;
 use crate::VmResult;
 
 /// Struct storing some additional metadata, which is only of interest for the pinned cache,
@@ -19,7 +21,7 @@ pub struct InstrumentedCircuit {
     /// Number of loads from memory this module received
     pub hits: u32,
     /// The actual cached module
-    pub circuit: zk_cosmwasm::PinnedCircuit,
+    pub circuit: CachedCircuit,
 }
 
 /// An pinned in memory module cache
@@ -62,10 +64,16 @@ impl PinnedMemoryCache {
     pub fn store_circuit(
         &mut self,
         checksum: &Checksum,
-        circuit: zk_cosmwasm::PinnedCircuit,
+        cached_circuit: CachedCircuit,
     ) -> VmResult<()> {
-        self.circuits
-            .insert(*checksum, InstrumentedCircuit { hits: 0, circuit });
+        println!("storing to pinned_memory_cache;");
+        self.circuits.insert(
+            *checksum,
+            InstrumentedCircuit {
+                hits: 0,
+                circuit: cached_circuit,
+            },
+        );
         Ok(())
     }
 
@@ -100,10 +108,7 @@ impl PinnedMemoryCache {
     }
     /// Looks up a module in the cache and creates a new module
     #[cfg(feature = "zk")]
-    pub fn load_circuit(
-        &mut self,
-        checksum: &Checksum,
-    ) -> VmResult<Option<zk_cosmwasm::PinnedCircuit>> {
+    pub fn load_circuit(&mut self, checksum: &Checksum) -> VmResult<Option<CachedCircuit>> {
         match self.circuits.get_mut(checksum) {
             Some(cached) => {
                 cached.hits = cached.hits.saturating_add(1);
@@ -151,7 +156,7 @@ impl PinnedMemoryCache {
         {
             let circuit_size: usize = self
                 .iter_circuits()
-                .map(|(key, zk)| std::mem::size_of_val(key) + zk.circuit.actual_size_bytes())
+                .map(|(key, zk)| std::mem::size_of_val(key) + zk.circuit.size_estimate)
                 .sum();
 
             return module_size + circuit_size;
@@ -277,7 +282,10 @@ mod tests {
             let checksum = Checksum::from(*checksum_footer);
             assert!(!cache.has(&checksum, true));
 
-            let circuit = zk_cosmwasm::PinnedCircuit::new(VerifyingKey::from_bytes(&zk).unwrap());
+            let circuit = CachedCircuit {
+                vk: VerifyingKey::from_bytes(&zk).unwrap(),
+                size_estimate: zk.len(),
+            };
             cache.store_circuit(&checksum, circuit).unwrap();
             assert!(cache.has(&checksum, true));
             // Remove
@@ -332,14 +340,15 @@ mod tests {
 
         #[cfg(feature = "zk")]
         {
-            use zk_cosmwasm::VerifyingKey;
-
             let zk = NORICK_CIRCUIT;
             let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
             let checksum = Checksum::from(*checksum_footer);
             assert!(!cache.has(&checksum, true));
 
-            let circuit = zk_cosmwasm::PinnedCircuit::new(VerifyingKey::from_bytes(&zk).unwrap());
+            let circuit = CachedCircuit {
+                vk: zk_cosmwasm::VerifyingKey::from_bytes(&zk).unwrap(),
+                size_estimate: zk.len(),
+            };
             cache.store_circuit(&checksum, circuit).unwrap();
 
             let (_checksum, circuit) = cache
@@ -405,7 +414,10 @@ mod tests {
 
             assert_eq!(cache.len(), 0);
 
-            let circuit = zk_cosmwasm::PinnedCircuit::new(VerifyingKey::from_bytes(&zk).unwrap());
+            let circuit = CachedCircuit {
+                vk: VerifyingKey::from_bytes(&zk).unwrap(),
+                size_estimate: zk.len(),
+            };
             cache.store_circuit(&checksum, circuit).unwrap();
 
             assert_eq!(cache.len(), 1);
@@ -477,21 +489,24 @@ mod tests {
 
         #[cfg(feature = "zk")]
         {
-            use zk_cosmwasm::VerifyingKey;
-
             let zk = NORICK_CIRCUIT;
             let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
             let checksum = Checksum::from(*checksum_footer);
 
             assert_eq!(cache.size(), 0);
-            // Add 1
-            let circuit = zk_cosmwasm::PinnedCircuit::new(VerifyingKey::from_bytes(&zk).unwrap());
+            // Add 1: 66135
+            let circuit = CachedCircuit {
+                vk: zk_cosmwasm::VerifyingKey::from_bytes(&zk).unwrap(),
+                size_estimate: zk.len(),
+            };
+            assert_eq!(zk.len(), circuit.vk.to_bytes().unwrap().len());
+
             cache.store_circuit(&checksum, circuit).unwrap();
-            assert_eq!(cache.size(), 66113);
+            assert_eq!(cache.size(), 66167);
 
             // Add 2
             cache.store(&checksum1, module).unwrap();
-            assert_eq!(cache.size(), 332 + 66113);
+            assert_eq!(cache.size(), 332 + 66167);
 
             // Remove 1
             cache.remove(&checksum, true).unwrap();

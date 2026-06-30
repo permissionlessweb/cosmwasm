@@ -64,6 +64,11 @@ const MAX_LENGTH_DEBUG: usize = 2 * MI;
 /// Max length for an abort message
 const MAX_LENGTH_ABORT: usize = 2 * MI;
 
+/// Max length for a proof
+const MAX_LENGTH_PROOF: usize = MI;
+/// Max length for a set of instances
+const MAX_LENGTH_INSTANCES: usize = MI;
+
 #[inline(always)]
 fn charge_host_call_gas<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
     env: &Environment<A, S, Q>,
@@ -837,20 +842,17 @@ pub fn do_halo2_proof_instance_verify<
 
     let zkid_u64 = zkid as u64;
 
-    // Read proof and instances from WASM memory
-    const MAX_PROOF_SIZE: usize = 2 * MI;
-    const MAX_INSTANCES_SIZE: usize = 64 * KI;
     let proof_bytes = read_region(
         data,
         &mut store,
         proof_ptr,
-        std::cmp::min(proof_len as usize, MAX_PROOF_SIZE),
+        std::cmp::min(proof_len as usize, MAX_LENGTH_PROOF),
     )?;
     let instances_bytes = read_region(
         data,
         &mut store,
         instances_ptr,
-        std::cmp::min(instances_len as usize, MAX_INSTANCES_SIZE),
+        std::cmp::min(instances_len as usize, MAX_LENGTH_INSTANCES),
     )?;
 
     // Charge gas for proof verification
@@ -861,6 +863,7 @@ pub fn do_halo2_proof_instance_verify<
     );
     process_gas_info(data, &mut store, gas_info)?;
 
+    // data.call_function0(&mut store, name, args)?;
     // Query x/wasm module for circuit data
     let query_request: QueryRequest<Empty> =
         QueryRequest::Wasm(WasmQuery::Circuit { zk_id: zkid_u64 });
@@ -895,6 +898,7 @@ pub fn do_halo2_proof_instance_verify<
         crate::serde::from_slice(&response_binary, response_binary.len()).map_err(|e| {
             VmError::generic_err(format!("Failed to parse CircuitResponse: {:?}", e))
         })?;
+
     let res = crate::zk::deserialize_circuit_data(&circuit_response.data)?;
     // Deserialize VK and verify proof
     let vk = zk_cosmwasm::VerifyingKey::from_bytes(&res.body).map_err(|e| {
@@ -1166,7 +1170,7 @@ mod tests {
         Box<WasmerInstance>,
     ) {
         let gas_limit = TESTING_GAS_LIMIT;
-        let env = Environment::new_with_vk(api, gas_limit);
+        let env = Environment::new(api, gas_limit);
 
         let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
         let module = compile(&engine, HACKATOM).unwrap();

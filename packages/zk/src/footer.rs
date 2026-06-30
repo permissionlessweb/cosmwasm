@@ -14,9 +14,9 @@ pub struct CircuitFooter {
     pub instance_count: u8,
     /// byte length of params
     pub param_len: u32,
-    /// byte length of constraint system
-    pub cs_len: u32,
     /// byte length of constraint systems
+    pub cs_len: u32,
+    /// byte length of vk
     pub vk_len: u32,
     /// checksums
     pub checksum: [u8; 32],
@@ -29,10 +29,20 @@ impl std::fmt::Display for CircuitFooter {
         f.write_str(&format!("{:#?}", self.param_len))?;
         f.write_str(&format!("{:#?}", self.cs_len))?;
         f.write_str(&format!("{:#?}", self.vk_len))?;
-        f.write_str(&format!(
-            "{:#?}, self.circuit_type.to_u8()",
-            hex::encode(self.checksum)
-        ))
+        f.write_str(&format!("{:#?}", hex::encode(self.checksum)))
+    }
+}
+
+impl Into<[u8; COSMWASM_FOOTER_LENGTH]> for CircuitFooter {
+    fn into(self) -> [u8; COSMWASM_FOOTER_LENGTH] {
+        self.to_bytes()
+    }
+}
+
+impl TryFrom<&[u8]> for CircuitFooter {
+    type Error = ZkError;
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(&bytes)
     }
 }
 
@@ -64,9 +74,9 @@ impl CircuitFooter {
     /// - [0]: circuit_type (1 byte)
     /// - [1]: instance_count (1 byte)
     /// - [2..6]: param_len (4 bytes, u32 LE)
-    /// - [6..10]: cs_len (4 bytes, u32 LE)
     /// - [10..14]: vk_len (4 bytes, u32 LE)
-    /// - [14..]: checksum
+    /// - [14..14]: vk_len (4 bytes, u32 LE)
+    /// - [21..53]: checksum (32 bytes,  )
     pub fn to_bytes(&self) -> [u8; COSMWASM_FOOTER_LENGTH] {
         let mut bytes = [0u8; COSMWASM_FOOTER_LENGTH];
         bytes[0] = self.circuit_type.to_u8();

@@ -225,25 +225,22 @@ impl CodeGenerator {
                 vk.write(&mut vk_buf)
                     .map_err(|e| cosmwasm_vm::zk::ZkError::new_err(format!("Failed to serialize VK: {}", e)))?;
 
-                // Get the constraint system and serialize it
-                let mut cs = halo2_proofs::plonk::ConstraintSystem::<pasta_curves::vesta::Scalar>::default();
-                let _ = <#circuit_name as Circuit<pasta_curves::vesta::Scalar>>::configure(&mut cs);
+                // // Get the constraint system and serialize it
+                // let mut cs = halo2_proofs::plonk::ConstraintSystem::<pasta_curves::vesta::Scalar>::default();
+                // let _ = <#circuit_name as Circuit<pasta_curves::vesta::Scalar>>::configure(&mut cs);
 
-                let mut cs_buf = Vec::new();
-                cs.write(&mut cs_buf)
-                    .map_err(|e| cosmwasm_vm::zk::ZkError::new_err(format!("Failed to serialize CS: {}", e)))?;
+                // let mut cs_buf = Vec::new();
+                // cs.write(&mut cs_buf)
+                //     .map_err(|e| cosmwasm_vm::zk::ZkError::new_err(format!("Failed to serialize CS: {}", e)))?;
 
 
 
                 let paramlen =  params_buf.len();
-                let cslen = cs_buf.len();
                 let vklen = vk_buf.len();
-                let mut output = Vec::with_capacity(paramlen + vklen + cslen + COSMWASM_FOOTER_LENGTH);
+                let mut output = Vec::with_capacity(paramlen + vklen  + COSMWASM_FOOTER_LENGTH);
                 // write to output buffer, pad with known object len in ZcashDeserialize fashion
                 output.extend_from_slice(&[paramlen])
                 output.extend_from_slice(&params_buf);
-                output.extend_from_slice(&[cslen])
-                output.extend_from_slice(&cs_buf);
                 output.extend_from_slice(&[vklen])
                 output.extend_from_slice(&vk_buf);
                 output.extend_from_slice(&CircuitFooter::new(instances,Sha256::digest(output).into()).to_bytes());

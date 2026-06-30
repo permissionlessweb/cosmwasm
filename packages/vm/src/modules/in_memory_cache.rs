@@ -42,16 +42,22 @@ pub struct InMemoryCache {
 }
 #[cfg(feature = "zk")]
 impl InMemoryCache {
-    pub fn store_circuit(&mut self, checksum: &Checksum, cached_zk: CachedCircuit) -> VmResult<()> {
+    pub fn store_circuit(
+        &mut self,
+        checksum: &Checksum,
+        cached_zk: &CachedCircuit,
+    ) -> VmResult<()> {
         if let Some(zk) = &mut self.cache {
-            zk.put_with_weight(*checksum, CacheEntry::Circuit(cached_zk))
+            zk.put_with_weight(*checksum, CacheEntry::Circuit(cached_zk.clone()))
                 .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
         }
         Ok(())
     }
     /// Looks up a module in the cache and creates a new module
     pub fn load_circuit(&mut self, checksum: &Checksum) -> VmResult<Option<CachedCircuit>> {
+        println!("loading circuit from in_memory_cache;");
         if let Some(modules) = &mut self.cache {
+            println!("in_memory_cache exists;");
             match modules.get(checksum) {
                 Some(cached) => match cached {
                     CacheEntry::Module(_) => Ok(None),
@@ -60,6 +66,7 @@ impl InMemoryCache {
                 None => Ok(None),
             }
         } else {
+            println!("no in_memory_cache;");
             Ok(None)
         }
     }

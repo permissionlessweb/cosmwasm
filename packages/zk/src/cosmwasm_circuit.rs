@@ -1,6 +1,3 @@
-use std::collections::VecDeque;
-use std::sync::Arc;
-
 use crate::errors::{ZkError, ZkResult};
 use crate::CircuitFooter;
 use group::ff::{Field, PrimeField};
@@ -11,6 +8,7 @@ use halo2_proofs::{
 };
 use pasta_curves::vesta;
 use sha2::{Digest, Sha256};
+use std::cell::RefCell;
 use std::io::{self, Cursor};
 
 /// Custom section name for embedded verifying keys
@@ -18,95 +16,60 @@ use std::io::{self, Cursor};
 pub const VK_CUSTOM_SECTION_NAME: &str = "cosmwasm_zk_vk";
 
 /// Thread-safe handle to a pinned verifying key
-pub type PinnedCircuit = Arc<VerifyingKey>;
+pub type PinnedCircuit = VerifyingKey;
 
-/// Basic metadata about a Plonkish circuit
-#[derive(Debug, Clone, Copy)]
-pub struct PlonkishCircuitMetadata {
-    /// Circuit type identifier
-    pub ct: CircuitType,
-    /// Number of public inputs (instance count)
-    pub i: u8,
-    /// Circuit name (for debugging)
-    pub name: &'static str,
-}
-
-impl PlonkishCircuitMetadata {
-    /// Create new metadata
-    pub const fn new(ct: CircuitType, i: u8, name: &'static str) -> Self {
-        Self { ct, i, name }
-    }
-}
-
-/// Metadata about a circuit's constraint system
-///
-/// Dynamically extracted from the circuit's `configure()` method.
 #[derive(Debug, Clone)]
-pub struct ConstraintSystemMetadata {
-    /// Number of fixed columns in the constraint system
-    pub num_fixed_columns: u32,
-    /// Number of advice (witness) columns in the constraint system
-    pub num_advice_columns: u32,
-    /// Number of instance (public) columns in the constraint system
-    pub num_instance_columns: u32,
-    /// Number of selectors in the constraint system
-    pub num_selectors: u32,
-    /// Number of gates in the constraint system
-    pub num_gates: u32,
-    /// Maximum polynomial degree across all constraints
-    pub degree: u8,
-    /// Whether the circuit contains lookup arguments
-    pub has_lookups: bool,
-    /// Columns that participate in copy constraints (permutation)
-    pub permutation_columns: Vec<plonk::Column<plonk::Any>>,
-}
-
-impl Default for ConstraintSystemMetadata {
-    fn default() -> Self {
-        Self {
-            num_fixed_columns: 0,
-            num_advice_columns: 0,
-            num_instance_columns: 0,
-            num_selectors: 0,
-            num_gates: 0,
-            degree: 0,
-            has_lookups: false,
-            permutation_columns: Vec::new(),
-        }
-    }
-}
-
-/// Dynamic circuit configuration (v2: column counts only, CS is serialized separately)
-#[derive(Debug, Clone, Copy)]
-pub struct DynamicCircuitConfig {
+pub struct CsBlueprint {
     pub num_fixed_columns: u8,
     pub num_advice_columns: u8,
     pub num_instance_columns: u8,
     pub num_selectors: u32,
+    pub permutation_columns: Vec<plonk::Column<plonk::Any>>,
 }
 
-// Thread-local storage for circuit config during keygen
+#[derive(Clone, Debug)]
+pub struct SerializedPlonkishCircuitData {
+    pub body: Vec<u8>,
+    pub footer: Vec<u8>,
+}
+
+impl SerializedPlonkishCircuitData {
+    pub fn new(bytes: &[u8], footer: &[u8]) -> Self {
+        Self {
+            body: bytes.to_vec(),
+            footer: footer.to_vec(),
+        }
+    }
+    pub fn serialized_to_vec(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&self.body);
+        buf.extend_from_slice(&self.footer);
+        buf
+    }
+}
+
 thread_local! {
-    static DYNAMIC_CIRCUIT_CONFIG: std::cell::RefCell<Option<DynamicCircuitConfig>> =
-        std::cell::RefCell::new(None);
+    static CS_BLUEPRINT: RefCell<Option<CsBlueprint>> = RefCell::new(None);
 }
 
-/// RAII Guard for DynamicCircuit thread-local configuration.
-///
-/// Automatically clears the thread-local config when dropped, preventing leaks
-/// and reentrancy issues in concurrent scenarios.
+// // / RAII Guard for DynamicCircuit thread-local configuration.
+// // /
+// // / Automatically clears the thread-local config when dropped, preventing leaks
+// // / and reentrancy issues in concurrent scenarios.
 #[must_use = "guard should be held for the entire operation"]
-pub struct DynamicCircuitGuard;
+pub struct CsBlueprintGuard;
 
-impl DynamicCircuitGuard {
-    fn new() -> Self {
+impl CsBlueprintGuard {
+    pub fn install(blueprint: CsBlueprint) -> Self {
+        println!("cw::vm::zk::cs_blueprint::install::{:#?}", blueprint);
+        CS_BLUEPRINT.with(|bp| *bp.borrow_mut() = Some(blueprint));
         Self
     }
 }
 
-impl Drop for DynamicCircuitGuard {
+impl Drop for CsBlueprintGuard {
     fn drop(&mut self) {
-        DynamicCircuit::clear_current();
+        CS_BLUEPRINT.with(|bp| *bp.borrow_mut() = None);
     }
 }
 
@@ -115,55 +78,24 @@ impl Drop for DynamicCircuitGuard {
 /// Used for VK deserialization without needing the original Rust circuit type.
 /// In v2 format, the serialized CS is included alongside the VK, so this only
 /// needs to match the column structure — gates and lookups come from the CS.
-///
-/// # Usage
-/// ```ignore
-/// let circuit = DynamicCircuit::from_footer(&footer);
-/// let _guard = circuit.set_as_current_guarded();
-/// // halo2::VerifyingKey::read can now use it
-/// ```
 #[derive(Debug, Clone)]
-pub struct DynamicCircuit {
-    config: DynamicCircuitConfig,
-}
+pub struct DynamicCircuit;
 
 impl DynamicCircuit {
     /// Create a new dynamic circuit with the specified column structure.
-    pub fn new(
-        num_fixed_columns: u8,
-        num_advice_columns: u8,
-        num_instance_columns: u8,
-        num_selectors: u32,
-    ) -> Self {
-        Self {
-            config: DynamicCircuitConfig {
-                num_fixed_columns,
-                num_advice_columns,
-                num_instance_columns,
-                num_selectors,
-            },
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 
-    /// Set config and return an RAII guard for automatic cleanup.
-    pub fn set_as_current_guarded(&self) -> DynamicCircuitGuard {
-        DYNAMIC_CIRCUIT_CONFIG.with(|cfg| {
-            *cfg.borrow_mut() = Some(self.config);
-        });
-        DynamicCircuitGuard::new()
-    }
+    // /// Get the current thread-local configuration.
+    // fn current_config() -> Option<CsBlueprint> {
+    //     CS_BLUEPRINT.with(|cfg| <Option<CsBlueprint> as Clone>::clone(&*cfg.borrow()))
+    // }
 
-    /// Get the current thread-local configuration.
-    fn current_config() -> Option<DynamicCircuitConfig> {
-        DYNAMIC_CIRCUIT_CONFIG.with(|cfg| *cfg.borrow())
-    }
-
-    /// Clear the thread-local configuration.
-    pub fn clear_current() {
-        DYNAMIC_CIRCUIT_CONFIG.with(|cfg| {
-            *cfg.borrow_mut() = None;
-        });
-    }
+    // /// Clear the thread-local configuration.
+    // pub fn clear_current() {
+    //     CS_BLUEPRINT.with(|bp| *bp.borrow_mut() = None);
+    // }
 }
 
 impl Circuit<vesta::Scalar> for DynamicCircuit {
@@ -171,39 +103,38 @@ impl Circuit<vesta::Scalar> for DynamicCircuit {
     type FloorPlanner = halo2_proofs::circuit::SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        let _ = self.set_as_current_guarded();
-        self.clone()
+        Self::new()
     }
 
     fn configure(meta: &mut ConstraintSystem<vesta::Scalar>) -> Self::Config {
-        let config = Self::current_config().expect(
-            "DynamicCircuit::configure called without setting thread-local config. \
-             Call circuit.set_as_current() before keygen operations.",
-        );
+        CS_BLUEPRINT.with(|bp_cell| {
+            if let Some(blueprint) = &*bp_cell.borrow() {
+                // Re-create the exact column structure
+                for _ in 0..blueprint.num_fixed_columns {
+                    let col = meta.fixed_column();
+                    meta.enable_equality(col);
+                }
+                for _ in 0..blueprint.num_advice_columns {
+                    let col = meta.advice_column();
+                    meta.enable_equality(col);
+                }
+                for _ in 0..blueprint.num_instance_columns {
+                    let col = meta.instance_column();
+                    meta.enable_equality(col);
+                }
+                for _ in 0..blueprint.num_selectors {
+                    meta.selector();
+                }
 
-        // Fixed columns — enable equality on all (conservative; the real CS
-        // is deserialized separately in v2).
-        for _ in 0..config.num_fixed_columns {
-            let col = meta.fixed_column();
-            meta.enable_equality(col);
-        }
-
-        // Advice columns — all with equality
-        for _ in 0..config.num_advice_columns {
-            let col = meta.advice_column();
-            meta.enable_equality(col);
-        }
-
-        // Instance columns — all with equality
-        for _ in 0..config.num_instance_columns {
-            let col = meta.instance_column();
-            meta.enable_equality(col);
-        }
-
-        // Selectors
-        for _ in 0..config.num_selectors {
-            meta.selector();
-        }
+                // Re-apply permutation columns (critical for correct VK read)
+                for &col in &blueprint.permutation_columns {
+                    meta.enable_equality(col);
+                }
+            } else {
+                eprintln!("Warning: DynamicCircuit::configure called without CsBlueprint");
+            }
+        });
+        ()
     }
 
     fn synthesize(
@@ -211,6 +142,7 @@ impl Circuit<vesta::Scalar> for DynamicCircuit {
         _config: Self::Config,
         _layouter: impl Layouter<vesta::Scalar>,
     ) -> Result<(), plonk::Error> {
+        // unimplemented as vm does not support proof creation
         Ok(())
     }
 }
@@ -281,53 +213,22 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct SerializedPlonkishCircuitData {
-    pub body: Vec<u8>,
-    pub footer: Vec<u8>,
-}
-
-impl SerializedPlonkishCircuitData {
-    pub fn new(bytes: &[u8], footer: &[u8]) -> Self {
-        Self {
-            body: bytes.to_vec(),
-            footer: footer.to_vec(),
-        }
-    }
-    pub fn serialized_to_vec(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&self.body);
-        buf.extend_from_slice(&self.footer);
-        buf
-    }
-}
-
 /// A verifying key for the zk-wasmvm.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VerifyingKey {
     pub params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
     pub vk: plonk::VerifyingKey<vesta::Affine>,
-    pub i: usize,
+    pub footer: CircuitFooter,
 }
 
 impl VerifyingKey {
-    /// Create from an existing VK.
-    /// WARNING: creates new random params — only for fresh key generation.
-    pub fn new(vk: plonk::VerifyingKey<vesta::Affine>, k: u32, i: usize) -> Self {
-        VerifyingKey {
-            params: halo2_proofs::poly::commitment::Params::new(k),
-            vk,
-            i,
-        }
-    }
-
     /// Create with existing params (use when deserializing).
-    pub fn new_with_params(
+    pub fn new(
         params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
         vk: plonk::VerifyingKey<vesta::Affine>,
-        i: usize,
+        footer: CircuitFooter,
     ) -> Self {
-        VerifyingKey { params, vk, i }
+        VerifyingKey { params, vk, footer }
     }
 }
 
@@ -346,170 +247,124 @@ impl VerifyingKey {
     {
         let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::new(k);
         let vk = plonk::keygen_vk(&params, &c).unwrap();
-        let (cs, _) = Self::extract_cs_metadata::<C>()?;
 
         let mut buf1: Vec<u8> = Vec::new();
         let mut buf2 = Vec::new();
+        let mut buf3 = Vec::new();
 
         params.write(&mut buf1)?;
-        vk.write(&mut buf2)?;
+        vk.cs().write(&mut buf2)?;
+        vk.write(&mut buf3)?;
 
-        let paramlen = buf1.len();
-        let vklen = buf2.len();
-        let cslen = cs.len();
+        let param_len = buf1.len();
+        let cs_len = buf2.len();
+        let vk_len = buf3.len();
 
-        let mut output = Vec::with_capacity(paramlen + cslen + vklen + COSMWASM_FOOTER_LENGTH);
+        let param_checksum = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&buf1).to_vec());
+        let cs_checksum = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&buf2).to_vec());
+        let vk_checksum = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&buf3).to_vec());
+
+        println!(
+            "cw::vm::BUILD::param::(len::{},checksum::{})",
+            param_len, param_checksum
+        );
+        println!(
+            "cw::vm::BUILD::cs::(len::{},checksum::{})",
+            cs_len, cs_checksum
+        );
+        println!(
+            "cw::vm::BUILD::vk::(len::{},checksum::{})",
+            vk_len, vk_checksum
+        );
+
+        let mut output = Vec::with_capacity(param_len + cs_len + vk_len + COSMWASM_FOOTER_LENGTH);
+
         output.extend_from_slice(&buf1);
-        output.extend_from_slice(&cs);
         output.extend_from_slice(&buf2);
+        output.extend_from_slice(&buf3);
 
         let footer = CircuitFooter::new(
             CircuitType::Plonkish,
             i as u8,
-            paramlen as u32,
-            cslen as u32,
-            vklen as u32,
+            param_len as u32,
+            cs_len as u32,
+            vk_len as u32,
             Sha256::digest(&output).into(), // does not hash footer content
         );
+
         output.extend_from_slice(&footer.to_bytes());
 
         Ok(output)
     }
 
-    /// Get actual memory footprint by serializing.
-    pub fn actual_size_bytes(&self) -> usize {
-        self.to_bytes().map(|b| b.len()).unwrap_or(0)
-    }
-
-    /// Parse and validate structure without deserializing.
-    pub fn parse_bytes(bytes: &[u8]) -> ZkResult<SerializedPlonkishCircuitData> {
-        let height = &bytes.len();
-        let foot = &bytes[height - COSMWASM_FOOTER_LENGTH..];
-        let body = &bytes[0..height - COSMWASM_FOOTER_LENGTH];
-        Ok(SerializedPlonkishCircuitData::new(body, foot))
-    }
-
     /// The embedded CS is deserialized and used for VK reconstruction,
     /// giving exact circuit-agnostic verification without the original Rust type.
-    ///     /// before: each object had its own reader, preflight validation
-    /// now: extract just footer from bytes, give and use single reader for all objects
     pub fn from_bytes(bytes: &[u8]) -> ZkResult<Self> {
         let footer_bytes = &bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..];
         let footer = crate::CircuitFooter::from_bytes(footer_bytes)?;
 
-        // Extract sections
         let mut reader = Cursor::new(bytes);
         let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(&mut reader)?;
 
-        // Deserialize constraint system
-        // let mut cs_reader = Cursor::new(cs_bytes);
-        let cs = ConstraintSystem::<vesta::Scalar>::read(&mut reader)
-            .map_err(|e| ZkError::from_io(e))?;
+        let cs: ConstraintSystem<vesta::Scalar> = ConstraintSystem::read(&mut reader)?;
 
-        // Deserialize VK using the deserialized CS
-        // let mut vk_reader = Cursor::new(vk_bytes);
-        let vk = halo2_proofs::plonk::VerifyingKey::<vesta::Affine>::read_with_cs(
+        let _guard = CsBlueprintGuard::install(CsBlueprint {
+            num_fixed_columns: cs.get_num_fixed_columns(),
+            num_advice_columns: cs.get_num_advice_columns(),
+            num_instance_columns: cs.get_num_instance_columns(),
+            num_selectors: cs.get_num_selectors(),
+            permutation_columns: cs.get_permutation_columns(),
+        });
+
+        let empty_selectors: Vec<Vec<bool>> = vec![];
+        let vk = halo2_proofs::plonk::VerifyingKey::read_with_cs::<std::io::Cursor<&[u8]>>(
             &mut reader,
             &params,
             cs,
+            empty_selectors,
         )
         .map_err(|e| {
-            ZkError::from_io(std::io::Error::new(
+            ZkError::new_io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("{:?}", e),
             ))
         })?;
 
-        Ok(VerifyingKey::new_with_params(
-            params,
-            vk,
-            footer.instance_count as usize,
-        ))
+        Ok(VerifyingKey::new(params, vk, footer))
     }
 
-    // CANONICAL SOURCE OF TRUTH FOR HOW WE SERIALIZE VERIFYING KEYS FOR COSMWASM
-    pub fn to_bytes_with_footer(
-        &self,
-        cs: &ConstraintSystem<vesta::Scalar>,
-        footer: &crate::CircuitFooter,
-    ) -> io::Result<Vec<u8>> {
-        let mut parambuf = VecDeque::new();
-        self.params.write(&mut parambuf)?;
-        let paramlen = parambuf.len();
-        parambuf.push_front(paramlen as u8);
-
-        let mut vkbuf = VecDeque::new();
-        self.vk.write(&mut vkbuf)?;
-        let vklen = vkbuf.len();
-        vkbuf.push_front(vklen as u8);
-
-        let mut csbuf = VecDeque::new();
-        cs.write(&mut csbuf)?;
-        let cslen = csbuf.len();
-        csbuf.push_front(cslen as u8);
-
-        let mut output = Vec::with_capacity(paramlen + vklen + cslen + COSMWASM_FOOTER_LENGTH);
-
-        output.extend_from_slice(parambuf.make_contiguous());
-        output.extend_from_slice(&vkbuf.make_contiguous());
-        output.extend_from_slice(&csbuf.make_contiguous());
-        output.extend_from_slice(&footer.to_bytes());
-        Ok(output)
-    }
-
-    /// write
     pub fn to_bytes(&self) -> io::Result<Vec<u8>> {
-        let mut output = Vec::new();
-        let mut params_buf = Vec::new();
-        self.params.write(&mut params_buf)?;
-        output.extend_from_slice(&params_buf);
+        let mut buf1 = Vec::new();
+        let mut buf2 = Vec::new();
+        let mut buf3 = Vec::new();
 
-        let mut vk_buf = Vec::new();
-        self.vk.write(&mut vk_buf)?;
-        output.extend_from_slice(&vk_buf);
+        self.params.write(&mut buf1)?;
+        self.vk.cs().write(&mut buf2)?;
+        self.vk.write(&mut buf3)?;
+
+        println!(
+            "cw::vm::vk::from_bytes::params::(len::{},checksum::{})",
+            buf1.len(),
+            hex::encode(&Sha256::digest(&buf1).to_vec()),
+        );
+        println!(
+            "cw::vm::vk::from_bytes::cs::(len::{},checksum::{})",
+            buf2.len(),
+            hex::encode(&Sha256::digest(&buf2).to_vec()),
+        );
+        println!(
+            "cw::vm::vk::from_bytes::(len::{},checksum::{})",
+            buf3.len(),
+            hex::encode(&Sha256::digest(&buf3).to_vec()),
+        );
+
+        let mut output = Vec::new();
+        output.extend_from_slice(&buf1);
+        output.extend_from_slice(&buf2);
+        output.extend_from_slice(&buf3);
+        output.extend_from_slice(&self.footer.to_bytes());
 
         Ok(output)
-    }
-    /// Extract constraint system metadata from a circuit type.
-    ///
-    /// Runs `C::configure()` on a fresh `ConstraintSystem` to capture
-    /// column counts, gate count, degree, and lookup presence.
-    /// Returns the serialized CS bytes and the metadata needed for the footer.
-    pub(crate) fn extract_cs_metadata<C>() -> io::Result<(Vec<u8>, ConstraintSystemMetadata)>
-    where
-        C: Circuit<vesta::Scalar>,
-    {
-        let mut cs = ConstraintSystem::<vesta::Scalar>::default();
-        let _ = C::configure(&mut cs);
-
-        let mut cs_buf = Vec::new();
-        cs.write(&mut cs_buf)?;
-
-        let meta = ConstraintSystemMetadata {
-            num_fixed_columns: cs.get_num_fixed_columns() as u32,
-            num_advice_columns: cs.get_num_advice_columns() as u32,
-            num_instance_columns: cs.get_num_instance_columns() as u32,
-            num_selectors: cs.get_num_selectors(),
-            num_gates: cs.get_gate_count() as u32,
-            degree: cs.degree() as u8,
-            has_lookups: cs.has_lookups(),
-            permutation_columns: cs.get_permutation_columns(),
-        };
-
-        Ok((cs_buf, meta))
-    }
-
-    pub fn build_and_write<C>(
-        path: std::path::PathBuf,
-        c: C,
-        k: u32,
-        instance_count: usize,
-    ) -> io::Result<()>
-    where
-        C: Circuit<vesta::Scalar>,
-    {
-        let bytes = Self::build(c, k, instance_count)?;
-        std::fs::write(path, bytes)
     }
 }
 
@@ -536,59 +391,6 @@ impl ProvingKey {
     pub fn params(&self) -> halo2_proofs::poly::commitment::Params<vesta::Affine> {
         self.params.clone()
     }
-
-    // /// Build and write to file.
-    // pub fn build_and_write(
-    //     path: std::path::PathBuf,
-    //     k: u32,
-    //     circuit: impl Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
-    // ) -> io::Result<()> {
-    //     let mut writer = io::BufWriter::new(std::fs::File::create(path)?);
-    //     let pk = Self::build(k, circuit);
-    //     pk.params.write(&mut writer)?;
-    //     pk.pk.get_vk().write(&mut writer)?;
-    //     io::Write::flush(&mut writer)
-    // }
-
-    // /// Build proving key and also write a v2 verifying key file.
-    // ///
-    // /// This is the recommended way to generate circuit keys: it produces
-    // /// both a proving key (for proof generation) and a minimal v2 VK file
-    // /// `[params][vk][cs][footer(32)]` ready for VM upload.
-    // ///
-    // /// The VK file is self-describing — the VM can deserialize and verify
-    // /// proofs without the original circuit type.
-    // pub fn build_with_vk_v2<C>(
-    //     k: u32,
-    //     circuit: C,
-    //     instance_count: usize,
-    // ) -> io::Result<(Self, Vec<u8>)>
-    // where
-    //     C: Circuit<vesta::Scalar>,
-    // {
-    //     // Capture CS before consuming the circuit for keygen
-    //     let (cs_buf, meta) = VerifyingKey::extract_cs_metadata::<C>()?;
-
-    //     // Build PK (which includes the VK internally)
-    //     let params = poly::commitment::Params::<vesta::Affine>::new(k);
-    //     let wrapped = CosmwasmCircuit::new(circuit);
-    //     let vk = plonk::keygen_vk(&params, &wrapped).unwrap();
-    //     let pk = plonk::keygen_pk(&params, vk, &wrapped).unwrap();
-
-    //     // Serialize VK from the PK
-    //     let mut params_buf = Vec::new();
-    //     params.write(&mut params_buf)?;
-
-    //     let mut vk_buf = Vec::new();
-    //     pk.get_vk().write(&mut vk_buf)?;
-
-    //     let mut vk_v2 = Vec::with_capacity(params_buf.len() + vk_buf.len() + cs_buf.len() + 32);
-    //     vk_v2.extend_from_slice(&params_buf);
-    //     vk_v2.extend_from_slice(&vk_buf);
-    //     vk_v2.extend_from_slice(&cs_buf);
-
-    //     Ok((ProvingKey { params, pk }, vk_v2))
-    // }
 }
 
 /// Public inputs.

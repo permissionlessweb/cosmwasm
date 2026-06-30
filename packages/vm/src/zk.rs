@@ -15,24 +15,8 @@ impl CodeBundle {
     }
     pub fn with_vk(wasm: Vec<u8>, vk_bytes: Vec<u8>) -> ZkResult<Self> {
         let footer = check_circuit(&vk_bytes)?;
-        tracing::debug!("Original vk_bytes len: {}", vk_bytes.len());
-        tracing::debug!(
-            "Body len passed to new(): {}",
-            vk_bytes.len() - COSMWASM_FOOTER_LENGTH
-        );
-
-        let bundle = Self::with_vk_and_type(wasm, vk_bytes, footer);
-
-        if let Some(vk) = &bundle.vk {
-            tracing::debug!("After new() - vk.bytes len: {}", vk.body.len());
-            tracing::debug!(
-                "vk checksum: {:02x?}",
-                Checksum::generate(&vk.body).as_slice()
-            );
-            tracing::debug!("Stored footer checksum: {:02x?}", footer.checksum);
-        }
-
-        Ok(bundle)
+        tracing::debug!("footer: {:#?}", footer);
+        Ok(Self::with_vk_and_type(wasm, vk_bytes, footer))
     }
 
     pub fn with_vk_and_type(wasm: Vec<u8>, vk_bytes: Vec<u8>, footer: CircuitFooter) -> Self {
@@ -94,10 +78,9 @@ pub fn deserialize_circuit_data(data: &[u8]) -> ZkResult<SerializedPlonkishCircu
 
 pub fn check_circuit(bytes: &[u8]) -> ZkResult<CircuitFooter> {
     let total_len = bytes.len();
-    tracing::debug!(total_len);
     if total_len < COSMWASM_FOOTER_LENGTH {
         return Err(ZkError::new_err(format!(
-            "bad circuit size. got: {}",
+            "vm::zk::bad circuit size::length::{}",
             total_len
         )));
     };
@@ -105,11 +88,12 @@ pub fn check_circuit(bytes: &[u8]) -> ZkResult<CircuitFooter> {
     let body_bytes = &bytes[..total_len - footer_bytes.len()];
 
     println!(
-        "Total len: {}, COSMWASM_FOOTER_LENGTH: {}, footer_bytes.len(): {}, body_bytes.len(): {}",
+        "check_circuit::::::::::\n
+        [total_len: {}, footer_len: {},  body_bytes.len(): {},sane: {}]",
         total_len,
-        COSMWASM_FOOTER_LENGTH,
         footer_bytes.len(),
-        body_bytes.len()
+        body_bytes.len(),
+        (total_len - footer_bytes.len() - body_bytes.len() == 0)
     );
 
     let footer = CircuitFooter::from_bytes(footer_bytes)
@@ -117,8 +101,9 @@ pub fn check_circuit(bytes: &[u8]) -> ZkResult<CircuitFooter> {
 
     let computed = Checksum::generate(body_bytes);
 
-    println!("Parsed  : {:02x?}", footer.checksum);
-    println!("Computed: {:02x?}", computed.as_slice());
+    println!("Parsed:{}", hex::encode(footer.checksum));
+    println!("Computed:{}", hex::encode(computed.as_slice()));
+
     match &computed.as_slice() == &footer.checksum {
         true => Ok(footer),
         false => return Err(ZkError::IntegrityErr {}),
@@ -165,8 +150,8 @@ mod tests {
 
         let mut vk_blob: Vec<u8> = Vec::new();
         vk_blob.extend(vec![0xAA; params_len as usize]);
-        vk_blob.extend(vec![0xCC; cs_len as usize]);
-        vk_blob.extend(vec![0xBB; vk_len as usize]);
+        vk_blob.extend(vec![0xBB; cs_len as usize]);
+        vk_blob.extend(vec![0xCC; vk_len as usize]);
 
         let footer = CircuitFooter::new(
             CircuitType::Plonkish,

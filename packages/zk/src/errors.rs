@@ -13,7 +13,7 @@ pub enum ZkError {
     IoErr { err: Error },
     #[error("{0}")]
     TryFromSliceError(#[from] TryFromSliceError),
-    #[error("Hash doesn't match stored data")]
+    #[error("calculated hash doesn't match stored hash")]
     IntegrityErr {},
 }
 
@@ -21,13 +21,13 @@ impl ZkError {
     pub fn new_err<T: Into<String>>(e: T) -> Self {
         ZkError::Aborted { err: e.into() }
     }
-    pub fn from_io<T: Into<Error>>(e: T) -> Self {
+    pub fn new_io<T: Into<Error>>(e: T) -> Self {
         ZkError::IoErr { err: e.into() }
     }
 }
 
 impl From<Error> for ZkError {
     fn from(e: Error) -> Self {
-        ZkError::from_io(e)
+        ZkError::new_io(e)
     }
 }

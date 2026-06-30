@@ -89,7 +89,7 @@ where
         extra_imports: Option<HashMap<&str, Exports>>,
         instantiation_lock: Option<&Mutex<()>>,
     ) -> VmResult<Self> {
-        let fe = FunctionEnv::new(&mut store, Environment::new_with_vk(backend.api, gas_limit));
+        let fe = FunctionEnv::new(&mut store, Environment::new(backend.api, gas_limit));
 
         let mut import_obj = Imports::new();
         let mut env_imports = Exports::new();
@@ -231,7 +231,7 @@ where
             "ed25519_batch_verify",
             Function::new_typed_with_env(&mut store, &fe, do_ed25519_batch_verify),
         );
-        
+
         #[cfg(feature = "zk")]
         env_imports.insert(
             "halo2_proof_instance_verify",
