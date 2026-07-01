@@ -1,6 +1,5 @@
 use blake2::{digest::consts::U5, Blake2b, Digest};
-#[cfg(feature = "zk")]
-use halo2_proofs::pasta::pallas;
+use cosmwasm_std::Checksum;
 use std::fs;
 use std::hash::Hash;
 use std::io;
@@ -8,13 +7,7 @@ use std::panic::catch_unwind;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use thiserror::Error;
-#[cfg(feature = "zk")]
-use zk_cosmwasm::CosmwasmCircuit;
-use zk_cosmwasm::{PinnedCircuit, VerifyingKey, ZkError};
-
 use wasmer::{DeserializeError, Module, Target};
-
-use cosmwasm_std::Checksum;
 
 use crate::errors::{VmError, VmResult};
 use crate::filesystem::mkdir_p;
@@ -296,7 +289,7 @@ impl FileSystemCache {
         );
         println!("this is where the error occurs for sure;");
 
-        let result = VerifyingKey::from_bytes(&raw_bytes);
+        let result = zk_cosmwasm::VerifyingKey::from_bytes(&raw_bytes);
         match result {
             Ok(vk) => {
                 let size_estimate = vk.to_bytes().expect("msg").len();
@@ -307,7 +300,7 @@ impl FileSystemCache {
                 );
                 Ok(Some(CachedCircuit { vk, size_estimate }))
             }
-            Err(ZkError::IoErr { err }) => match err.kind() {
+            Err(zk_cosmwasm::ZkError::IoErr { err }) => match err.kind() {
                 io::ErrorKind::NotFound => Ok(None),
                 _ => Err(VmError::cache_err(format!(
                     "Error opening module file: {err}"

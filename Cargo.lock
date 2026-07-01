@@ -697,6 +697,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "corez"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4df6f98652d30167eaeea34d77b730e07c8caba6df17bd4551842b9b8da01deb"
+
+[[package]]
 name = "corosensei"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -831,6 +837,7 @@ dependencies = [
  "blake2",
  "clap",
  "clru",
+ "corez",
  "cosmwasm-core",
  "cosmwasm-crypto",
  "cosmwasm-std",
@@ -1718,12 +1725,15 @@ name = "halo2_proofs"
 version = "0.3.2"
 dependencies = [
  "blake2b_simd",
+ "digest 0.10.7",
  "ff",
  "group",
+ "hex",
  "indexmap 1.9.3",
  "maybe-rayon",
  "pasta_curves",
  "rand_core 0.6.4",
+ "sha2 0.10.9",
  "tracing",
 ]
 

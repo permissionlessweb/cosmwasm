@@ -5,10 +5,7 @@ use std::num::NonZeroUsize;
 use cosmwasm_std::Checksum;
 
 use super::cached_module::CachedModule;
-use crate::{
-    modules::cached_module::{CacheEntry, CachedCircuit},
-    Size, VmError, VmResult,
-};
+use crate::{modules::cached_module::CacheEntry, Size, VmError, VmResult};
 
 // Minimum module size.
 // Based on `examples/module_size.sh`, and the cosmwasm-plus contracts.
@@ -40,12 +37,13 @@ pub struct InMemoryCache {
     /// This guarantees the total memory used never exceeds the configured `Size`.
     cache: Option<CLruCache<Checksum, CacheEntry, RandomState, SizeScale>>,
 }
+
 #[cfg(feature = "zk")]
 impl InMemoryCache {
     pub fn store_circuit(
         &mut self,
         checksum: &Checksum,
-        cached_zk: &CachedCircuit,
+        cached_zk: &super::CachedCircuit,
     ) -> VmResult<()> {
         if let Some(zk) = &mut self.cache {
             zk.put_with_weight(*checksum, CacheEntry::Circuit(cached_zk.clone()))
@@ -54,14 +52,14 @@ impl InMemoryCache {
         Ok(())
     }
     /// Looks up a module in the cache and creates a new module
-    pub fn load_circuit(&mut self, checksum: &Checksum) -> VmResult<Option<CachedCircuit>> {
+    pub fn load_circuit(&mut self, checksum: &Checksum) -> VmResult<Option<super::CachedCircuit>> {
         println!("loading circuit from in_memory_cache;");
         if let Some(modules) = &mut self.cache {
             println!("in_memory_cache exists;");
             match modules.get(checksum) {
                 Some(cached) => match cached {
-                    CacheEntry::Module(_) => Ok(None),
                     CacheEntry::Circuit(zk) => Ok(Some(zk.clone())),
+                    _ => Ok(None),
                 },
                 None => Ok(None),
             }
@@ -104,7 +102,7 @@ impl InMemoryCache {
             match modules.get(checksum) {
                 Some(cached) => match cached {
                     CacheEntry::Module(cached) => Ok(Some(cached.clone())),
-                    CacheEntry::Circuit(_) => Ok(None),
+                    _ => Ok(None),
                 },
                 None => Ok(None),
             }

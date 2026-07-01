@@ -26,7 +26,7 @@ builds = [{ name = "cosmwasm-vm", default-features = true }]
 bench = false
 
 [features]
-default = ["iterator", "staking"]
+default = ["iterator", "staking", "zk"]
 # iterator allows us to iterate over all DB items in a given range
 # this must be enabled to support cosmwasm contracts compiled with the 'iterator' feature
 # optional as some merkle stores (like tries) don't support this
@@ -75,6 +75,7 @@ zk-cosmwasm  = { workspace = true, features = ["interface"], optional = true }
 tracing = "0.1.38"
 tracing-profile = "0.10.11"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
+corez = "0.1.1"
 
 [dev-dependencies]
 clap = "4"

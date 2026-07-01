@@ -174,45 +174,6 @@ impl CircuitType {
     }
 }
 
-/// A struct defining a circuit compatible with the zk-wasmvm.
-#[derive(Debug)]
-pub struct CosmwasmCircuit<C> {
-    circuit: C,
-}
-
-impl<C> CosmwasmCircuit<C> {
-    pub fn new(circuit: C) -> Self {
-        Self { circuit }
-    }
-}
-
-impl<C, F> halo2_proofs::plonk::Circuit<F> for CosmwasmCircuit<C>
-where
-    C: Circuit<F>,
-    F: Field,
-{
-    type Config = C::Config;
-    type FloorPlanner = C::FloorPlanner;
-
-    fn without_witnesses(&self) -> Self {
-        CosmwasmCircuit {
-            circuit: self.circuit.without_witnesses(),
-        }
-    }
-
-    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        C::configure(meta)
-    }
-
-    fn synthesize(
-        &self,
-        config: Self::Config,
-        layouter: impl Layouter<F>,
-    ) -> Result<(), plonk::Error> {
-        self.circuit.synthesize(config, layouter)
-    }
-}
-
 /// A verifying key for the zk-wasmvm.
 #[derive(Debug, Clone)]
 pub struct VerifyingKey {
@@ -372,21 +333,21 @@ impl VerifyingKey {
 #[derive(Debug)]
 pub struct ProvingKey {
     params: halo2_proofs::poly::commitment::Params<vesta::Affine>,
-    pk: plonk::ProvingKey<vesta::Affine>,
+    _pk: plonk::ProvingKey<vesta::Affine>,
 }
 
 impl ProvingKey {
-    /// Build from a given circuit.
-    pub fn build<C>(k: u32, circuit: C) -> Self
-    where
-        C: Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
-    {
-        let params = halo2_proofs::poly::commitment::Params::new(k);
-        let wrapped_circuit = CosmwasmCircuit { circuit };
-        let vk = plonk::keygen_vk(&params, &wrapped_circuit).unwrap();
-        let pk = plonk::keygen_pk(&params, vk, &wrapped_circuit).unwrap();
-        ProvingKey { params, pk }
-    }
+    // /// Build from a given circuit.
+    // pub fn build<C>(k: u32, circuit: C) -> Self
+    // where
+    //     C: Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
+    // {
+    //     let params = halo2_proofs::poly::commitment::Params::new(k);
+    //     let wrapped_circuit = CosmwasmCircuit { circuit };
+    //     let vk = plonk::keygen_vk(&params, &wrapped_circuit).unwrap();
+    //     let pk = plonk::keygen_pk(&params, vk, &wrapped_circuit).unwrap();
+    //     ProvingKey { params, _pk: pk }
+    // }
 
     pub fn params(&self) -> halo2_proofs::poly::commitment::Params<vesta::Affine> {
         self.params.clone()
@@ -453,39 +414,39 @@ impl Proof {
         Proof(bytes)
     }
 
-    /// Create a proof for the given circuits and instances.
-    pub fn create<C: halo2_proofs::plonk::Circuit<pasta_curves::Fp>>(
-        pk: &ProvingKey,
-        circuits: &[crate::CosmwasmCircuit<C>],
-        i: &[Instance],
-        mut rng: impl rand::RngCore,
-    ) -> Result<Self, plonk::Error> {
-        let converted_columns: Vec<Vec<pasta_curves::Fp>> = i
-            .iter()
-            .map(|i| {
-                i.i.iter()
-                    .map(|&s| Into::<pasta_curves::Fp>::into(s))
-                    .collect()
-            })
-            .collect();
+    // /// Create a proof for the given circuits and instances.
+    // pub fn create<C: halo2_proofs::plonk::Circuit<pasta_curves::Fp>>(
+    //     pk: &ProvingKey,
+    //     circuits: &[crate::CosmwasmCircuit<C>],
+    //     i: &[Instance],
+    //     mut rng: impl rand::RngCore,
+    // ) -> Result<Self, plonk::Error> {
+    //     let converted_columns: Vec<Vec<pasta_curves::Fp>> = i
+    //         .iter()
+    //         .map(|i| {
+    //             i.i.iter()
+    //                 .map(|&s| Into::<pasta_curves::Fp>::into(s))
+    //                 .collect()
+    //         })
+    //         .collect();
 
-        let column_slices: Vec<&[pasta_curves::Fp]> =
-            converted_columns.iter().map(|v| v.as_slice()).collect();
+    //     let column_slices: Vec<&[pasta_curves::Fp]> =
+    //         converted_columns.iter().map(|v| v.as_slice()).collect();
 
-        let instances_arg: &[&[&[pasta_curves::Fp]]] = &[column_slices.as_slice()];
+    //     let instances_arg: &[&[&[pasta_curves::Fp]]] = &[column_slices.as_slice()];
 
-        let mut transcript =
-            halo2_proofs::transcript::Blake2bWrite::<_, vesta::Affine, _>::init(vec![]);
-        plonk::create_proof(
-            &pk.params,
-            &pk.pk,
-            circuits,
-            instances_arg,
-            &mut rng,
-            &mut transcript,
-        )?;
-        Ok(Proof(transcript.finalize()))
-    }
+    //     let mut transcript =
+    //         halo2_proofs::transcript::Blake2bWrite::<_, vesta::Affine, _>::init(vec![]);
+    //     plonk::create_proof(
+    //         &pk.params,
+    //         &pk.pk,
+    //         circuits,
+    //         instances_arg,
+    //         &mut rng,
+    //         &mut transcript,
+    //     )?;
+    //     Ok(Proof(transcript.finalize()))
+    // }
 
     /// Verify this proof with the given instances.
     pub fn verify(&self, vk: &VerifyingKey, i: &[Instance]) -> Result<(), plonk::Error> {

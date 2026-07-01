@@ -1,8 +1,8 @@
 //! Zk-CosmWasm: zk-struct specific for interacting with zk-circuit binaries
 pub mod cosmwasm_circuit;
 pub use cosmwasm_circuit::{
-    CircuitType, CosmwasmCircuit, DynamicCircuit, Instance, PinnedCircuit, Proof, ProvingKey,
-    VerifyingKey,SerializedPlonkishCircuitData,
+    CircuitType, DynamicCircuit, Instance, Proof, ProvingKey, SerializedPlonkishCircuitData,
+    VerifyingKey,
 };
 
 pub mod errors;
