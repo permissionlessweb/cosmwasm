@@ -40,9 +40,11 @@ halo2_gadgets = { path = "../../../zcash/halo2/halo2_gadgets", default-features 
 halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs" }
 sha2 = "0.11.0"
 
-# for dev environment
-# halo2_proofs  = { path = "../../../../halo2/halo2_proofs", package = "halo2_proofs" }
-# halo2_gadgets = { path = "../../../../halo2/halo2_gadgets", default-features = false ,features = ["test-dependencies"]  } 
+
+# patch halo2_gadgets and hao2_proofs with the release commit from its git source
+[patch.crates-io]
+halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303" }
+halo2_proofs = { git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303" }   
 
 [dev-dependencies]
 clap = "4"
