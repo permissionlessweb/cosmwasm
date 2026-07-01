@@ -159,7 +159,7 @@ impl PinnedMemoryCache {
                 .map(|(key, zk)| std::mem::size_of_val(key) + zk.circuit.size_estimate)
                 .sum();
 
-            return module_size + circuit_size;
+            module_size + circuit_size
         }
         #[cfg(not(feature = "zk"))]
         module_size

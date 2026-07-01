@@ -1033,11 +1033,11 @@ impl Default for WasmQuerier {
                 },
                 #[cfg(feature = "zk")]
                 WasmQuery::CircuitInfo { zk_id } => SystemError::NoSuchCircuit {
-                    zk_id: zk_id.clone(),
+                    zk_id: *zk_id,
                 },
                 #[cfg(feature = "zk")]
                 WasmQuery::Circuit { zk_id } => SystemError::NoSuchCircuit {
-                    zk_id: zk_id.clone(),
+                    zk_id: *zk_id,
                 },
             };
             SystemResult::Err(err)
@@ -1094,7 +1094,7 @@ impl BankQuerier {
     fn calculate_supplies(balances: &BTreeMap<String, Vec<Coin>>) -> BTreeMap<String, Uint256> {
         let mut supplies = BTreeMap::new();
 
-        let all_coins = balances.iter().flat_map(|(_, coins)| coins);
+        let all_coins = balances.values().flatten();
 
         for coin in all_coins {
             *supplies

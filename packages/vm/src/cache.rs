@@ -321,14 +321,14 @@ where
         // Here we could also delete from memory caches but this is not really
         // necessary as they are pushed out from the LRU over time or disappear
         // when the node process restarts.
-        cache.fs_cache.remove(&checksum)?;
+        cache.fs_cache.remove(checksum)?;
         if wasm {
-            remove_wasm_from_disk(&cache.wasm_path, &checksum)?;
+            remove_wasm_from_disk(&cache.wasm_path, checksum)?;
         } else {
             #[cfg(feature = "zk")]
             {
                 tracing::debug!("remove_circuit_from_disk ");
-                self.remove_circuit_from_disk(&cache.wasm_path, &checksum)?;
+                self.remove_circuit_from_disk(&cache.wasm_path, checksum)?;
             }
         }
 
@@ -559,10 +559,10 @@ where
         // Here we could also delete from memory caches but this is not really
         // necessary as they are pushed out from the LRU over time or disappear
         // when the node process restarts.
-        cache.fs_cache.remove_circuit(&checksum)?;
-        cache.pinned_memory_cache.remove(&checksum, true)?;
+        cache.fs_cache.remove_circuit(checksum)?;
+        cache.pinned_memory_cache.remove(checksum, true)?;
         tracing::debug!("remove_circuit_from_disk ");
-        self.remove_circuit_from_disk(&cache.wasm_path, &checksum)?;
+        self.remove_circuit_from_disk(&cache.wasm_path, checksum)?;
         Ok(())
     }
 
@@ -601,7 +601,7 @@ where
 {
     fn save_circuit_to_disk(&self, vk: &[u8]) -> VmResult<Checksum> {
         let cache = self.inner.lock().unwrap();
-        Ok(save_circuit_to_disk(&cache.wasm_path, vk)?)
+        save_circuit_to_disk(&cache.wasm_path, vk)
     }
 
     /// Pins a circuit that was previously stored via [`Cache::store_circuit`].
@@ -701,7 +701,7 @@ where
             code_bundle
                 .vk
                 .as_ref()
-                .map_or(false, |vk| !vk.body.is_empty()),
+                .is_some_and(|vk| !vk.body.is_empty()),
         );
 
         // Error if both are empty
@@ -886,11 +886,11 @@ where
         println!("loading circuit from disk;");
         let bytes = load_circuit_from_disk(dir, checksum)?;
         println!("length on disk:{};", bytes.len());
-        let body = &bytes[0..&bytes.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH];
+        let body = &bytes[0..bytes.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH];
         let footer = crate::check_circuit(&bytes)
             .map_err(|e| VmError::generic_err(format!("ZK load: {}", e)))?
             .to_bytes();
-        Ok(Some(SerializedPlonkishCircuitData::new(&body, &footer)))
+        Ok(Some(SerializedPlonkishCircuitData::new(body, &footer)))
     }
     /// Remove a VK file from disk if the path exists
     #[cfg(feature = "zk")]
@@ -1074,7 +1074,7 @@ fn save_circuit_to_disk(dir: impl Into<PathBuf>, c: &[u8]) -> VmResult<Checksum>
         .truncate(true)
         .open(filepath)
         .map_err(|e| VmError::cache_err(format!("Error opening Circuit file for writing: {e}")))?;
-    file.write_all(&c)
+    file.write_all(c)
         .map_err(|e| VmError::cache_err(format!("Error writing Circuit file: {e}")))?;
 
     Ok(cf.checksum.into())
