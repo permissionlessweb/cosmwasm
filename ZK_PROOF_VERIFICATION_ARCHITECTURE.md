@@ -37,7 +37,7 @@ VM Cache Layer (Performance Optimization)
 **Proof Verification Flow**:
 
 ```
-do_halo2_proof_instance_verify(zkid, proof_bytes, instances_bytes)
+do_proof_instance_verify(zkid, proof_bytes, instances_bytes)
     ↓
 1. Charge gas for host call
 2. Read proof from WASM memory (max 2 MB)
@@ -67,10 +67,10 @@ The application layer maintains the zkid-to-checksum mapping:
 
 ### 2. Imports Layer (`packages/vm/src/imports.rs`)
 
-The `do_halo2_proof_instance_verify` function implements the host import:
+The `do_proof_instance_verify` function implements the host import:
 
 ```rust
-pub fn do_halo2_proof_instance_verify<
+pub fn do_proof_instance_verify<
     A: BackendApi + 'static,
     S: Storage + 'static,
     Q: Querier + 'static,
@@ -124,7 +124,7 @@ pub fn resolve_zkid_to_checksum(&self, zkid: u64) -> Option<Checksum> {}
 
    ```wasm
    ;; In contract code
-   (call $do_halo2_proof_instance_verify
+   (call $do_proof_instance_verify
        (i64.const 42)           ; zkid
        (i32.const 0x1000)       ; proof pointer
        (i32.const 0x200000)     ; proof length (2 MB max)
@@ -132,7 +132,7 @@ pub fn resolve_zkid_to_checksum(&self, zkid: u64) -> Option<Checksum> {}
        (i32.const 0x10000))     ; instances length (64 KB max)
    ```
 
-2. **Imports Layer (`do_halo2_proof_instance_verify`)**
+2. **Imports Layer (`do_proof_instance_verify`)**
    - ✓ Charge host call gas
    - ✓ Read proof from WASM memory (max 2 MB)
    - ✓ Read instances from WASM memory (max 64 KB)
@@ -230,7 +230,7 @@ if result == 0 {
 **VM Host Import** (implemented in `packages/vm/src/imports.rs`):
 
 ```rust
-// do_halo2_proof_instance_verify flow:
+// do_proof_instance_verify flow:
 // 1. Resolve zkid to checksum via env.resolve_zkid_to_checksum()
 // 2. Load VK from VM cache using cache.get_pinned_circuit()
 // 3. Verify proof using VK with embedded constraint system
@@ -359,7 +359,7 @@ store_code_with_circuit
   └─ App state: store zkid → checksum mapping
            ↓
 [Use Phase]
-do_halo2_proof_instance_verify
+do_proof_instance_verify
   ├─ Resolve zkid → checksum (app state)
   └─ Load VK from cache (pinned memory or disk)
            ↓
@@ -401,7 +401,7 @@ This indirection decouples logical circuit references (zkid) from physical stora
 
 ✅ **Host Import Function** (`packages/vm/src/imports.rs`)
 
-- `do_halo2_proof_instance_verify` accepts `zkid: u64` parameter
+- `do_proof_instance_verify` accepts `zkid: u64` parameter
 - Resolves zkid to checksum, loads VK from VM cache
 - Supports version 2 format with embedded constraint systems
 - Returns 0 (valid) or 1 (invalid)

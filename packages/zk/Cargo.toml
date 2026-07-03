@@ -41,6 +41,7 @@ halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_pr
 sha2 = "0.11.0"
 
 
+
 # patch halo2_gadgets and hao2_proofs with the release commit from its git source
 [patch.crates-io]
 halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303" }

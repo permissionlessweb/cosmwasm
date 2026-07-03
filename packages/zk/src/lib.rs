@@ -1,12 +1,17 @@
 //! Zk-CosmWasm: zk-struct specific for interacting with zk-circuit binaries
-pub mod cosmwasm_circuit;
-pub use cosmwasm_circuit::{
-    CircuitType, DynamicCircuit, Instance, Proof, ProvingKey, SerializedPlonkishCircuitData,
-    VerifyingKey,
-};
+pub mod circuits;
+pub mod curves;
+pub mod footer;
 
 pub mod errors;
 pub use errors::{ZkError, ZkResult};
 
-pub mod footer;
-pub use footer::CircuitFooter;
+pub use {
+    circuits::{AnyInstance, AnyVerifyingKey, CircuitType, Proof, SerializedPlonkishCircuitData},
+    curves::ZkCurve,
+    footer::CircuitFooter,
+};
+
+pub(crate) use circuits::{
+    CosmwasmCircuit, CsBlueprint, CsBlueprintGuard, CwInstance, CwProvingKey, CwVerifyingKey,
+};

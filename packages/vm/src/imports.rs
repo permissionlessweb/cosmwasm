@@ -825,7 +825,7 @@ pub fn do_ed25519_batch_verify<
 
 /// Fetches VK from x/wasm module via WasmQuery::Circuit and verifies a Halo2 proof.
 #[cfg(feature = "zk")]
-pub fn do_halo2_proof_instance_verify<
+pub fn do_proof_instance_verify<
     A: BackendApi + 'static,
     S: Storage + 'static,
     Q: Querier + 'static,
@@ -839,8 +839,6 @@ pub fn do_halo2_proof_instance_verify<
 ) -> VmResult<u32> {
     let (data, mut store) = env.data_and_store_mut();
     charge_host_call_gas(data, &mut store)?;
-
-    let zkid_u64 = zkid as u64;
 
     let proof_bytes = read_region(
         data,
@@ -865,14 +863,14 @@ pub fn do_halo2_proof_instance_verify<
 
     // data.call_function0(&mut store, name, args)?;
     // Query x/wasm module for circuit data
-    let query_request: QueryRequest<Empty> =
-        QueryRequest::Wasm(WasmQuery::Circuit { zk_id: zkid_u64 });
-    let query_bytes = to_vec(&query_request)
-        .map_err(|e| VmError::generic_err(format!("Failed to serialize circuit query: {:?}", e)))?;
-
     const QUERY_GAS_LIMIT: u64 = 1_000_000_000;
     let (query_result, query_gas_info) = data.with_querier_from_context(|querier| {
-        Ok(querier.query_raw(&query_bytes, QUERY_GAS_LIMIT))
+        Ok(querier.query_raw(
+            &to_vec(&QueryRequest::Wasm::<Empty>(WasmQuery::Circuit {
+                zk_id: zkid as u64,
+            }))?,
+            QUERY_GAS_LIMIT,
+        ))
     })?;
     process_gas_info(data, &mut store, query_gas_info)?;
 
@@ -881,36 +879,27 @@ pub fn do_halo2_proof_instance_verify<
         .map_err(|e| {
             VmError::generic_err(format!(
                 "Query backend error for circuit {}: {:?}",
-                zkid_u64, e
+                &zkid, e
             ))
         })?
         .into_result()
         .map_err(|e| {
-            VmError::generic_err(format!(
-                "Query system error for circuit {}: {:?}",
-                zkid_u64, e
-            ))
+            VmError::generic_err(format!("Query system error for circuit {}: {:?}", &zkid, e))
         })?
         .into_result()
-        .map_err(|e| VmError::generic_err(format!("Circuit {} not found: {}", zkid_u64, e)))?;
+        .map_err(|e| VmError::generic_err(format!("Circuit {} not found: {}", &zkid, e)))?;
 
-    let circuit_response: CircuitResponse =
-        crate::serde::from_slice(&response_binary, response_binary.len()).map_err(|e| {
-            VmError::generic_err(format!("Failed to parse CircuitResponse: {:?}", e))
-        })?;
+    let res = crate::zk::deserialize_circuit_data(
+        &crate::serde::from_slice::<CircuitResponse>(&response_binary, response_binary.len())
+            .map_err(|e| VmError::generic_err(format!("Failed to parse CircuitResponse: {:?}", e)))?
+            .data,
+    )?;
 
-    let res = crate::zk::deserialize_circuit_data(&circuit_response.data)?;
-    // Deserialize VK and verify proof
-    let vk = zk_cosmwasm::VerifyingKey::from_bytes(&res.body).map_err(|e| {
-        VmError::generic_err(format!(
-            "Failed to deserialize VK for circuit {}: {}",
-            zkid_u64, e
-        ))
-    })?;
+    let v = zk_cosmwasm::AnyVerifyingKey::try_from(res.body.as_slice())?;
+    let i = zk_cosmwasm::AnyInstance::try_from_bytes(&zkid, instances_bytes.as_slice())?;
+    let p = zk_cosmwasm::Proof::new(proof_bytes.clone());
 
-    let instance = zk_cosmwasm::Instance::new_from_vm(instances_bytes.clone())?;
-    let proof = zk_cosmwasm::Proof::new(proof_bytes.clone());
-    match proof.verify(&vk, &[instance]) {
+    match p.verify(&v, &[i]) {
         Ok(_) => {
             eprintln!("✅ Proof verification succeeded!");
             Ok(0)

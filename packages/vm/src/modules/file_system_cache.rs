@@ -289,10 +289,10 @@ impl FileSystemCache {
         );
         println!("this is where the error occurs for sure;");
 
-        let result = zk_cosmwasm::VerifyingKey::from_bytes(&raw_bytes);
+        let result = zk_cosmwasm::AnyVerifyingKey::try_from(raw_bytes.as_slice());
         match result {
             Ok(vk) => {
-                let size_estimate = vk.to_bytes().expect("msg").len();
+                let size_estimate = vk.to_bytes_with_params()?.len();
                 println!("deserializing-vk::raw_bytes::length::{};", raw_bytes.len());
                 println!(
                     "deserializing-vk::size_estimate::length::{};",

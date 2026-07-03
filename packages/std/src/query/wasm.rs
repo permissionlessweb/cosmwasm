@@ -166,9 +166,8 @@ pub mod zk {
     use super::*;
     /// The essential data from wasmd's [Circuit]/[CircuitResponse].
     ///
-    /// `code_hash`/`data_hash` was renamed to `checksum` to follow the CosmWasm
-    /// convention and naming in `instantiate2_address`.
-    ///
+    /// This contains the circuit's constraint_system parameter bytes as well as the cs & vk, with the circuit footer bytes.
+    /// This is the minimum full bytes needed to power optimized proof verification.
     /// [CircuitInfo]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/types.proto#L62-L72
     /// [CircuitInfoResponse]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/query.proto#L184-L199
     #[non_exhaustive]
@@ -210,8 +209,7 @@ pub mod zk {
         zk_id: u64,
         creator: Addr,
         checksum: Checksum
-    )
-    ;
+    );
     impl QueryResponseType for CircuitInfoResponse {}
 }
 

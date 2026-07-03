@@ -220,7 +220,7 @@ impl Api for MockApi {
         })
 
         // // Deserialize the verifying key from bytes
-        // // This mirrors the VM's do_halo2_proof_instance_verify implementation
+        // // This mirrors the VM's do_proof_instance_verify implementation
         // let loaded_vk =
         //     cosmwasm_vm::zk::LoadedVk::from_bytes(&vk_bytes).map_err(|e| {
         //         return Err(VerificationError::unknown_err(66));

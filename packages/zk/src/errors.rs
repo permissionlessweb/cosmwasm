@@ -1,5 +1,6 @@
 use std::{array::TryFromSliceError, io::Error};
 
+use halo2_proofs::plonk;
 use thiserror::Error;
 
 pub type ZkResult<T> = core::result::Result<T, ZkError>;
@@ -9,10 +10,18 @@ pub type ZkResult<T> = core::result::Result<T, ZkError>;
 pub enum ZkError {
     #[error("Aborted: {}", err)]
     Aborted { err: String },
+    #[error("Invalid Scalar")]
+    InvalidScalar,
+    #[error("CurveMismatch")]
+    CurveMismatch,
+    #[error("UnsupportedCurve: {id}")]
+    UnsupportedCurve{id:u32},
     #[error("Aborted: {}", err)]
     IoErr { err: Error },
     #[error("{0}")]
     TryFromSliceError(#[from] TryFromSliceError),
+    #[error("{0}")]
+    PlonkError(#[from] plonk::Error),
     #[error("calculated hash doesn't match stored hash")]
     IntegrityErr {},
 }

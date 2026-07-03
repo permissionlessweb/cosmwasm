@@ -79,20 +79,14 @@ impl PinnedMemoryCache {
 
     /// Removes a module from the cache
     /// Not found modules are silently ignored. Potential integrity errors (wrong checksum) are not checked / enforced
-    pub fn remove(&mut self, checksum: &Checksum, zk: bool) -> VmResult<()> {
-        match zk {
-            true => {
-                #[cfg(feature = "zk")]
-                self.circuits.remove(checksum);
-                #[cfg(not(feature = "zk"))]
-                return Err(crate::VmError::generic_err(
-                    "zk faeture disabled. cannot remove circuit from cache",
-                ));
-            }
-            false => {
-                self.modules.remove(checksum);
-            }
-        };
+    pub fn remove(&mut self, checksum: &Checksum) -> VmResult<()> {
+        self.modules.remove(checksum);
+        Ok(())
+    }
+
+    #[cfg(feature = "zk")]
+    pub fn remove_circuit(&mut self, checksum: &Checksum) -> VmResult<()> {
+        self.circuits.remove(checksum);
         Ok(())
     }
 
@@ -106,7 +100,8 @@ impl PinnedMemoryCache {
             None => Ok(None),
         }
     }
-    /// Looks up a module in the cache and creates a new module
+    /// Looks up a module in the cache and creates a new module.
+    /// IMPORTANT: pinned memory lookup is not checksum of vk file, but checksum of loaded vk with cs & params (since params and vk are different)
     #[cfg(feature = "zk")]
     pub fn load_circuit(&mut self, checksum: &Checksum) -> VmResult<Option<CachedCircuit>> {
         match self.circuits.get_mut(checksum) {
@@ -269,27 +264,25 @@ mod tests {
         assert!(cache.has(&checksum, false));
 
         // Remove
-        cache.remove(&checksum, false).unwrap();
+        cache.remove(&checksum).unwrap();
 
         assert!(!cache.has(&checksum, false));
 
         #[cfg(feature = "zk")]
         {
-            use zk_cosmwasm::VerifyingKey;
-
             let zk = NORICK_CIRCUIT;
             let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
             let checksum = Checksum::from(*checksum_footer);
             assert!(!cache.has(&checksum, true));
 
             let circuit = CachedCircuit {
-                vk: VerifyingKey::from_bytes(&zk).unwrap(),
+                vk: zk_cosmwasm::AnyVerifyingKey::try_from(zk).unwrap(),
                 size_estimate: zk.len(),
             };
             cache.store_circuit(&checksum, circuit).unwrap();
             assert!(cache.has(&checksum, true));
             // Remove
-            cache.remove(&checksum, true).unwrap();
+            cache.remove_circuit(&checksum).unwrap();
             assert!(!cache.has(&checksum, false));
         }
     }
@@ -340,13 +333,15 @@ mod tests {
 
         #[cfg(feature = "zk")]
         {
+            use zk_cosmwasm::AnyVerifyingKey;
+
             let zk = NORICK_CIRCUIT;
             let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
             let checksum = Checksum::from(*checksum_footer);
             assert!(!cache.has(&checksum, true));
 
             let circuit = CachedCircuit {
-                vk: zk_cosmwasm::VerifyingKey::from_bytes(&zk).unwrap(),
+                vk: AnyVerifyingKey::try_from(zk).unwrap(),
                 size_estimate: zk.len(),
             };
             cache.store_circuit(&checksum, circuit).unwrap();
@@ -400,14 +395,12 @@ mod tests {
         assert_eq!(cache.len(), 1);
 
         // Remove
-        cache.remove(&checksum, false).unwrap();
+        cache.remove(&checksum).unwrap();
 
         assert_eq!(cache.len(), 0);
 
         #[cfg(feature = "zk")]
         {
-            use zk_cosmwasm::VerifyingKey;
-
             let zk = NORICK_CIRCUIT;
             let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
             let checksum = Checksum::from(*checksum_footer);
@@ -415,7 +408,7 @@ mod tests {
             assert_eq!(cache.len(), 0);
 
             let circuit = CachedCircuit {
-                vk: VerifyingKey::from_bytes(&zk).unwrap(),
+                vk: zk_cosmwasm::AnyVerifyingKey::try_from(zk).unwrap(),
                 size_estimate: zk.len(),
             };
             cache.store_circuit(&checksum, circuit).unwrap();
@@ -423,7 +416,7 @@ mod tests {
             assert_eq!(cache.len(), 1);
 
             // Remove
-            cache.remove(&checksum, true).unwrap();
+            cache.remove_circuit(&checksum).unwrap();
 
             assert_eq!(cache.len(), 0);
         }
@@ -480,11 +473,11 @@ mod tests {
         assert_eq!(cache.size(), 532 + 332);
 
         // Remove 1
-        cache.remove(&checksum1, false).unwrap();
+        cache.remove(&checksum1).unwrap();
         assert_eq!(cache.size(), 332);
 
         // Remove 2
-        cache.remove(&checksum2, false).unwrap();
+        cache.remove(&checksum2).unwrap();
         assert_eq!(cache.size(), 0);
 
         #[cfg(feature = "zk")]
@@ -496,10 +489,10 @@ mod tests {
             assert_eq!(cache.size(), 0);
             // Add 1: 66135
             let circuit = CachedCircuit {
-                vk: zk_cosmwasm::VerifyingKey::from_bytes(&zk).unwrap(),
+                vk: zk_cosmwasm::AnyVerifyingKey::try_from(zk).unwrap(),
                 size_estimate: zk.len(),
             };
-            assert_eq!(zk.len(), circuit.vk.to_bytes().unwrap().len());
+            assert_eq!(zk.len(), circuit.vk.to_bytes_with_params().unwrap().len());
 
             cache.store_circuit(&checksum, circuit).unwrap();
             assert_eq!(cache.size(), 66167);
@@ -509,11 +502,11 @@ mod tests {
             assert_eq!(cache.size(), 332 + 66167);
 
             // Remove 1
-            cache.remove(&checksum, true).unwrap();
+            cache.remove(&checksum).unwrap();
             assert_eq!(cache.size(), 332);
 
             // Remove 2
-            cache.remove(&checksum1, false).unwrap();
+            cache.remove(&checksum1).unwrap();
             assert_eq!(cache.size(), 0);
         }
     }

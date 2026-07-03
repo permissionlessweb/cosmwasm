@@ -1,11 +1,5 @@
 # CosmWasm
 
-## TODO
-```
-- ## goal: implement code-generator macro for all circuits implementing the cw-orch circuit interface (CodeGenerator functions by default, we default to building objects with these helpers)
-- implement circuits into Wasm Modules files via custom section create_wasm_with_custom_section
-```
-
 ![component][component-badge]
 [![license][apache-badge]][apache-url]
 

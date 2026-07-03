@@ -18,14 +18,14 @@ impl CodeBundle {
         tracing::debug!("footer: {:#?}", footer);
         Ok(Self::with_vk_and_type(wasm, vk_bytes, footer))
     }
-
     pub fn with_vk_and_type(wasm: Vec<u8>, vk_bytes: Vec<u8>, footer: CircuitFooter) -> Self {
-        let body_len = vk_bytes.len() - COSMWASM_FOOTER_LENGTH;
-        let body = &vk_bytes[0..body_len]; // ← explicit slice
-
-        let vk = SerializedPlonkishCircuitData::new(body, &footer.to_bytes()); // ← pass body only!
-
-        CodeBundle { wasm, vk: Some(vk) }
+        CodeBundle {
+            wasm,
+            vk: Some(SerializedPlonkishCircuitData::new(
+                &vk_bytes[0..vk_bytes.len() - COSMWASM_FOOTER_LENGTH],
+                &footer.to_bytes(),
+            )),
+        }
     }
 
     // true - wasm; false - && circuit
@@ -127,9 +127,8 @@ mod tests {
 
     #[test]
     fn circuit_type_conversion() {
-        assert_eq!(CircuitType::Plonkish.to_u8(), 0);
-        assert_eq!(CircuitType::from_u8(0), Some(CircuitType::Plonkish));
-        assert_eq!(CircuitType::from_u8(255), Some(CircuitType::Plonkish));
+        assert_eq!(CircuitType::try_from(0).unwrap(), CircuitType::Plonkish);
+        assert_eq!(CircuitType::try_from(255).unwrap(), CircuitType::Plonkish);
     }
 
     #[test]
@@ -155,8 +154,9 @@ mod tests {
 
         let footer = CircuitFooter::new(
             CircuitType::Plonkish,
+            curves::CurveType::Pasta,
+            1,
             2, // instance_count
-            params_len as u32,
             cs_len as u32,
             vk_len as u32,
             Checksum::generate(&vk_blob)

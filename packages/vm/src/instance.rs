@@ -14,7 +14,7 @@ use crate::conversion::{ref_to_u32, to_u32};
 use crate::environment::Environment;
 use crate::errors::{CommunicationError, VmError, VmResult};
 #[cfg(feature = "zk")]
-use crate::imports::do_halo2_proof_instance_verify;
+use crate::imports::do_proof_instance_verify;
 use crate::imports::{
     do_abort, do_addr_canonicalize, do_addr_humanize, do_addr_validate, do_bls12_381_aggregate_g1,
     do_bls12_381_aggregate_g2, do_bls12_381_hash_to_g1, do_bls12_381_hash_to_g2,
@@ -235,7 +235,7 @@ where
         #[cfg(feature = "zk")]
         env_imports.insert(
             "halo2_proof_instance_verify",
-            Function::new_typed_with_env(&mut store, &fe, do_halo2_proof_instance_verify),
+            Function::new_typed_with_env(&mut store, &fe, do_proof_instance_verify),
         );
 
         // Allows the contract to emit debug logs that the host can either process or ignore.

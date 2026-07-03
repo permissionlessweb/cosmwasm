@@ -1,4 +1,5 @@
 use wasmer::{Engine, Module};
+use zk_cosmwasm::curves::ZkCurve;
 
 /// Some manual tests on Simon's machine showed that Engine is roughly 3-5 KB big,
 /// so give it a constant 10 KiB estimate.
@@ -36,9 +37,14 @@ pub struct CachedModule {
     pub size_estimate: usize,
 }
 
-/// NEW: Wrapper to accurately track the memory footprint of the deserialized key
 #[derive(Debug, Clone)]
 pub struct CachedCircuit {
-    pub vk: zk_cosmwasm::VerifyingKey,
+    pub vk: zk_cosmwasm::AnyVerifyingKey,
+    pub size_estimate: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedParams {
+    pub vk: zk_cosmwasm::AnyVerifyingKey,
     pub size_estimate: usize,
 }

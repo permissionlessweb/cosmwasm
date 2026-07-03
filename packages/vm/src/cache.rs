@@ -419,26 +419,12 @@ where
     ///
     /// Not found IDs are silently ignored, and no integrity check (checksum validation) is done
     /// on the removed value.
-    pub fn unpin(&self, checksum: &Checksum, zk: bool) -> VmResult<()> {
-        match zk {
-            true => {
-                #[cfg(feature = "zk")]
-                {
-                    let mut cache = self.inner.lock().unwrap();
-                    cache.pinned_memory_cache.remove(checksum, true)?;
-                    return cache.fs_cache.remove_circuit(checksum);
-                };
-
-                #[cfg(not(feature = "zk"))]
-                return Err(VmError::generic_err("circuit feature disabled"));
-            }
-            false => self
-                .inner
-                .lock()
-                .unwrap()
-                .pinned_memory_cache
-                .remove(checksum, false),
-        }
+    pub fn unpin(&self, checksum: &Checksum) -> VmResult<()> {
+        self.inner
+            .lock()
+            .unwrap()
+            .pinned_memory_cache
+            .remove(checksum)
     }
 
     /// Returns an Instance tied to a previously saved Wasm.
@@ -546,26 +532,6 @@ where
         Ok((module, store))
     }
 
-    /// Removes the Wasm blob for the given checksum from disk and its
-    /// compiled module from the file system cache.
-    ///
-    /// Also removes the VK file if present.
-    /// The existence of the original code is required since the caller (wasmd)
-    /// has to keep track of which entries we have here.
-    pub fn remove_circuit(&self, checksum: &Checksum) -> VmResult<()> {
-        let mut cache = self.inner.lock().unwrap();
-        // Remove compiled module & vk from disk.
-        // Remove compiled moduled from disk (if it exists).
-        // Here we could also delete from memory caches but this is not really
-        // necessary as they are pushed out from the LRU over time or disappear
-        // when the node process restarts.
-        cache.fs_cache.remove_circuit(checksum)?;
-        cache.pinned_memory_cache.remove(checksum, true)?;
-        tracing::debug!("remove_circuit_from_disk ");
-        self.remove_circuit_from_disk(&cache.wasm_path, checksum)?;
-        Ok(())
-    }
-
     // Helper to produce a dummy checksum (same as used for missing VK)
     fn store_wasm_to_disk(&self, dir: &PathBuf, wasm: Vec<u8>) -> VmResult<(Module, Checksum)> {
         // Compile and store WASM
@@ -599,9 +565,100 @@ where
     S: Storage + 'static,    // 'static is needed by `impl<…> Instance`
     Q: Querier + 'static,    // 'static is needed by `impl<…> Instance`
 {
+    fn save_cs_params_to_disk(&self, vk: &[u8]) -> VmResult<Checksum> {
+        let cache = self.inner.lock().unwrap();
+        save_cs_params_to_disk(&cache.wasm_path, vk)
+    }
+    pub fn remove_cs_params(&self, checksum: &Checksum) -> VmResult<()> {
+        let mut cache = self.inner.lock().unwrap();
+        // Remove compiled module & vk from disk.
+        // Remove compiled moduled from disk (if it exists).
+        // Here we could also delete from memory caches but this is not really
+        // necessary as they are pushed out from the LRU over time or disappear
+        // when the node process restarts.
+        cache.fs_cache.remove_circuit(checksum)?;
+        cache.pinned_memory_cache.remove_circuit(checksum)?;
+        self.remove_cs_params_from_disk(&cache.wasm_path, checksum)?;
+        Ok(())
+    }
+    /// Remove a VK file from disk if the path exists
+    #[cfg(feature = "zk")]
+    fn remove_cs_params_from_disk(
+        &self,
+        dir: impl Into<PathBuf>,
+        checksum: &Checksum,
+    ) -> VmResult<()> {
+        let path: PathBuf = self.zk_path(dir, checksum);
+        println!("{}", path.to_str().unwrap());
+
+        let circuit_path = path.with_extension("bin");
+        println!("{}", circuit_path.to_str().unwrap());
+
+        let path_exists = path.exists();
+        let circuit_path_exists = circuit_path.exists();
+        if !path_exists && !circuit_path_exists {
+            return Err(VmError::cache_err("Circuit file does not exist"));
+        }
+        if path.exists() {
+            println!("removing file");
+            std::fs::remove_file(&path)
+                .map_err(|e| VmError::cache_err(format!("Error removing VK file: {}", e)))?;
+            println!("file removed");
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "zk")]
+impl<A, S, Q> Cache<A, S, Q>
+where
+    A: BackendApi + 'static, // 'static is needed by `impl<…> Instance`
+    S: Storage + 'static,    // 'static is needed by `impl<…> Instance`
+    Q: Querier + 'static,    // 'static is needed by `impl<…> Instance`
+{
+    /// stores a circuit to both disk and pinned to memory.
+    pub fn store_circuit(&self, vk: &[u8], persist: bool) -> VmResult<Checksum> {
+        let foot = check_circuit(vk)?;
+        println!("check_circuit checkpoint");
+        if persist {
+            println!("save_circuit_to_disk");
+            let checksum: Checksum = self.save_circuit_to_disk(vk)?;
+            println!("saved! pinning circuit to disk");
+            self.pin_circuit(&checksum)?;
+            assert_eq!(checksum, Checksum::from(foot.checksum));
+            println!("pinned and checksum validated!");
+            Ok(checksum)
+        } else {
+            println!("not persisting");
+            Ok(Checksum::from(foot.checksum))
+        }
+    }
+
+    /// saves the cs + vk
     fn save_circuit_to_disk(&self, vk: &[u8]) -> VmResult<Checksum> {
         let cache = self.inner.lock().unwrap();
         save_circuit_to_disk(&cache.wasm_path, vk)
+    }
+
+    /// Removes the Wasm blob for the given checksum from disk and its
+    /// compiled module from the file system cache.
+    ///
+    /// Also removes the VK file if present.
+    /// The existence of the original code is required since the caller (wasmd)
+    /// has to keep track of which entries we have here.
+    pub fn remove_circuit(&self, checksum: &Checksum) -> VmResult<()> {
+        let mut cache = self.inner.lock().unwrap();
+        // Remove compiled module & vk from disk.
+        // Remove compiled moduled from disk (if it exists).
+        // Here we could also delete from memory caches but this is not really
+        // necessary as they are pushed out from the LRU over time or disappear
+        // when the node process restarts.
+        cache.fs_cache.remove_circuit(checksum)?;
+        cache.pinned_memory_cache.remove_circuit(checksum)?;
+        tracing::debug!("remove_circuit_from_disk ");
+        self.remove_circuit_from_disk(&cache.wasm_path, checksum)?;
+        Ok(())
     }
 
     /// Pins a circuit that was previously stored via [`Cache::store_circuit`].
@@ -670,106 +727,10 @@ where
             .store_circuit(checksum, verifying_key)
     }
 
-    pub fn store_circuit(&self, vk: &[u8], persist: bool) -> VmResult<Checksum> {
-        let hash = check_circuit(vk)
-            .map_err(|e| VmError::generic_err(e.to_string()))?
-            .checksum;
-        println!("check_circuit checkpoint");
-        if persist {
-            println!("save_circuit_to_disk");
-            let checksum: Checksum = self.save_circuit_to_disk(vk)?;
-            println!("saved! pinning circuit to disk");
-            self.pin_circuit(&checksum)?;
-            assert_eq!(checksum, Checksum::from(hash));
-            println!("pinned and checksum validated!");
-            Ok(checksum)
-        } else {
-            println!("not persisting");
-            Ok(Checksum::from(hash))
-        }
-    }
-
-    pub fn store_code_with_circuit(
-        &self,
-        code_bundle: &CodeBundle,
-        checked: bool,
-        persist: bool,
-    ) -> VmResult<[Checksum; 2]> {
-        // TODO: check wasm if exist immediately via; map.checked && checkvk == Some(v,i) || None
-        let (has_wasm, has_circuit) = (
-            !code_bundle.wasm.is_empty(),
-            code_bundle
-                .vk
-                .as_ref()
-                .is_some_and(|vk| !vk.body.is_empty()),
-        );
-
-        // Error if both are empty
-        if !has_wasm || !has_circuit {
-            return Err(VmError::generic_err("must provide either wasm or vk"));
-        }
-
-        // Validate WASM and VK
-        if checked {
-            if let Some(ref vk) = code_bundle.vk {
-                check_circuit(&vk.body).map_err(|e| VmError::generic_err(format!("VK: {}", e)))?;
-            }
-            if has_wasm {
-                check_wasm(
-                    &code_bundle.wasm,
-                    &self.available_capabilities,
-                    &self.wasm_limits,
-                    crate::internals::Logger::Off,
-                )?;
-            }
-        }
-
-        // Non-persist mode: just compute and return checksums
-        if !persist {
-            let wasm_checksum = if has_wasm {
-                Checksum::generate(&code_bundle.wasm)
-            } else {
-                Checksum::generate(&[])
-            };
-            let circuit_checksum = if let Some(vk) = &code_bundle.vk {
-                Checksum::generate(&vk.body)
-            } else {
-                Checksum::generate(&[])
-            };
-            return Ok([wasm_checksum, circuit_checksum]);
-        }
-
-        // Persist mode: acquire lock once and handle everything within it
+    pub fn unpin_circuit(&self, checksum: &Checksum) -> VmResult<()> {
         let mut cache = self.inner.lock().unwrap();
-
-        // Store WASM code & VK binary,pin VK and return both checksums
-        // let circuit_checksum = Checksum::generate(&[]);
-        let (wasm_checksum, circuit_checksum) = (
-            if has_wasm {
-                let (m, cs) =
-                    self.store_wasm_to_disk(&cache.wasm_path, code_bundle.wasm.clone())?;
-                cache.fs_cache.store(&cs, &m)?;
-                cs
-            } else {
-                Checksum::generate(&[])
-            },
-            if let Some(svk) = &code_bundle.vk {
-                //  store to disk
-                let vcs = self.store_circuit_to_disk(&cache.wasm_path, svk)?;
-                // immediately pin to memory
-                cache.pinned_memory_cache.store_circuit(
-                    &vcs,
-                    CachedCircuit {
-                        vk: zk_cosmwasm::VerifyingKey::from_bytes(&svk.body)?,
-                        size_estimate: svk.body.len() + COSMWASM_FOOTER_LENGTH,
-                    },
-                )?;
-                vcs
-            } else {
-                Checksum::generate(&[])
-            },
-        );
-        Ok([wasm_checksum, circuit_checksum])
+        cache.pinned_memory_cache.remove_circuit(checksum)?;
+        return cache.fs_cache.remove_circuit(checksum);
     }
 
     /// Load a verifying key from disk
@@ -823,11 +784,11 @@ where
     /// Check if a VK exists for a given checksum
     pub fn has_circuit(&self, checksum: &Checksum) -> bool {
         let cache = self.inner.lock().unwrap();
-        let circuit_path = self.circuit_path(&cache.wasm_path, checksum);
+        let circuit_path = self.zk_path(&cache.wasm_path, checksum);
         circuit_path.exists()
     }
 
-    fn circuit_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
+    fn zk_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
         dir.into().join(checksum.to_hex()).with_extension("bin")
     }
 
@@ -843,7 +804,7 @@ where
         let hash = &vk.footer[COSMWASM_FOOTER_LENGTH - 32..]
             .try_into()
             .map_err(|e: cosmwasm_std::ChecksumError| VmError::cache_err(e.to_string()))?;
-        let path = self.circuit_path(dir, hash);
+        let path = self.zk_path(dir, hash);
 
         let mut file_content: Vec<u8> = Vec::with_capacity(len + COSMWASM_FOOTER_LENGTH);
         file_content.extend_from_slice(&vk.body);
@@ -899,7 +860,7 @@ where
         dir: impl Into<PathBuf>,
         checksum: &Checksum,
     ) -> VmResult<()> {
-        let path: PathBuf = self.circuit_path(dir, checksum);
+        let path: PathBuf = self.zk_path(dir, checksum);
         println!("{}", path.to_str().unwrap());
 
         let circuit_path = path.with_extension("bin");
@@ -1054,7 +1015,7 @@ fn remove_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResu
     Ok(())
 }
 
-/// save stores the wasm code in the given directory and returns an ID for lookup.
+/// save stores the circuit based on
 /// It will create the directory if it doesn't exist.
 /// Saving the same byte code multiple times is allowed.
 #[cfg(feature = "zk")]
@@ -1065,9 +1026,6 @@ fn save_circuit_to_disk(dir: impl Into<PathBuf>, c: &[u8]) -> VmResult<Checksum>
     let filename = cf.checksum_to_hex();
     let filepath = dir.into().join(&filename).with_extension("bin");
     println!("filename: {}", filename);
-    // write data to file
-    // Since the same filename (a collision resistant hash) cannot be generated from two different byte codes
-    // (even if a malicious actor tried), it is safe to override.
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
@@ -1078,6 +1036,34 @@ fn save_circuit_to_disk(dir: impl Into<PathBuf>, c: &[u8]) -> VmResult<Checksum>
         .map_err(|e| VmError::cache_err(format!("Error writing Circuit file: {e}")))?;
 
     Ok(cf.checksum.into())
+}
+
+/// save stores the wasm code in the given directory and returns an ID for lookup.
+/// It will create the directory if it doesn't exist.
+/// Saving the same byte code multiple times is allowed.
+#[cfg(feature = "zk")]
+fn save_cs_params_to_disk(dir: impl Into<PathBuf>, p: &[u8]) -> VmResult<Checksum> {
+    // calculate filename (checksum bytes)
+    let param_checksum = Checksum::generate(p);
+    let filepath = dir
+        .into()
+        .join(&param_checksum.to_hex())
+        .with_extension("bin");
+
+    println!("param_filename: {}", param_checksum.to_hex());
+    // write data to file
+    // Since the same filename (a collision resistant hash) cannot be generated from two different byte codes
+    // (even if a malicious actor tried), it is safe to override.
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(filepath)
+        .map_err(|e| VmError::cache_err(format!("Error opening Circuit file for writing: {e}")))?;
+    file.write_all(p)
+        .map_err(|e| VmError::cache_err(format!("Error writing Circuit file: {e}")))?;
+
+    Ok(param_checksum)
 }
 
 #[cfg(test)]
@@ -1306,7 +1292,7 @@ mod tests {
 
         let restored = cache.load_circuit(&checksum).unwrap().unwrap();
         let mut buf = Vec::new();
-        buf.extend(restored.vk.to_bytes().unwrap());
+        buf.extend(restored.vk.to_bytes_with_params().unwrap());
         assert_eq!(buf.as_slice(), NORICK_CIRCUIT);
     }
 
@@ -1348,7 +1334,7 @@ mod tests {
             let cache2: Cache<MockApi, MockStorage, MockQuerier> =
                 unsafe { Cache::new(options2).unwrap() };
             let restored = cache2.load_circuit(&id).unwrap().unwrap();
-            let buf = restored.vk.to_bytes().unwrap();
+            let buf = restored.vk.to_bytes_with_params().unwrap();
 
             if buf.as_slice() != NORICK_CIRCUIT {
                 let l = NORICK_CIRCUIT.len();
@@ -1458,7 +1444,7 @@ mod tests {
         match res {
             Ok(cc) => match cc{
                 Some(cc) => {
-                    assert_ne!(cc.vk.to_bytes().unwrap(), corrupt );
+                    assert_ne!(cc.vk.to_bytes_with_params().unwrap() , corrupt );
                 },
                 None => panic!("This must succeed, our circuit lives in pinned_memory cache, and can be loaded even if file on disk gets corrupted")
             },
@@ -1466,7 +1452,7 @@ mod tests {
         };
 
         // unpin circuit, so that we must load from disk, invoking verification, and throwing error
-        cache.unpin(&checksum, true).unwrap();
+        cache.unpin_circuit(&checksum).unwrap();
         let res = cache.load_circuit(&checksum);
         match res {
             Ok(r) => {
@@ -2346,15 +2332,15 @@ mod tests {
         println!("pin_circuit for the second time");
         cache.pin_circuit(&checksum).unwrap();
 
-        cache.unpin(&checksum, true).unwrap();
+        cache.unpin_circuit(&checksum).unwrap();
 
         // unpin again has no effect
         println!("unpin again has no effect");
-        cache.unpin(&checksum, true).unwrap();
+        cache.unpin_circuit(&checksum).unwrap();
 
         // unpin non existent id has no effect
         let non_id = Checksum::generate(b"non_existent");
-        cache.unpin(&non_id, true).unwrap();
+        cache.unpin_circuit(&non_id).unwrap();
     }
 
     #[test]
@@ -2400,7 +2386,7 @@ mod tests {
         test_hackatom_instance_execution(&mut instance);
 
         // unpin
-        cache.unpin(&checksum, false).unwrap();
+        cache.unpin(&checksum).unwrap();
 
         // verify unpinned
         let backend = mock_backend(&[]);
@@ -2414,11 +2400,11 @@ mod tests {
         test_hackatom_instance_execution(&mut instance);
 
         // unpin again has no effect
-        cache.unpin(&checksum, false).unwrap();
+        cache.unpin(&checksum).unwrap();
 
         // unpin non existent id has no effect
         let non_id = Checksum::generate(b"non_existent");
-        cache.unpin(&non_id, false).unwrap();
+        cache.unpin(&non_id).unwrap();
     }
 
     #[test]
