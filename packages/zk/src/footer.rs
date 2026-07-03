@@ -33,16 +33,16 @@ impl std::fmt::Display for CircuitFooter {
     }
 }
 
-impl Into<[u8; COSMWASM_FOOTER_LENGTH]> for CircuitFooter {
-    fn into(self) -> [u8; COSMWASM_FOOTER_LENGTH] {
-        self.to_bytes()
+impl From<CircuitFooter> for [u8; COSMWASM_FOOTER_LENGTH] {
+    fn from(val: CircuitFooter) -> Self {
+        val.to_bytes()
     }
 }
 
 impl TryFrom<&[u8]> for CircuitFooter {
     type Error = ZkError;
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        Self::from_bytes(&bytes)
+        Self::from_bytes(bytes)
     }
 }
 
@@ -84,7 +84,7 @@ impl CircuitFooter {
         bytes[2..6].copy_from_slice(&self.param_len.to_le_bytes());
         bytes[6..10].copy_from_slice(&self.cs_len.to_le_bytes());
         bytes[10..14].copy_from_slice(&self.vk_len.to_le_bytes());
-        bytes[14..COSMWASM_FOOTER_LENGTH].copy_from_slice(&self.checksum.as_slice());
+        bytes[14..COSMWASM_FOOTER_LENGTH].copy_from_slice(self.checksum.as_slice());
         bytes
     }
 

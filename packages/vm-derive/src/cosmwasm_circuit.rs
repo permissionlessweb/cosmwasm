@@ -28,7 +28,7 @@ pub fn cosmwasm_circuit_impl(
     let mut validation = validate_attributes(&attrs, input.span());
     validation
         .errors
-        .extend(validate_circuit_struct(&input).errors.into_iter());
+        .extend(validate_circuit_struct(&input).errors);
 
     if !validation.is_valid {
         return Err(validation.to_compile_error());

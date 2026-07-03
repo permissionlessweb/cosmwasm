@@ -180,7 +180,7 @@ pub trait Querier {
     /// The gas limit describes how much [CosmWasm gas] this particular query is allowed
     /// to consume when measured separately from the rest of the contract.
     /// The returned gas info (in BackendResult) can exceed the gas limit in cases
-    /// where the query could not be aborted exactly a the limit.
+    /// where the query could not be aborted exactly at the limit.
     ///
     /// [CosmWasm gas]: https://github.com/CosmWasm/cosmwasm/blob/main/docs/GAS.md
     fn query_raw(

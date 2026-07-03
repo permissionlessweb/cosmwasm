@@ -35,7 +35,7 @@ impl CodeBundle {
 
     // Helper: Compute checksums without persisting
     pub fn compute_checksums(&self) -> [Checksum; 2] {
-        match (self.wasm.len() > 0, &self.vk) {
+        match (!self.wasm.is_empty(), &self.vk) {
             (true, None) => [Checksum::generate(&self.wasm), self.dummy_checksum()],
             (true, Some(vk)) => [Checksum::generate(&self.wasm), Checksum::generate(&vk.body)],
             (false, None) => [self.dummy_checksum(), self.dummy_checksum()],
@@ -71,8 +71,8 @@ pub fn deserialize_circuit_data(data: &[u8]) -> ZkResult<SerializedPlonkishCircu
     }
     let circuit_len = length - COSMWASM_FOOTER_LENGTH;
     Ok(SerializedPlonkishCircuitData::new(
-        &data[0..circuit_len].to_vec(),
-        &data[circuit_len..].to_vec(),
+        &data[0..circuit_len],
+        &data[circuit_len..],
     ))
 }
 
@@ -104,9 +104,9 @@ pub fn check_circuit(bytes: &[u8]) -> ZkResult<CircuitFooter> {
     println!("Parsed:{}", hex::encode(footer.checksum));
     println!("Computed:{}", hex::encode(computed.as_slice()));
 
-    match &computed.as_slice() == &footer.checksum {
+    match computed.as_slice() == footer.checksum {
         true => Ok(footer),
-        false => return Err(ZkError::IntegrityErr {}),
+        false => Err(ZkError::IntegrityErr {}),
     }
 }
 

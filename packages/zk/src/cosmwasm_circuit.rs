@@ -1,6 +1,6 @@
 use crate::errors::{ZkError, ZkResult};
 use crate::CircuitFooter;
-use group::ff::{Field, PrimeField};
+use group::ff::PrimeField;
 use halo2_proofs::COSMWASM_FOOTER_LENGTH;
 use halo2_proofs::{
     circuit::Layouter,
@@ -49,7 +49,7 @@ impl SerializedPlonkishCircuitData {
 }
 
 thread_local! {
-    static CS_BLUEPRINT: RefCell<Option<CsBlueprint>> = RefCell::new(None);
+    static CS_BLUEPRINT: RefCell<Option<CsBlueprint>> = const { RefCell::new(None) };
 }
 
 // // / RAII Guard for DynamicCircuit thread-local configuration.
@@ -134,7 +134,7 @@ impl Circuit<vesta::Scalar> for DynamicCircuit {
                 eprintln!("Warning: DynamicCircuit::configure called without CsBlueprint");
             }
         });
-        ()
+        
     }
 
     fn synthesize(
@@ -152,21 +152,16 @@ impl Circuit<vesta::Scalar> for DynamicCircuit {
 /// Circuit type identifier for VK deserialization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum CircuitType {
+    #[default]
     Plonkish = 0,
 }
 
-impl Default for CircuitType {
-    fn default() -> Self {
-        CircuitType::Plonkish
-    }
-}
 
 impl CircuitType {
-    pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            _ => Some(CircuitType::Plonkish),
-        }
+    pub fn from_u8(_value: u8) -> Option<Self> {
+        Some(CircuitType::Plonkish)
     }
 
     pub fn to_u8(self) -> u8 {
@@ -221,9 +216,9 @@ impl VerifyingKey {
         let cs_len = buf2.len();
         let vk_len = buf3.len();
 
-        let param_checksum = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&buf1).to_vec());
-        let cs_checksum = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&buf2).to_vec());
-        let vk_checksum = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(&buf3).to_vec());
+        let param_checksum = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&buf1));
+        let cs_checksum = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&buf2));
+        let vk_checksum = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&buf3));
 
         println!(
             "cw::vm::BUILD::param::(len::{},checksum::{})",
@@ -306,17 +301,17 @@ impl VerifyingKey {
         println!(
             "cw::vm::vk::from_bytes::params::(len::{},checksum::{})",
             buf1.len(),
-            hex::encode(&Sha256::digest(&buf1).to_vec()),
+            hex::encode(Sha256::digest(&buf1)),
         );
         println!(
             "cw::vm::vk::from_bytes::cs::(len::{},checksum::{})",
             buf2.len(),
-            hex::encode(&Sha256::digest(&buf2).to_vec()),
+            hex::encode(Sha256::digest(&buf2)),
         );
         println!(
             "cw::vm::vk::from_bytes::(len::{},checksum::{})",
             buf3.len(),
-            hex::encode(&Sha256::digest(&buf3).to_vec()),
+            hex::encode(Sha256::digest(&buf3)),
         );
 
         let mut output = Vec::new();
@@ -452,7 +447,7 @@ impl Proof {
     pub fn verify(&self, vk: &VerifyingKey, i: &[Instance]) -> Result<(), plonk::Error> {
         let instances: Vec<Vec<pasta_curves::Fp>> = i
             .iter()
-            .map(|inst| inst.i.iter().map(|&s| pasta_curves::Fp::from(s)).collect())
+            .map(|inst| inst.i.iter().copied().collect())
             .collect();
 
         let column_refs: Vec<&[pasta_curves::Fp]> =
