@@ -13,6 +13,7 @@ pub fn engine_size_estimate() -> usize {
 pub enum CacheEntry {
     Module(CachedModule),
     Circuit(CachedCircuit),
+    Param(CachedParam),
 }
 
 #[derive(Debug, Clone)]
@@ -44,7 +45,7 @@ pub struct CachedCircuit {
 }
 
 #[derive(Debug, Clone)]
-pub struct CachedParams {
+pub struct CachedParam {
     pub vk: zk_cosmwasm::AnyVerifyingKey,
     pub size_estimate: usize,
 }

@@ -33,9 +33,7 @@ pub mod zk;
 pub use zk_cosmwasm::{self};
 
 #[cfg(feature = "zk")]
-pub use crate::zk::{
-    check_circuit, AnyInstance, AnyVerifyingKey, CodeBundle, Proof, SerializedPlonkishCircuitData,
-};
+pub use crate::zk::{check_circuit, AnyInstance, AnyVerifyingKey, Proof, SerializedCircuitData};
 
 pub use crate::backend::{
     Backend, BackendApi, BackendError, BackendResult, GasInfo, Querier, Storage,

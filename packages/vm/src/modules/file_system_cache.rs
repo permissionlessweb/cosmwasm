@@ -263,16 +263,22 @@ impl FileSystemCache {
 #[cfg(feature = "zk")]
 impl FileSystemCache {
     /// Gets the circuit file path for a checksum.
-    fn circuit_file(&self, checksum: &Checksum) -> PathBuf {
-        let mut path = self.modules_path.join(checksum.to_hex());
+    fn circuit_file(&self, circuit_file_key: &[u8; 72]) -> PathBuf {
+        let mut path = self.modules_path.join(hex::encode(circuit_file_key));
+        path.set_extension("module");
+        path
+    }
+    /// Gets the circuit constraint system parameter file path for a checksum.
+    fn param_file(&self, param_file_key: &[u8; 36]) -> PathBuf {
+        let mut path = self.modules_path.join(hex::encode(param_file_key));
         path.set_extension("module");
         path
     }
 
     /// Loads a serialized verifying key from the file system and returns it.
-    pub fn load_circuit(&self, checksum: &Checksum) -> VmResult<Option<CachedCircuit>> {
+    pub fn load_circuit(&self, circuit_file_key: &[u8; 72]) -> VmResult<Option<CachedCircuit>> {
         println!("getting module from fs_cache;");
-        let file_path = self.circuit_file(checksum);
+        let file_path = self.circuit_file(circuit_file_key);
         // use cursor to load circuit?
         let raw_bytes = match std::fs::read(&file_path) {
             Ok(bytes) => bytes,
@@ -314,11 +320,11 @@ impl FileSystemCache {
 
     /// Stores a serialized verifying key to the file system.
     /// serialized_to_vec is used to curate the zk bytes for this function.
-    pub fn store_circuit(&mut self, checksum: &Checksum, zk: &[u8]) -> VmResult<usize> {
+    pub fn store_circuit(&mut self, circuit_file_key: &[u8; 72], zk: &[u8]) -> VmResult<usize> {
         mkdir_p(&self.modules_path)
             .map_err(|_e| VmError::cache_err("Error creating circuits directory"))?;
 
-        let path = self.circuit_file(checksum);
+        let path = self.circuit_file(circuit_file_key);
         catch_unwind(|| {
             fs::write(&path, zk)
                 .map_err(|e| VmError::cache_err(format!("Error writing circuit to disk: {e}")))
@@ -328,8 +334,18 @@ impl FileSystemCache {
     }
 
     /// Removes a verifying key from the file system.
-    pub fn remove_circuit(&mut self, checksum: &Checksum) -> VmResult<()> {
-        let path = self.circuit_file(checksum);
+    pub fn remove_circuit(&mut self, circuit_file_key: &[u8; 72]) -> VmResult<()> {
+        let path = self.circuit_file(circuit_file_key);
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| {
+                VmError::cache_err(format!("Error removing circuit from disk: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn remove_params(&mut self, param_file_key: &[u8; 36]) -> VmResult<()> {
+        let path = self.param_file(param_file_key);
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| {
                 VmError::cache_err(format!("Error removing circuit from disk: {e}"))

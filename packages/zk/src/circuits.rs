@@ -1,6 +1,6 @@
 use crate::{
     curves::{VestaInstance, VestaVerifyingKey, ZkCurve},
-    ZkError, ZkResult,
+    CircuitFooter, ZkError, ZkResult,
 };
 use halo2_proofs::{
     circuit::Layouter,
@@ -29,9 +29,8 @@ pub struct CwInstance<C: ZkCurve> {
 
 /// A verifying key for the zk-wasmvm.
 #[derive(Debug, Clone)]
-pub struct CwVerifyingKey<C: ZkCurve> {
+pub struct CwCircuit<C: ZkCurve> {
     /// IPA commitment scheme params
-    /// TODO: implement generically for KZG, Bulletproof
     pub params: C::Params,
     pub vk: C::VerifyingKey,
     pub footer: crate::CircuitFooter,
@@ -40,8 +39,28 @@ pub struct CwVerifyingKey<C: ZkCurve> {
 /// The proving key.
 #[derive(Debug)]
 pub struct CwProvingKey<C: ZkCurve> {
-    pub(crate) params: C::Params,
+    // pub(crate) params: C::Params,
     pub(crate) _pk: C::ProvingKey,
+}
+
+/// A verifying key for the zk-wasmvm.
+#[derive(Debug, Clone)]
+pub struct CwVerifyingKey<C: ZkCurve> {
+    pub(crate) params: C::Params,
+    pub vk: C::VerifyingKey,
+    pub footer: CircuitFooter,
+}
+
+/// The circuit params
+#[derive(Debug)]
+pub struct CwCircuitParam<C: ZkCurve> {
+    pub(crate) params: C::Params,
+}
+
+/// The circuit constraint system
+#[derive(Debug)]
+pub struct CwConstraintSystem<C: ZkCurve> {
+    pub(crate) cs: C::ConstraintSystem,
 }
 
 #[derive(Debug, Clone)]
@@ -61,17 +80,15 @@ impl TryFrom<&[u8]> for AnyVerifyingKey {
             return Err(ZkError::new_err("Data too short for footer"));
         }
 
-        // TODO:
         let footer =
             crate::CircuitFooter::from_bytes(&bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..])?;
 
-        match footer.to_appstate_key() {
+        // get specific circuit identifier for proper methods
+        match footer.appstate_key() {
             pasta_curves::vesta::Affine::ID => {
                 Ok(AnyVerifyingKey::Vesta(VestaVerifyingKey::try_from(bytes)?))
             }
-            _ => Err(ZkError::UnsupportedCurve {
-                id: footer.to_appstate_key(),
-            }),
+            _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
 }
@@ -85,13 +102,11 @@ impl AnyVerifyingKey {
     pub fn from_bytes(bytes: &[u8]) -> crate::ZkResult<Self> {
         let footer =
             crate::CircuitFooter::from_bytes(&bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..])?;
-        match footer.to_appstate_key() {
+        match footer.appstate_key() {
             pasta_curves::vesta::Affine::ID => Ok(AnyVerifyingKey::Vesta(
                 VestaVerifyingKey::from_bytes_with_params(bytes)?,
             )),
-            _ => Err(ZkError::UnsupportedCurve {
-                id: footer.to_appstate_key(),
-            }),
+            _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
 
@@ -136,6 +151,7 @@ impl TryFrom<u8> for CircuitType {
         }
     }
 }
+
 impl Into<u8> for CircuitType {
     fn into(self) -> u8 {
         match self {
@@ -145,8 +161,8 @@ impl Into<u8> for CircuitType {
 }
 
 impl AnyInstance {
-    pub fn try_from_bytes(id: &u32, bytes: &[u8]) -> ZkResult<Self> {
-        match id {
+    pub fn try_from_bytes(id: impl Into<u32>, bytes: &[u8]) -> ZkResult<Self> {
+        match id.into() {
             0u32 => Ok(AnyInstance::Vesta(VestaInstance::try_from(bytes)?)),
             _ => Err(ZkError::CurveMismatch),
         }
@@ -167,15 +183,15 @@ pub struct CsBlueprint {
 }
 
 #[derive(Clone, Debug)]
-pub struct SerializedPlonkishCircuitData {
+pub struct SerializedCircuitData {
     pub body: Vec<u8>,
     pub footer: Vec<u8>,
 }
 
-impl SerializedPlonkishCircuitData {
-    pub fn new(bytes: &[u8], footer: &[u8]) -> Self {
+impl SerializedCircuitData {
+    pub fn new(body: &[u8], footer: &[u8]) -> Self {
         Self {
-            body: bytes.to_vec(),
+            body: body.to_vec(),
             footer: footer.to_vec(),
         }
     }

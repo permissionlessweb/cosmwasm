@@ -860,44 +860,24 @@ pub fn do_proof_instance_verify<
             .total_cost(1)?,
     );
     process_gas_info(data, &mut store, gas_info)?;
-
-    // data.call_function0(&mut store, name, args)?;
-    // Query x/wasm module for circuit data
-    const QUERY_GAS_LIMIT: u64 = 1_000_000_000;
-    let (query_result, query_gas_info) = data.with_querier_from_context(|querier| {
-        Ok(querier.query_raw(
-            &to_vec(&QueryRequest::Wasm::<Empty>(WasmQuery::Circuit {
-                zk_id: zkid as u64,
-            }))?,
-            QUERY_GAS_LIMIT,
-        ))
+    let (res, storage_gas) = data.with_storage_from_context::<_, _>(|storage| {
+        Ok(storage.get(&crate::zk::get_circuit_key(zkid.into())))
     })?;
-    process_gas_info(data, &mut store, query_gas_info)?;
 
+    process_gas_info(data, &mut store, storage_gas)?;
     // Parse query response
-    let response_binary = query_result
-        .map_err(|e| {
-            VmError::generic_err(format!(
-                "Query backend error for circuit {}: {:?}",
-                &zkid, e
-            ))
-        })?
-        .into_result()
-        .map_err(|e| {
-            VmError::generic_err(format!("Query system error for circuit {}: {:?}", &zkid, e))
-        })?
-        .into_result()
-        .map_err(|e| VmError::generic_err(format!("Circuit {} not found: {}", &zkid, e)))?;
+    let res = match res? {
+        Some(r) => Ok(r),
+        None => Err(VmError::generic_err("Failed to parse CircuitResponse:")),
+    }?;
 
     let res = crate::zk::deserialize_circuit_data(
-        &crate::serde::from_slice::<CircuitResponse>(&response_binary, response_binary.len())
-            .map_err(|e| VmError::generic_err(format!("Failed to parse CircuitResponse: {:?}", e)))?
-            .data,
+        &crate::serde::from_slice::<CircuitResponse>(&res, res.len())?.data,
     )?;
 
     let v = zk_cosmwasm::AnyVerifyingKey::try_from(res.body.as_slice())?;
-    let i = zk_cosmwasm::AnyInstance::try_from_bytes(&zkid, instances_bytes.as_slice())?;
-    let p = zk_cosmwasm::Proof::new(proof_bytes.clone());
+    let i = zk_cosmwasm::AnyInstance::try_from_bytes(zkid, instances_bytes.as_slice())?;
+    let p = zk_cosmwasm::Proof::new(proof_bytes);
 
     match p.verify(&v, &[i]) {
         Ok(_) => {

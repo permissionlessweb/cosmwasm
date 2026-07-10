@@ -5,7 +5,7 @@ use std::num::NonZeroUsize;
 use cosmwasm_std::Checksum;
 
 use super::cached_module::CachedModule;
-use crate::{modules::cached_module::CacheEntry, Size, VmError, VmResult};
+use crate::{cache::CacheKey, modules::cached_module::CacheEntry, Size, VmError, VmResult};
 
 // Minimum module size.
 // Based on `examples/module_size.sh`, and the cosmwasm-plus contracts.
@@ -20,12 +20,13 @@ const MINIMUM_MODULE_SIZE: Size = Size::kibi(250);
 struct SizeScale;
 
 // Single implementation covering both types via the enum
-impl WeightScale<Checksum, CacheEntry> for SizeScale {
+impl WeightScale<CacheKey, CacheEntry> for SizeScale {
     #[inline]
-    fn weight(&self, key: &Checksum, value: &CacheEntry) -> usize {
+    fn weight(&self, key: &CacheKey, value: &CacheEntry) -> usize {
         let val_size = match value {
             CacheEntry::Module(m) => m.size_estimate,
             CacheEntry::Circuit(c) => c.size_estimate,
+            CacheEntry::Param(p) => p.size_estimate,
         };
         std::mem::size_of_val(key) + val_size
     }
@@ -35,28 +36,73 @@ impl WeightScale<Checksum, CacheEntry> for SizeScale {
 pub struct InMemoryCache {
     /// A single LRU cache holding both modules and circuits.
     /// This guarantees the total memory used never exceeds the configured `Size`.
-    cache: Option<CLruCache<Checksum, CacheEntry, RandomState, SizeScale>>,
+    cache: Option<CLruCache<CacheKey, CacheEntry, RandomState, SizeScale>>,
 }
 
 #[cfg(feature = "zk")]
 impl InMemoryCache {
     pub fn store_circuit(
         &mut self,
-        checksum: &Checksum,
+        circuit_file_key: &[u8; 72],
         cached_zk: &super::CachedCircuit,
     ) -> VmResult<()> {
         if let Some(zk) = &mut self.cache {
-            zk.put_with_weight(*checksum, CacheEntry::Circuit(cached_zk.clone()))
-                .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
+            use crate::cache::CacheKey;
+
+            zk.put_with_weight(
+                CacheKey::CircuitKey(*circuit_file_key),
+                CacheEntry::Circuit(cached_zk.clone()),
+            )
+            .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
         }
         Ok(())
     }
     /// Looks up a module in the cache and creates a new module
-    pub fn load_circuit(&mut self, checksum: &Checksum) -> VmResult<Option<super::CachedCircuit>> {
+    pub fn load_circuit(
+        &mut self,
+        circuit_file_key: &[u8; 72],
+    ) -> VmResult<Option<super::CachedCircuit>> {
         println!("loading circuit from in_memory_cache;");
         if let Some(modules) = &mut self.cache {
             println!("in_memory_cache exists;");
-            match modules.get(checksum) {
+            match modules.get(&CacheKey::CircuitKey(*circuit_file_key)) {
+                Some(cached) => match cached {
+                    CacheEntry::Circuit(zk) => Ok(Some(zk.clone())),
+                    _ => Ok(None),
+                },
+                None => Ok(None),
+            }
+        } else {
+            println!("no in_memory_cache;");
+            Ok(None)
+        }
+    }
+    /// Looks up a module in the cache and creates a new module
+    pub fn load_param(
+        &mut self,
+        param_file_key: &[u8; 36],
+    ) -> VmResult<Option<super::CachedCircuit>> {
+        println!("loading param from in_memory_cache;");
+        if let Some(modules) = &mut self.cache {
+            println!("in_memory_cache exists;");
+            match modules.get(&CacheKey::PartialKey(*param_file_key)) {
+                Some(cached) => match cached {
+                    CacheEntry::Circuit(zk) => Ok(Some(zk.clone())),
+                    _ => Ok(None),
+                },
+                None => Ok(None),
+            }
+        } else {
+            println!("no in_memory_cache;");
+            Ok(None)
+        }
+    }
+    /// Looks up a module in the cache and creates a new module
+    pub fn load_vk(&mut self, vk_file_key: &[u8; 36]) -> VmResult<Option<super::CachedCircuit>> {
+        println!("loading param from in_memory_cache;");
+        if let Some(modules) = &mut self.cache {
+            println!("in_memory_cache exists;");
+            match modules.get(&CacheKey::PartialKey(*vk_file_key)) {
                 Some(cached) => match cached {
                     CacheEntry::Circuit(zk) => Ok(Some(zk.clone())),
                     _ => Ok(None),
@@ -90,7 +136,10 @@ impl InMemoryCache {
     pub fn store(&mut self, checksum: &Checksum, cached_module: CachedModule) -> VmResult<()> {
         if let Some(modules) = &mut self.cache {
             modules
-                .put_with_weight(*checksum, CacheEntry::Module(cached_module))
+                .put_with_weight(
+                    CacheKey::Checksum(*checksum),
+                    CacheEntry::Module(cached_module),
+                )
                 .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
         }
         Ok(())
@@ -99,7 +148,7 @@ impl InMemoryCache {
     /// Looks up a module in the cache and creates a new module
     pub fn load(&mut self, checksum: &Checksum) -> VmResult<Option<CachedModule>> {
         if let Some(modules) = &mut self.cache {
-            match modules.get(checksum) {
+            match modules.get(&CacheKey::Checksum(*checksum)) {
                 Some(cached) => match cached {
                     CacheEntry::Module(cached) => Ok(Some(cached.clone())),
                     _ => Ok(None),

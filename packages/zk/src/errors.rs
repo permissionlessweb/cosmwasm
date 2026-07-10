@@ -14,8 +14,8 @@ pub enum ZkError {
     InvalidScalar,
     #[error("CurveMismatch")]
     CurveMismatch,
-    #[error("UnsupportedCurve: {id}")]
-    UnsupportedCurve{id:u32},
+    #[error("UnsupportedCurve: {0}")]
+    UnsupportedCurve(u32),
     #[error("Aborted: {}", err)]
     IoErr { err: Error },
     #[error("{0}")]

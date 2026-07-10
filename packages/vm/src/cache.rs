@@ -1,5 +1,5 @@
 #[cfg(feature = "zk")]
-use crate::{check_circuit, CodeBundle, SerializedPlonkishCircuitData};
+use crate::{check_circuit, SerializedCircuitData};
 use cosmwasm_std::Checksum;
 #[cfg(feature = "zk")]
 use halo2_proofs::COSMWASM_FOOTER_LENGTH;
@@ -12,7 +12,7 @@ use std::str::FromStr;
 use std::sync::Mutex;
 use wasmer::{Module, Store};
 #[cfg(feature = "zk")]
-use zk_cosmwasm::ZkError;
+use zk_cosmwasm::{CircuitFooter, ZkError};
 
 use crate::backend::{Backend, BackendApi, Querier, Storage};
 use crate::capabilities::required_capabilities_from_module;
@@ -32,10 +32,20 @@ use crate::wasm_backend::{compile, make_compiling_engine};
 const STATE_DIR: &str = "state";
 // Things related to the state of the blockchain.
 const WASM_DIR: &str = "wasm";
+const ZK_PARAM_DIR: &str = "zk_param";
+const ZK_VK_DIR: &str = "zk_vk";
+const ZK_CIRCUIT_DIR: &str = "zk_circuit";
 
 const CACHE_DIR: &str = "cache";
 // Cacheable things.
 const MODULES_DIR: &str = "modules";
+
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub enum CacheKey {
+    Checksum(Checksum),
+    PartialKey([u8; 36]),
+    CircuitKey([u8; 72]),
+}
 
 /// Statistics about the usage of a cache instance. Those values are node
 /// specific and must not be used in a consensus critical context.
@@ -74,7 +84,7 @@ pub struct PinnedMetrics {
     // It is *intentional* that this is only a vector
     // We don't need a potentially expensive hashing algorithm here
     // The checksums are sourced from a hashmap already, ensuring uniqueness of the checksums
-    pub per_module: Vec<(Checksum, PerModuleMetrics)>,
+    pub per_module: Vec<(CacheKey, PerModuleMetrics)>,
 }
 
 pub struct CacheInner {
@@ -84,6 +94,19 @@ pub struct CacheInner {
     memory_cache: InMemoryCache,
     fs_cache: FileSystemCache,
     stats: Stats,
+}
+
+#[cfg(feature = "zk")]
+impl CacheInner {
+    pub fn param_path(&self) -> PathBuf {
+        self.wasm_path.join(ZK_PARAM_DIR)
+    }
+    pub fn vk_path(&self) -> PathBuf {
+        self.wasm_path.join(ZK_VK_DIR)
+    }
+    pub fn circuit_path(&self) -> PathBuf {
+        self.wasm_path.join(ZK_CIRCUIT_DIR)
+    }
 }
 
 pub struct Cache<A: BackendApi, S: Storage, Q: Querier> {
@@ -159,11 +182,17 @@ where
         let cache_path = base_dir.join(CACHE_DIR);
 
         let wasm_path = state_path.join(WASM_DIR);
+        let zk_param_path = wasm_path.join(ZK_PARAM_DIR);
+        let zk_vk_path = wasm_path.join(ZK_VK_DIR);
+        let zk_zk_path = wasm_path.join(ZK_CIRCUIT_DIR);
 
         // Ensure all the needed directories exist on disk.
         mkdir_p(&state_path).map_err(|_e| VmError::cache_err("Error creating state directory"))?;
         mkdir_p(&cache_path).map_err(|_e| VmError::cache_err("Error creating cache directory"))?;
         mkdir_p(&wasm_path).map_err(|_e| VmError::cache_err("Error creating wasm directory"))?;
+        mkdir_p(&zk_param_path).map_err(|_e| VmError::cache_err("Error creating zk_param dir"))?;
+        mkdir_p(&zk_vk_path).map_err(|_e| VmError::cache_err("Error creating zk_param dir"))?;
+        mkdir_p(&zk_zk_path).map_err(|_e| VmError::cache_err("Error creating zk_param dir"))?;
 
         let fs_cache = FileSystemCache::new(cache_path.join(MODULES_DIR), false)
             .map_err(|e| VmError::cache_err(format!("Error file system cache: {e}")))?;
@@ -201,7 +230,7 @@ where
 
     pub fn pinned_metrics(&self) -> PinnedMetrics {
         let cache = self.inner.lock().unwrap();
-        let per_module: Vec<(Checksum, PerModuleMetrics)> = cache
+        let per_module: Vec<(CacheKey, PerModuleMetrics)> = cache
             .pinned_memory_cache
             .iter()
             .map(|(checksum, module)| {
@@ -210,13 +239,13 @@ where
                     size: module.module.size_estimate,
                 };
 
-                (*checksum, metrics)
+                (CacheKey::Checksum(*checksum), metrics)
             })
             .collect();
 
         #[cfg(feature = "zk")]
         {
-            let mut pm: Vec<(Checksum, PerModuleMetrics)> = cache
+            let mut pm: Vec<(CacheKey, PerModuleMetrics)> = cache
                 .pinned_memory_cache
                 .iter_circuits()
                 .map(|(checksum, zk)| {
@@ -225,7 +254,7 @@ where
                         size: zk.circuit.size_estimate,
                     };
 
-                    (*checksum, metrics)
+                    (CacheKey::CircuitKey(*checksum), metrics)
                 })
                 .collect();
             pm.extend_from_slice(&per_module);
@@ -314,7 +343,7 @@ where
     /// Also removes the VK file if present.
     /// The existence of the original code is required since the caller (wasmd)
     /// has to keep track of which entries we have here.
-    pub fn remove_wasm(&self, checksum: &Checksum, wasm: bool) -> VmResult<()> {
+    pub fn remove_wasm(&self, checksum: &Checksum) -> VmResult<()> {
         let mut cache = self.inner.lock().unwrap();
         // Remove compiled module & vk from disk.
         // Remove compiled moduled from disk (if it exists).
@@ -322,15 +351,7 @@ where
         // necessary as they are pushed out from the LRU over time or disappear
         // when the node process restarts.
         cache.fs_cache.remove(checksum)?;
-        if wasm {
-            remove_wasm_from_disk(&cache.wasm_path, checksum)?;
-        } else {
-            #[cfg(feature = "zk")]
-            {
-                tracing::debug!("remove_circuit_from_disk ");
-                self.remove_circuit_from_disk(&cache.wasm_path, checksum)?;
-            }
-        }
+        remove_wasm_from_disk(&cache.wasm_path, checksum)?;
 
         Ok(())
     }
@@ -373,7 +394,7 @@ where
     pub fn pin(&self, checksum: &Checksum) -> VmResult<()> {
         let mut cache = self.inner.lock().unwrap();
 
-        if cache.pinned_memory_cache.has(checksum, false) {
+        if cache.pinned_memory_cache.has(checksum) {
             return Ok(());
         }
 
@@ -565,30 +586,38 @@ where
     S: Storage + 'static,    // 'static is needed by `impl<…> Instance`
     Q: Querier + 'static,    // 'static is needed by `impl<…> Instance`
 {
-    fn save_cs_params_to_disk(&self, vk: &[u8]) -> VmResult<Checksum> {
-        let cache = self.inner.lock().unwrap();
-        save_cs_params_to_disk(&cache.wasm_path, vk)
+    fn save_vk_params_to_disk(
+        &self,
+        cache: &mut std::sync::MutexGuard<'_, CacheInner>,
+        p: &[u8],
+    ) -> VmResult<Checksum> {
+        save_vk_params_to_disk(&cache.param_path(), p)
     }
-    pub fn remove_cs_params(&self, checksum: &Checksum) -> VmResult<()> {
-        let mut cache = self.inner.lock().unwrap();
+
+    pub fn remove_vk_params(
+        &self,
+        cache: &mut std::sync::MutexGuard<'_, CacheInner>,
+        param_file_key: &[u8; 36],
+    ) -> VmResult<()> {
         // Remove compiled module & vk from disk.
         // Remove compiled moduled from disk (if it exists).
         // Here we could also delete from memory caches but this is not really
         // necessary as they are pushed out from the LRU over time or disappear
         // when the node process restarts.
-        cache.fs_cache.remove_circuit(checksum)?;
-        cache.pinned_memory_cache.remove_circuit(checksum)?;
-        self.remove_cs_params_from_disk(&cache.wasm_path, checksum)?;
+        cache.fs_cache.remove_params(param_file_key)?;
+        cache.pinned_memory_cache.remove_param(param_file_key)?;
+        self.remove_vk_params_from_disk(&cache.wasm_path, param_file_key)?;
         Ok(())
     }
+
     /// Remove a VK file from disk if the path exists
     #[cfg(feature = "zk")]
-    fn remove_cs_params_from_disk(
+    fn remove_vk_params_from_disk(
         &self,
         dir: impl Into<PathBuf>,
-        checksum: &Checksum,
+        param_file_key: &[u8; 36],
     ) -> VmResult<()> {
-        let path: PathBuf = self.zk_path(dir, checksum);
+        let path: PathBuf = self.param_path(dir, param_file_key);
         println!("{}", path.to_str().unwrap());
 
         let circuit_path = path.with_extension("bin");
@@ -617,28 +646,43 @@ where
     S: Storage + 'static,    // 'static is needed by `impl<…> Instance`
     Q: Querier + 'static,    // 'static is needed by `impl<…> Instance`
 {
-    /// stores a circuit to both disk and pinned to memory.
-    pub fn store_circuit(&self, vk: &[u8], persist: bool) -> VmResult<Checksum> {
-        let foot = check_circuit(vk)?;
+    /// stores a circuit to both disk and pinned to memory. deconstructs params for isolated storage as well
+    pub fn store_circuit(&self, zk: &[u8], persist: bool) -> VmResult<[u8; 72]> {
+        let foot = check_circuit(zk)?;
+
         println!("check_circuit checkpoint");
         if persist {
             println!("save_circuit_to_disk");
-            let checksum: Checksum = self.save_circuit_to_disk(vk)?;
-            println!("saved! pinning circuit to disk");
-            self.pin_circuit(&checksum)?;
-            assert_eq!(checksum, Checksum::from(foot.checksum));
-            println!("pinned and checksum validated!");
-            Ok(checksum)
+            let (filename, circuitname): ([[u8; 36]; 2], [u8; 72]) =
+                self.save_circuit_to_disk(zk)?;
+
+            assert_eq!(filename[0], foot.to_param_key());
+            assert_eq!(filename[1], foot.to_vk_key());
+            self.pin_circuit(&circuitname)?;
+            assert_eq!(circuitname, foot.to_circuit_key());
+            Ok(circuitname)
         } else {
             println!("not persisting");
-            Ok(Checksum::from(foot.checksum))
+            Ok(foot.to_circuit_key())
         }
     }
 
+    // pub fn remove_circuit(&self, checksum: &[u8; 72]) -> VmResult<()> {
+    //     let mut cache = self.inner.lock().unwrap();
+    //     tracing::debug!("remove_circuit_from_disk ");
+    //     self.remove_circuit_from_disk(&cache.wasm_path, checksum)?;
+
+    //     Ok(())
+    // }
+
     /// saves the cs + vk
-    fn save_circuit_to_disk(&self, vk: &[u8]) -> VmResult<Checksum> {
+    fn save_circuit_to_disk(&self, c: &[u8]) -> VmResult<([[u8; 36]; 2], [u8; 72])> {
         let cache = self.inner.lock().unwrap();
-        save_circuit_to_disk(&cache.wasm_path, vk)
+        save_circuit_to_disk(
+            &cache.circuit_path(),
+            c,
+            CircuitFooter::from_bytes(&c[c.len() - COSMWASM_FOOTER_LENGTH..])?,
+        )
     }
 
     /// Removes the Wasm blob for the given checksum from disk and its
@@ -647,17 +691,17 @@ where
     /// Also removes the VK file if present.
     /// The existence of the original code is required since the caller (wasmd)
     /// has to keep track of which entries we have here.
-    pub fn remove_circuit(&self, checksum: &Checksum) -> VmResult<()> {
+    pub fn remove_circuit(&self, circuit_file_key: &[u8; 72]) -> VmResult<()> {
         let mut cache = self.inner.lock().unwrap();
         // Remove compiled module & vk from disk.
         // Remove compiled moduled from disk (if it exists).
         // Here we could also delete from memory caches but this is not really
         // necessary as they are pushed out from the LRU over time or disappear
         // when the node process restarts.
-        cache.fs_cache.remove_circuit(checksum)?;
-        cache.pinned_memory_cache.remove_circuit(checksum)?;
+        cache.fs_cache.remove_circuit(circuit_file_key)?;
+        cache.pinned_memory_cache.remove_circuit(circuit_file_key)?;
         tracing::debug!("remove_circuit_from_disk ");
-        self.remove_circuit_from_disk(&cache.wasm_path, checksum)?;
+        self.remove_circuit_from_disk(&cache.circuit_path(), circuit_file_key)?;
         Ok(())
     }
 
@@ -678,17 +722,17 @@ where
     ///
     /// If the given contract for the given checksum is not found, or the content
     /// does not match the checksum, an error is returned.
-    pub fn pin_circuit(&self, checksum: &Checksum) -> VmResult<()> {
+    pub fn pin_circuit(&self, circuit_file_key: &[u8; 72]) -> VmResult<()> {
         let mut cache: std::sync::MutexGuard<'_, CacheInner> = self.inner.lock().unwrap();
-        self._pin_circuit(checksum, &mut cache)
+        self._pin_circuit(circuit_file_key, &mut cache)
     }
 
     pub fn _pin_circuit(
         &self,
-        checksum: &Checksum,
+        circuit_file_key: &[u8; 72],
         cache: &mut std::sync::MutexGuard<'_, CacheInner>,
     ) -> VmResult<()> {
-        if cache.pinned_memory_cache.has(checksum, true) {
+        if cache.pinned_memory_cache.has_circuit(circuit_file_key) {
             return Ok(());
         }
         println!("didnt have in pinned memory");
@@ -699,60 +743,65 @@ where
         // for a not-so-relevant use case.
 
         // Try to get module from file system cache
-        if let Some(cached_circuit) = cache.fs_cache.load_circuit(checksum)? {
+        if let Some(cached_circuit) = cache.fs_cache.load_circuit(circuit_file_key)? {
             println!("found in filesystem cache");
             cache.stats.hits_fs_cache = cache.stats.hits_fs_cache.saturating_add(1);
             cache
                 .pinned_memory_cache
-                .store_circuit(checksum, cached_circuit)?;
+                .store_circuit(circuit_file_key, cached_circuit)?;
 
             return Ok(());
         }
 
-        // Re-compile from original Wasm bytecode
-        let zk = self.load_circuit_with_path(&cache.wasm_path, checksum)?;
+        // Re-compile from the full circuit bytecode information.
+        //IMPORTANT: this would be if the circuit has not yet been compiled yet by the appstate (contract usage once, memeory eviction)
+        let zk = self.load_circuit_with_path(
+            &cache.wasm_path,
+            &circuit_file_key[..36].try_into().expect("msg"),
+            &circuit_file_key[36..].try_into().expect("msg"),
+        )?;
         cache.stats.misses = cache.stats.misses.saturating_add(1);
         cache
             .fs_cache
-            .store_circuit(checksum, &zk.serialized_to_vec())?;
+            .store_circuit(circuit_file_key, &zk.serialized_to_vec())?;
 
         // // This time we'll hit the file-system cache.
-        let Some(verifying_key) = cache.fs_cache.load_circuit(checksum)? else {
+        let Some(verifying_key) = cache.fs_cache.load_circuit(circuit_file_key)? else {
             return Err(VmError::generic_err(
                 "Can't load module from file system cache after storing it to file system cache (pin)",));
         };
 
         cache
             .pinned_memory_cache
-            .store_circuit(checksum, verifying_key)
+            .store_circuit(circuit_file_key, verifying_key)
     }
 
-    pub fn unpin_circuit(&self, checksum: &Checksum) -> VmResult<()> {
+    pub fn unpin_circuit(&self, circuit_file_key: &[u8; 72]) -> VmResult<()> {
         let mut cache = self.inner.lock().unwrap();
-        cache.pinned_memory_cache.remove_circuit(checksum)?;
-        return cache.fs_cache.remove_circuit(checksum);
+        cache.pinned_memory_cache.remove_circuit(circuit_file_key)?;
+        return cache.fs_cache.remove_circuit(circuit_file_key);
     }
 
     /// Load a verifying key from disk
-    pub fn load_circuit(&self, checksum: &Checksum) -> VmResult<Option<CachedCircuit>> {
+    pub fn load_circuit(&self, circuit_file_key: &[u8; 72]) -> VmResult<Option<CachedCircuit>> {
         let mut cache = self.inner.lock().unwrap();
         // Try to get module from the pinned memory cache
-        if let Some(czk) = cache.pinned_memory_cache.load_circuit(checksum)? {
+        if let Some(czk) = cache.pinned_memory_cache.load_circuit(circuit_file_key)? {
             cache.stats.hits_pinned_memory_cache =
                 cache.stats.hits_pinned_memory_cache.saturating_add(1);
             return Ok(Some(czk));
         }
 
         // Get module from memory cache
-        if let Some(czk) = cache.memory_cache.load_circuit(checksum)? {
+        if let Some(czk) = cache.memory_cache.load_circuit(circuit_file_key)? {
             cache.stats.hits_memory_cache = cache.stats.hits_memory_cache.saturating_add(1);
             return Ok(Some(czk));
         }
 
         // Get module from file system cache
-        if let Some(czk) = cache.fs_cache.load_circuit(checksum)? {
+        if let Some(czk) = cache.fs_cache.load_circuit(circuit_file_key)? {
             cache.stats.hits_fs_cache = cache.stats.hits_fs_cache.saturating_add(1);
-            cache.memory_cache.store_circuit(checksum, &czk)?;
+            cache.memory_cache.store_circuit(circuit_file_key, &czk)?;
             return Ok(Some(czk));
         }
 
@@ -761,74 +810,100 @@ where
         // This is needed for chains that upgrade their node software in a way that changes the module
         // serialization format. If you do not replay all transactions, previous calls of `store_code`
         // stored the old module format.
-        let zk = self.load_circuit_with_path(&cache.wasm_path, checksum)?;
+        let zk = self.load_circuit_with_path(
+            &cache.wasm_path,
+            &circuit_file_key[..36].try_into().expect("msg"),
+            &circuit_file_key[36..].try_into().expect("msg"),
+        )?;
         cache.stats.misses = cache.stats.misses.saturating_add(1);
         {
             cache
                 .fs_cache
-                .store_circuit(checksum, &zk.serialized_to_vec())?;
+                .store_circuit(circuit_file_key, &zk.serialized_to_vec())?;
         }
 
         // This time we'll hit the file-system cache.
-        let Some(czk) = cache.fs_cache.load_circuit(checksum)? else {
+        let Some(czk) = cache.fs_cache.load_circuit(circuit_file_key)? else {
             return Err(VmError::generic_err(
                 "Can't load module from file system cache after storing it to file system cache (load_circuit)",
             ));
         };
-        cache.memory_cache.store_circuit(checksum, &czk)?;
+        cache.memory_cache.store_circuit(circuit_file_key, &czk)?;
 
         // let CachedCircuit { vk, .. } = element;
         Ok(Some(czk))
     }
 
-    /// Check if a VK exists for a given checksum
-    pub fn has_circuit(&self, checksum: &Checksum) -> bool {
+    /// Check if a VK exists for a given circuit_key
+    pub fn has_circuit(&self, circuit_file_key: &[u8; 72]) -> bool {
         let cache = self.inner.lock().unwrap();
-        let circuit_path = self.zk_path(&cache.wasm_path, checksum);
+        // TODO::IMPORTANT:: implement method that is aware if possible of reconstructing requiested circuit if not full bytes loaded in cache
+        let circuit_path = self.circuit_path(&cache.circuit_path(), circuit_file_key);
         circuit_path.exists()
     }
 
-    fn zk_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
+    fn circuit_path(&self, dir: impl Into<PathBuf>, circuit_file_key: &[u8; 72]) -> PathBuf {
+        dir.into()
+            .join(hex::encode(circuit_file_key))
+            .with_extension("bin")
+    }
+    fn param_path(&self, dir: impl Into<PathBuf>, param_file_key: &[u8; 36]) -> PathBuf {
+        dir.into()
+            .join(hex::encode(param_file_key))
+            .with_extension("bin")
+    }
+    fn vk_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
         dir.into().join(checksum.to_hex()).with_extension("bin")
     }
 
-    /// Stores vk keys to their dedicated path in dir.
-    fn store_circuit_to_disk(
-        &self,
-        dir: impl Into<PathBuf>,
-        vk: &SerializedPlonkishCircuitData,
-    ) -> VmResult<Checksum> {
-        use halo2_proofs::COSMWASM_FOOTER_LENGTH;
-        let len = vk.body.len();
-        // hash is last 32 bytes
-        let hash = &vk.footer[COSMWASM_FOOTER_LENGTH - 32..]
-            .try_into()
-            .map_err(|e: cosmwasm_std::ChecksumError| VmError::cache_err(e.to_string()))?;
-        let path = self.zk_path(dir, hash);
+    // /// Stores vk keys to their dedicated path in dir.
+    // fn store_circuit_to_disk(
+    //     &self,
+    //     dir: impl Into<PathBuf>,
+    //     vk: &SerializedCircuitData,
+    // ) -> VmResult<Checksum> {
+    //     use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+    //     let len = vk.body.len();
+    //     // hash is last 32 bytes
+    //     let hash = &vk.footer[COSMWASM_FOOTER_LENGTH - 32..]
+    //         .try_into()
+    //         .map_err(|e: cosmwasm_std::ChecksumError| VmError::cache_err(e.to_string()))?;
+    //     let path = self.zk_path(dir, hash);
 
-        let mut file_content: Vec<u8> = Vec::with_capacity(len + COSMWASM_FOOTER_LENGTH);
-        file_content.extend_from_slice(&vk.body);
-        file_content.extend_from_slice(&vk.footer);
+    //     let mut file_content: Vec<u8> = Vec::with_capacity(len + COSMWASM_FOOTER_LENGTH);
+    //     file_content.extend_from_slice(&vk.body);
+    //     file_content.extend_from_slice(&vk.footer);
 
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)
-            .map_err(|e| VmError::cache_err(format!("Error creating VK file: {}", e)))?;
+    //     let mut file = OpenOptions::new()
+    //         .write(true)
+    //         .create(true)
+    //         .truncate(true)
+    //         .open(&path)
+    //         .map_err(|e| VmError::cache_err(format!("Error creating VK file: {}", e)))?;
 
-        file.write_all(&file_content)
-            .map_err(|e| VmError::cache_err(format!("Error writing VK file: {}", e)))?;
+    //     file.write_all(&file_content)
+    //         .map_err(|e| VmError::cache_err(format!("Error writing VK file: {}", e)))?;
 
-        Ok(*hash)
-    }
+    //     Ok(*hash)
+    // }
 
     fn load_circuit_with_path(
         &self,
         circuit_path: &Path,
-        checksum: &Checksum,
-    ) -> VmResult<zk_cosmwasm::SerializedPlonkishCircuitData> {
-        match self.load_circuit_from_disk(circuit_path, checksum)? {
+        param_file_key: &[u8; 36],
+        vk_file_key: &[u8; 36],
+    ) -> VmResult<zk_cosmwasm::SerializedCircuitData> {
+        // TODO: new workflow for param isolation
+        // load circuit params file from disk (or cache?)
+        // load circuit vk+cs file from disk
+        // merge together into sp
+        let mut circuit_key = Vec::with_capacity(72);
+        circuit_key.extend_from_slice(param_file_key.as_slice());
+        circuit_key.extend_from_slice(vk_file_key.as_slice());
+
+        match self
+            .load_circuit_from_disk(circuit_path, circuit_key.as_slice().try_into().expect("ah"))?
+        {
             Some(szk) => Ok(szk),
             None => Err(VmError::zk_err(ZkError::new_err(
                 "no circuit found on disk.",
@@ -842,8 +917,8 @@ where
     fn load_circuit_from_disk(
         &self,
         dir: impl Into<PathBuf>,
-        checksum: &Checksum,
-    ) -> VmResult<Option<SerializedPlonkishCircuitData>> {
+        checksum: &[u8; 72],
+    ) -> VmResult<Option<SerializedCircuitData>> {
         println!("loading circuit from disk;");
         let bytes = load_circuit_from_disk(dir, checksum)?;
         println!("length on disk:{};", bytes.len());
@@ -851,16 +926,16 @@ where
         let footer = crate::check_circuit(&bytes)
             .map_err(|e| VmError::generic_err(format!("ZK load: {}", e)))?
             .to_bytes();
-        Ok(Some(SerializedPlonkishCircuitData::new(body, &footer)))
+        Ok(Some(SerializedCircuitData::new(body, &footer)))
     }
     /// Remove a VK file from disk if the path exists
     #[cfg(feature = "zk")]
     fn remove_circuit_from_disk(
         &self,
         dir: impl Into<PathBuf>,
-        checksum: &Checksum,
+        checksum: &[u8; 72],
     ) -> VmResult<()> {
-        let path: PathBuf = self.zk_path(dir, checksum);
+        let path: PathBuf = self.circuit_path(dir, checksum);
         println!("{}", path.to_str().unwrap());
 
         let circuit_path = path.with_extension("bin");
@@ -928,11 +1003,11 @@ fn save_wasm_to_disk(dir: impl Into<PathBuf>, wasm: &[u8]) -> VmResult<Checksum>
     Ok(checksum)
 }
 
-fn load_circuit_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResult<Vec<u8>> {
+fn load_circuit_from_disk(dir: impl Into<PathBuf>, checksum: &[u8; 72]) -> VmResult<Vec<u8>> {
     // this requires the directory and file to exist
     // The files previously had no extension, so to allow for a smooth transition,
     // we also try to load the file without the wasm extension.
-    let path = dir.into().join(checksum.to_hex());
+    let path = dir.into().join(hex::encode(checksum));
     let mut file = File::open(path.with_extension("bin"))
         .or_else(|_| File::open(path))
         .map_err(|_e| VmError::cache_err("vm::cache::Circuit file does not exist"))?;
@@ -948,7 +1023,9 @@ fn load_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResult
     // The files previously had no extension, so to allow for a smooth transition,
     // we also try to load the file without the wasm extension.
     let path = dir.into().join(checksum.to_hex());
-    let mut file = File::open(path.with_extension("wasm"))
+    let file = path.with_extension("wasm");
+    println!("FILE_OPEN_FROM_DISK: {:#?}", file);
+    let mut file = File::open(file)
         .or_else(|_| File::open(path))
         .map_err(|_e| VmError::cache_err("Error opening Wasm file for reading"))?;
 
@@ -963,9 +1040,9 @@ fn load_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResult
 /// In contrast to the file system cache, the existence of the original
 /// code is required. So a non-existent file leads to an error as it
 /// indicates a bug.
-fn remove_circuit_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResult<()> {
+fn remove_circuit_from_disk(dir: impl Into<PathBuf>, checksum: &[u8; 72]) -> VmResult<()> {
     // the files previously had no extension, so to allow for a smooth transition, we delete both
-    let path = dir.into().join(checksum.to_hex());
+    let path = dir.into().join(hex::encode(checksum));
     let wasm_path = path.with_extension("bin");
 
     let path_exists = path.exists();
@@ -1019,30 +1096,43 @@ fn remove_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResu
 /// It will create the directory if it doesn't exist.
 /// Saving the same byte code multiple times is allowed.
 #[cfg(feature = "zk")]
-fn save_circuit_to_disk(dir: impl Into<PathBuf>, c: &[u8]) -> VmResult<Checksum> {
-    println!("save_circuit_to_disk: {}", c.len());
-    let cf = crate::check_circuit(c).map_err(|e| VmError::generic_err(e.to_string()))?;
-    // calculate filename
-    let filename = cf.checksum_to_hex();
-    let filepath = dir.into().join(&filename).with_extension("bin");
-    println!("filename: {}", filename);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(filepath)
-        .map_err(|e| VmError::cache_err(format!("Error opening Circuit file for writing: {e}")))?;
-    file.write_all(c)
-        .map_err(|e| VmError::cache_err(format!("Error writing Circuit file: {e}")))?;
+fn save_circuit_to_disk(
+    dir: impl Into<PathBuf>,
+    c: &[u8],
+    cf: CircuitFooter,
+) -> VmResult<([[u8; 36]; 2], [u8; 72])> {
+    let param_filename = cf.param_filename();
+    let vk_filename = cf.vk_filename();
+    let dir = dir.into();
+    let parampath = dir.join(&param_filename).with_extension("bin");
+    let vkpath = dir.join(&vk_filename).with_extension("bin");
 
-    Ok(cf.checksum.into())
+    println!("parampath: {:#?}", parampath);
+    println!("vkpath: {:#?}", vkpath);
+
+    // write both param nd vk to disk
+    for filepath in [parampath, vkpath] {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(filepath)
+            .map_err(|e| {
+                VmError::cache_err(format!("Error opening Circuit file for writing: {e}"))
+            })?;
+        file.write_all(c)
+            .map_err(|e| VmError::cache_err(format!("Error writing Circuit file: {e}")))?;
+    }
+
+    //param,checksum,vk
+    Ok((cf.file_keys(), cf.to_circuit_key()))
 }
 
 /// save stores the wasm code in the given directory and returns an ID for lookup.
 /// It will create the directory if it doesn't exist.
 /// Saving the same byte code multiple times is allowed.
 #[cfg(feature = "zk")]
-fn save_cs_params_to_disk(dir: impl Into<PathBuf>, p: &[u8]) -> VmResult<Checksum> {
+fn save_vk_params_to_disk(dir: impl Into<PathBuf>, p: &[u8]) -> VmResult<Checksum> {
     // calculate filename (checksum bytes)
     let param_checksum = Checksum::generate(p);
     let filepath = dir
@@ -1310,7 +1400,7 @@ mod tests {
     #[test]
     fn load_circuit_works_across_multiple_cache_instances() {
         let tmp_dir = TempDir::new().unwrap();
-        let id: Checksum;
+        let id: [u8; 72];
 
         {
             let options1 = CacheOptions {
@@ -1384,12 +1474,13 @@ mod tests {
         let (testing_opts, _temp_dir) = make_testing_options();
         let cache: Cache<MockApi, MockStorage, MockQuerier> =
             unsafe { Cache::new(testing_opts).unwrap() };
-        let checksum = Checksum::from([
+        let key = [
             5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-            5, 5, 5,
-        ]);
+            5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+            5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+        ];
 
-        match cache.load_circuit(&checksum).unwrap_err() {
+        match cache.load_circuit(&key).unwrap_err() {
             VmError::CacheErr { msg, .. } => {
                 assert_eq!(msg, "vm::cache::Circuit file does not exist")
             }
@@ -1432,7 +1523,7 @@ mod tests {
             .path()
             .join(STATE_DIR)
             .join(WASM_DIR)
-            .join(checksum.to_hex())
+            .join(hex::encode(checksum))
             .with_extension("bin");
 
         let mut file = OpenOptions::new().write(true).open(&filepath).unwrap();
@@ -1525,7 +1616,7 @@ mod tests {
         };
 
         // Removing again fails
-        match cache.remove_wasm(&checksum, false).unwrap_err() {
+        match cache.remove_circuit(&checksum).unwrap_err() {
             VmError::CacheErr { msg, .. } => {
                 assert_eq!(msg, "Circuit file does not exist")
             }
@@ -1546,7 +1637,7 @@ mod tests {
         cache.load_wasm(&checksum).unwrap();
 
         // Remove
-        cache.remove_wasm(&checksum, true).unwrap();
+        cache.remove_wasm(&checksum).unwrap();
 
         // Does not exist anymore
         match cache.load_wasm(&checksum).unwrap_err() {
@@ -1557,7 +1648,7 @@ mod tests {
         }
 
         // Removing again fails
-        match cache.remove_wasm(&checksum, true).unwrap_err() {
+        match cache.remove_wasm(&checksum).unwrap_err() {
             VmError::CacheErr { msg, .. } => {
                 assert_eq!(msg, "Wasm file does not exist")
             }
@@ -2055,9 +2146,13 @@ mod tests {
         let path = tmp_dir.path();
         // Store
         let code = NORICK_CIRCUIT;
+        let footer = zk_cosmwasm::CircuitFooter::from_bytes(
+            &code[code.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+        )
+        .unwrap();
 
-        save_circuit_to_disk(path, &code).unwrap();
-        save_circuit_to_disk(path, &code).unwrap();
+        save_circuit_to_disk(path, &code, footer).unwrap();
+        save_circuit_to_disk(path, &code, footer).unwrap();
     }
 
     #[test]
@@ -2084,9 +2179,13 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let path = tmp_dir.path();
         let code = NORICK_CIRCUIT;
-        let checksum = save_circuit_to_disk(path, &code).unwrap();
+        let footer = zk_cosmwasm::CircuitFooter::from_bytes(
+            &code[code.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+        )
+        .unwrap();
+        let checksum = save_circuit_to_disk(path, &code, footer).unwrap();
 
-        let loaded = load_circuit_from_disk(path, &checksum).unwrap();
+        let loaded = load_circuit_from_disk(path, &checksum.1).unwrap();
         assert_eq!(code, loaded);
     }
 
@@ -2118,9 +2217,14 @@ mod tests {
         let path = tmp_dir.path().join("something");
         create_dir_all(&path).unwrap();
         let code = NORICK_CIRCUIT;
-        let checksum = save_circuit_to_disk(&path, &code).unwrap();
+        let footer = zk_cosmwasm::CircuitFooter::from_bytes(
+            &code[code.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+        )
+        .unwrap();
 
-        let loaded = load_circuit_from_disk(&path, &checksum).unwrap();
+        let checksum = save_circuit_to_disk(&path, &code, footer).unwrap();
+
+        let loaded = load_circuit_from_disk(&path, &checksum.1).unwrap();
         assert_eq!(code, loaded);
     }
 
@@ -2129,13 +2233,17 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let path = tmp_dir.path();
         let code = NORICK_CIRCUIT;
-        let checksum = save_circuit_to_disk(path, &code).unwrap();
+        let footer = zk_cosmwasm::CircuitFooter::from_bytes(
+            &code[code.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+        )
+        .unwrap();
+        let checksum = save_circuit_to_disk(path, &code, footer).unwrap();
 
-        remove_circuit_from_disk(path, &checksum).unwrap();
+        remove_circuit_from_disk(path, &checksum.1).unwrap();
 
         // removing again fails
 
-        match remove_circuit_from_disk(path, &checksum).unwrap_err() {
+        match remove_circuit_from_disk(path, &checksum.1).unwrap_err() {
             VmError::CacheErr { msg, .. } => assert_eq!(msg, "Wasm file does not exist"),
             err => panic!("Unexpected error: {err:?}"),
         }
@@ -2286,7 +2394,7 @@ mod tests {
 
         let pinned_metrics = cache.pinned_metrics();
         assert_eq!(pinned_metrics.per_module.len(), 1);
-        assert_eq!(pinned_metrics.per_module[0].0, checksum);
+        assert_eq!(pinned_metrics.per_module[0].0, CacheKey::Checksum(checksum));
         assert_eq!(pinned_metrics.per_module[0].1.hits, 0);
 
         let backend = mock_backend(&[]);
@@ -2296,7 +2404,7 @@ mod tests {
 
         let pinned_metrics = cache.pinned_metrics();
         assert_eq!(pinned_metrics.per_module.len(), 1);
-        assert_eq!(pinned_metrics.per_module[0].0, checksum);
+        assert_eq!(pinned_metrics.per_module[0].0, CacheKey::Checksum(checksum));
         assert_eq!(pinned_metrics.per_module[0].1.hits, 1);
 
         let empty_checksum = cache.store_code(EMPTY, true, true).unwrap();
@@ -2315,8 +2423,8 @@ mod tests {
                 .unwrap()
         };
 
-        assert_eq!(get_module_hits(checksum).hits, 1);
-        assert_eq!(get_module_hits(empty_checksum).hits, 0);
+        assert_eq!(get_module_hits(CacheKey::Checksum(checksum)).hits, 1);
+        assert_eq!(get_module_hits(CacheKey::Checksum(empty_checksum)).hits, 0);
     }
 
     #[test]
@@ -2324,23 +2432,24 @@ mod tests {
         let (testing_opts, _temp_dir) = make_testing_options();
         let cache: Cache<MockApi, MockStorage, MockQuerier> =
             unsafe { Cache::new(testing_opts).unwrap() };
-        let checksum = cache.store_circuit(NORICK_CIRCUIT, true).unwrap();
+        let circuit_file_key = cache.store_circuit(NORICK_CIRCUIT, true).unwrap();
 
         println!("pin_circuit for the first time");
-        cache.pin_circuit(&checksum).unwrap();
+        cache.pin_circuit(&circuit_file_key).unwrap();
 
         println!("pin_circuit for the second time");
-        cache.pin_circuit(&checksum).unwrap();
+        cache.pin_circuit(&circuit_file_key).unwrap();
 
-        cache.unpin_circuit(&checksum).unwrap();
+        cache.unpin_circuit(&circuit_file_key).unwrap();
 
         // unpin again has no effect
         println!("unpin again has no effect");
-        cache.unpin_circuit(&checksum).unwrap();
+        cache.unpin_circuit(&circuit_file_key).unwrap();
 
         // unpin non existent id has no effect
-        let non_id = Checksum::generate(b"non_existent");
-        cache.unpin_circuit(&non_id).unwrap();
+        let mut non_id = Checksum::generate(b"non_existent").as_slice();
+
+        cache.unpin_circuit(&circuit_file_key).unwrap();
     }
 
     #[test]

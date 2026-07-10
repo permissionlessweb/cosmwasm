@@ -4,6 +4,7 @@ pub(crate) use vesta::{VestaInstance, VestaVerifyingKey};
 use crate::{ZkError, ZkResult};
 
 pub trait ConstraintSystemTrait: Send + Sync + std::fmt::Debug + 'static {
+  
     fn write(&self) -> ZkResult<()>;
 }
 pub trait VerifyingKeyTrait: Send + Sync + 'static {

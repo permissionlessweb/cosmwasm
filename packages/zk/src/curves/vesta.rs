@@ -1,8 +1,9 @@
 // use std::io;
 
 use crate::{
-    curves::ZkCurve, CsBlueprint, CsBlueprintGuard, CwInstance, CwProvingKey, CwVerifyingKey,
-    ZkError, ZkResult,
+    circuits::{CwCircuitParam, CwConstraintSystem},
+    curves::ZkCurve,
+    CsBlueprint, CsBlueprintGuard, CwInstance, CwProvingKey, CwVerifyingKey, ZkError, ZkResult,
 };
 use group::ff::PrimeField as _;
 use halo2_proofs::plonk::{self};
@@ -13,8 +14,18 @@ use sha2::{Digest as _, Sha256};
 pub(crate) type VestaInstance = CwInstance<VestaAffine>;
 pub(crate) type VestaVerifyingKey = CwVerifyingKey<VestaAffine>;
 pub(crate) type VestaProvingKey = CwProvingKey<VestaAffine>;
-pub(crate) type VestaConstraintSystem = plonk::ConstraintSystem<VestaScalar>;
-pub(crate) type VestaParams = halo2_proofs::poly::commitment::Params<VestaAffine>;
+pub(crate) type VestaConstraintSystem = CwConstraintSystem<VestaAffine>;
+pub(crate) type VestaParams = CwCircuitParam<VestaAffine>;
+
+impl TryFrom<halo2_proofs::poly::commitment::Params<vesta::Affine>> for VestaParams {
+    type Error = ZkError;
+
+    fn try_from(
+        value: halo2_proofs::poly::commitment::Params<vesta::Affine>,
+    ) -> Result<Self, Self::Error> {
+        Ok(Self { params: value })
+    }
+}
 
 impl ZkCurve for VestaAffine {
     const ID: u32 = 0;
@@ -45,13 +56,13 @@ impl VestaInstance {
     }
 
     pub fn new_from_vm(i: &Vec<u8>) -> crate::ZkResult<Self> {
-        const SCALAR_SIZE: usize = 32;
+        const SCALAR_SIZE: usize = vesta::Scalar::CAPACITY as usize;
         if i.len() % SCALAR_SIZE != 0 {
             return Err(ZkError::new_err(format!(
                 "bytes length must be multiple of {SCALAR_SIZE}"
             )));
         }
-        let is = i
+        let i = i
             .chunks_exact(SCALAR_SIZE)
             .map(|chunk| {
                 let mut arr = [0u8; 32];
@@ -59,8 +70,8 @@ impl VestaInstance {
                 vesta::Scalar::from_repr(arr).expect("invalid scalar bytes")
             })
             .collect::<Vec<_>>();
-        let size = is.len();
-        Ok(Self { i: is, size })
+        let size = i.len();
+        Ok(Self { i, size })
     }
 
     pub fn get_size(&self) -> usize {
@@ -93,34 +104,32 @@ impl TryInto<Vec<u8>> for VestaVerifyingKey {
     }
 }
 
-impl VestaProvingKey {
-    /// Build from a given circuit.
-    pub fn build<C>(k: u32, circuit: C) -> Self
-    where
-        C: plonk::Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
-    {
-        let params = halo2_proofs::poly::commitment::Params::new(k);
-        let wrapped_circuit = crate::CosmwasmCircuit { circuit };
-        let vk = plonk::keygen_vk(&params, &wrapped_circuit).unwrap();
-        let _pk = plonk::keygen_pk(&params, vk, &wrapped_circuit).unwrap();
-        // is there a way to implement th ZkCurve trait pk for this specific proving keym since its associated with VestAffine
-        CwProvingKey { params, _pk }
-    }
+// impl VestaProvingKey {
+//     /// Build from a given circuit.
+//     pub fn build<C>(k: u32, circuit: C) -> Self
+//     where
+//         C: plonk::Circuit<<pasta_curves::EqAffine as group::prime::PrimeCurveAffine>::Scalar>,
+//     {
+//         let params = halo2_proofs::poly::commitment::Params::new(k);
+//         let wrapped_circuit = crate::CosmwasmCircuit { circuit };
+//         let vk = plonk::keygen_vk(&params, &wrapped_circuit).unwrap();
+//         let _pk = plonk::keygen_pk(&params, vk, &wrapped_circuit).unwrap();
+//         // is there a way to implement th ZkCurve trait pk for this specific proving keym since its associated with VestAffine
+//         CwProvingKey { params, _pk }
+//     }
 
-    pub fn params(&self) -> halo2_proofs::poly::commitment::Params<VestaAffine> {
-        self.params.clone()
-    }
-}
+//     pub fn params(&self) -> halo2_proofs::poly::commitment::Params<VestaAffine> {
+//         self.params.clone()
+//     }
+// }
 
 impl VestaVerifyingKey {
     pub fn from_bytes_without_params(
         mut reader: &mut std::io::Cursor<&[u8]>,
         footer: crate::CircuitFooter,
-        bytes: &[u8],
         p: VestaParams,
     ) -> ZkResult<Self> {
-        let cs: VestaConstraintSystem = plonk::ConstraintSystem::read(&mut reader)?;
-
+        let cs = plonk::ConstraintSystem::read(&mut reader)?;
         let _guard = CsBlueprintGuard::install(CsBlueprint {
             num_fixed_columns: cs.get_num_fixed_columns(),
             num_advice_columns: cs.get_num_advice_columns(),
@@ -132,7 +141,7 @@ impl VestaVerifyingKey {
         let empty_selectors: Vec<Vec<bool>> = vec![];
         let vk = halo2_proofs::plonk::VerifyingKey::read_with_cs::<std::io::Cursor<&[u8]>>(
             &mut reader,
-            &p,
+            &p.params,
             cs,
             empty_selectors,
         )
@@ -143,9 +152,10 @@ impl VestaVerifyingKey {
             ))
         })?;
 
-        Ok(Self::new(p, vk, footer))
+        Ok(Self::new(p.params, vk, footer))
     }
 }
+
 impl VestaVerifyingKey {
     /// Create with existing params (use when deserializing).
     pub fn new(
@@ -187,8 +197,7 @@ impl VestaVerifyingKey {
         Self::from_bytes_without_params(
             &mut reader,
             crate::CircuitFooter::from_bytes(footer_bytes)?,
-            bytes,
-            params,
+            VestaParams::try_from(params)?,
         )
     }
 
