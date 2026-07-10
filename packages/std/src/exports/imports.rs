@@ -109,7 +109,7 @@ extern "C" {
     /// i_ptr: pointer to instance bytes in Wasm memory
     /// i_len: length of instance bytes
     #[cfg(feature = "zk")]
-    fn halo2_proof_instance_verify(
+    fn proof_instance_verify(
         zkid: u32,
         proof_ptr: u32,
         proof_len: u32,
@@ -724,7 +724,7 @@ impl Api for ExternalApi {
     }
 
     #[cfg(feature = "zk")]
-    fn halo2_proof_instance_verify(
+    fn proof_instance_verify(
         &self,
         zkid: u64,
         proof: &[u8],
@@ -752,7 +752,7 @@ impl Api for ExternalApi {
         // Call FFI with zkid (as u32), proof, and instances
         // zkid is passed directly as u32 (safe since zkid sequence won't exceed u32 range)
         let result = unsafe {
-            halo2_proof_instance_verify(
+            proof_instance_verify(
                 zkid as u32,    // ← Circuit ID (cast to u64 on Go side)
                 proof_send_ptr, // ← Pointer to proof bytes
                 proof_len,

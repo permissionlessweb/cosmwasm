@@ -118,7 +118,7 @@ Transform the current zk-cosmwasm programmable circuit verification VM into a tr
 
 ### Current State
 
-- **Programmable VM**: Upload VK circuits via `store_code_with_circuit()`, verify via `halo2_proof_instance_verify(zkid, proof, instances)`
+- **Programmable VM**: Upload VK circuits via `store_code_with_circuit()`, verify via `proof_instance_verify(zkid, proof, instances)`
 - **Circuit Registry**: zkid → checksum mapping in app state
 - **3-Tier Caching**: Pinned memory → File system → LRU
 - **Serialization**: Version 2 format with 32-byte footer, embedded constraint system
@@ -130,7 +130,7 @@ Transform the current zk-cosmwasm programmable circuit verification VM into a tr
 │                    zk-cosmwasm zkVM Architecture                │
 ├─────────────────────────────────────────────────────────────────┤
 │  Layer 4: Smart Contracts                                       │
-│  ├─ Call halo2_proof_instance_verify() for custom circuits      │
+│  ├─ Call proof_instance_verify() for custom circuits      │
 │  └─ Call wasm_execution_verify() for WASM execution proofs      │
 ├─────────────────────────────────────────────────────────────────┤
 │  Layer 3: Host Imports (packages/vm/src/imports.rs)             │
@@ -623,7 +623,7 @@ Record: Insert after valid claim proof
 ```rust
 impl Api {
     // Existing
-    fn halo2_proof_instance_verify(&self, zkid: u64, proof: &[u8], instances: &[u8]) -> StdResult<u32>;
+    fn proof_instance_verify(&self, zkid: u64, proof: &[u8], instances: &[u8]) -> StdResult<u32>;
 
     // Late Binding Actions
     fn execution_commit(&self, commit: &ExecutionCommitBody) -> StdResult<ExecutionCommitment>;

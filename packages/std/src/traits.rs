@@ -336,7 +336,7 @@ pub trait Api: Any {
     /// Returns `Ok(true)` if the proof is valid, `Ok(false)` if invalid, or an error if verification fails.
     #[cfg(feature = "zk")]
     #[allow(unused_variables)]
-    fn halo2_proof_instance_verify(
+    fn proof_instance_verify(
         &self,
         zkid: u64,
         proof: &[u8],

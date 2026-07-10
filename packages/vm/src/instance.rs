@@ -247,7 +247,7 @@ where
 
         #[cfg(feature = "zk")]
         env_imports.insert(
-            "halo2_proof_instance_verify",
+            "proof_instance_verify",
             Function::new_typed_with_env(&mut store, &fe, do_proof_instance_verify),
         );
 

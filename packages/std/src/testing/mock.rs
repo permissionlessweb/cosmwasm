@@ -198,7 +198,7 @@ impl Api for MockApi {
     }
 
     #[cfg(feature = "zk")]
-    fn halo2_proof_instance_verify(
+    fn proof_instance_verify(
         &self,
         zkid: u64,
         proof: &[u8],

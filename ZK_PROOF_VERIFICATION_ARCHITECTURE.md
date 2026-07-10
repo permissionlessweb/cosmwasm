@@ -7,7 +7,7 @@ This document describes the architecture for zero-knowledge proof verification i
 **Key Feature**: Proof verification is invoked via:
 
 ```rust
-deps.api.halo2_proof_instance_verify(zkID: u64, proof: &[u8], instances: &[u8])
+deps.api.proof_instance_verify(zkID: u64, proof: &[u8], instances: &[u8])
 ```
 
  allowing contracts to use multiple circuits dynamically.
@@ -110,7 +110,7 @@ pub fn resolve_zkid_to_checksum(&self, zkid: u64) -> Option<Checksum> {}
 
 ## Data Flow: Complete Example
 
-### Scenario: Contract calls `api.halo2_proof_instance_verify(zkid, proof, instances)`
+### Scenario: Contract calls `api.proof_instance_verify(zkid, proof, instances)`
 
 **Prerequisites**:
 
@@ -212,7 +212,7 @@ Stores VK to file system cache and optionally pins in memory.
 
 ```rust
 // Call the host function to verify proof with specific circuit
-let result: u32 = api.halo2_proof_instance_verify(
+let result: u32 = api.proof_instance_verify(
     zkid,          // ← Which circuit to verify against
     &proof_bytes,
     &instance_bytes,
@@ -296,7 +296,7 @@ Err: VmError::generic_err("bytes length must be multiple of 32")
 
 ```rust
 // Contract code calling proof verification
-match api.halo2_proof_instance_verify(zkid, proof, instances) {
+match api.proof_instance_verify(zkid, proof, instances) {
     Ok(0) => { /* proof valid */ },
     Ok(1) => { /* proof invalid */ },
     Ok(_) => { /* unexpected return code */ },
@@ -434,7 +434,7 @@ This design:
    - Implement zkid resolution in app state storage
 
 2. **Contract Developers**:
-   - Use `api.halo2_proof_instance_verify(zkid, proof, instances)`
+   - Use `api.proof_instance_verify(zkid, proof, instances)`
    - Ensure zkid mappings are established before verification calls
 
 3. **Node Operators** (optional performance tuning):

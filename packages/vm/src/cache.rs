@@ -691,6 +691,52 @@ where
         save_vk_params_to_disk(&cache.param_path(), p)
     }
 
+    /// Store param bytes independently, without a circuit.
+    ///
+    /// Reads `k` from the first 4 bytes of the halo2 params (u32 LE),
+    /// computes the 36-byte param_key `[appstate_key_le][SHA256(params)]`,
+    /// writes to `zk_param/{param_key}.bin`, and caches in pinned memory.
+    ///
+    /// Returns the 36-byte param_key.
+    pub fn store_param(&self, p: &[u8]) -> VmResult<[u8; 36]> {
+        // Extract k from the halo2 params header (first 4 bytes, u32 LE)
+        if p.len() < 4 {
+            return Err(VmError::cache_err("param bytes too short for k header"));
+        }
+        let k_bytes: [u8; 4] = p[..4].try_into().expect("4-byte k");
+        let k = u32::from_le_bytes(k_bytes) as u8;
+
+        let appstate_key = u32::from_be_bytes([0, 0, k, 0]);
+        let param_checksum = Checksum::generate(p);
+
+        let mut param_key = [0u8; 36];
+        param_key[..4].copy_from_slice(&appstate_key.to_le_bytes());
+        param_key[4..].copy_from_slice(param_checksum.as_slice());
+
+        let mut cache = self.inner.lock().unwrap();
+        let param_path = cache.param_path().join(hex::encode(param_key)).with_extension("bin");
+        if let Some(parent) = param_path.parent() {
+            mkdir_p(parent).map_err(|_e| VmError::cache_err("Error creating param dir"))?;
+        }
+        {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&param_path)
+                .map_err(|e| VmError::cache_err(format!("Error opening param file: {e}")))?;
+            file.write_all(p)
+                .map_err(|e| VmError::cache_err(format!("Error writing param file: {e}")))?;
+        }
+        cache.pinned_memory_cache.store_param(
+            &param_key,
+            crate::modules::CachedParam::from_bytes(p.to_vec()),
+        )?;
+        cache.memory_cache.store_param(&param_key, &crate::modules::CachedParam::from_bytes(p.to_vec()))?;
+
+        Ok(param_key)
+    }
+
     pub fn remove_vk_params(
         &self,
         cache: &mut std::sync::MutexGuard<'_, CacheInner>,

@@ -214,7 +214,7 @@ pub struct DebugInfo<'a> {
 //                            v                                                 v
 pub type DebugHandlerFn = dyn for<'a, 'b> FnMut(/* msg */ &'a str, DebugInfo<'b>);
 
-/// Host-side circuit cache lookup used by `halo2_proof_instance_verify` (Path A).
+/// Host-side circuit cache lookup used by `proof_instance_verify` (Path A).
 ///
 /// Maps a 72-byte wasmvm circuit key to an already-deserialized verifying key.
 /// Constructed from `Cache` so the import never touches contract storage.
@@ -652,7 +652,7 @@ mod tests {
                 "secp256r1_recover_pubkey" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u64 { 0 }),
                 "ed25519_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "ed25519_batch_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
-                "halo2_proof_instance_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "proof_instance_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
                 "debug" => Function::new_typed(&mut store, |_a: u32| {}),
                 "abort" => Function::new_typed(&mut store, |_a: u32| {}),
             },
