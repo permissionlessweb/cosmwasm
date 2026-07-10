@@ -400,7 +400,7 @@ mod tests {
 
             let (_checksum, circuit) = cache
                 .iter_circuits()
-                .find(|(iter_checksum, _circuit)| **iter_checksum == checksum.as_slice())
+                .find(|(iter_checksum, _circuit)| **iter_checksum == footer.to_circuit_key())
                 .unwrap();
 
             assert_eq!(circuit.hits, 0);
@@ -408,7 +408,7 @@ mod tests {
             let _ = cache.load_circuit(&footer.to_circuit_key()).unwrap();
             let (_checksum, circuit) = cache
                 .iter_circuits()
-                .find(|(iter_checksum, _circuit)| **iter_checksum == checksum.as_slice())
+                .find(|(iter_checksum, _circuit)| **iter_checksum == footer.to_circuit_key())
                 .unwrap();
 
             assert_eq!(circuit.hits, 1);
@@ -558,11 +558,14 @@ mod tests {
             cache
                 .store_circuit(&footer.to_circuit_key(), circuit)
                 .unwrap();
-            assert_eq!(cache.size(), 66167);
+            assert_eq!(cache.size(), zk.len() + std::mem::size_of::<[u8; 72]>());
 
             // Add 2
             cache.store(&checksum1, module).unwrap();
-            assert_eq!(cache.size(), 332 + 66167);
+            assert_eq!(
+                cache.size(),
+                332 + zk.len() + std::mem::size_of::<[u8; 72]>()
+            );
 
             // Remove 1
             cache.remove_circuit(&footer.to_circuit_key()).unwrap();

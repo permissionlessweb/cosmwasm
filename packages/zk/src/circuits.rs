@@ -84,8 +84,8 @@ impl TryFrom<&[u8]> for AnyVerifyingKey {
             crate::CircuitFooter::from_bytes(&bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..])?;
 
         // get specific circuit identifier for proper methods
-        match footer.appstate_key() {
-            pasta_curves::vesta::Affine::ID => {
+        match (footer.prover_id, footer.curve_id) {
+            (0, 0) => {
                 Ok(AnyVerifyingKey::Vesta(VestaVerifyingKey::try_from(bytes)?))
             }
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
@@ -102,8 +102,8 @@ impl AnyVerifyingKey {
     pub fn from_bytes(bytes: &[u8]) -> crate::ZkResult<Self> {
         let footer =
             crate::CircuitFooter::from_bytes(&bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..])?;
-        match footer.appstate_key() {
-            pasta_curves::vesta::Affine::ID => Ok(AnyVerifyingKey::Vesta(
+        match (footer.prover_id, footer.curve_id) {
+            (0, 0) => Ok(AnyVerifyingKey::Vesta(
                 VestaVerifyingKey::from_bytes_with_params(bytes)?,
             )),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
@@ -127,8 +127,8 @@ impl AnyVerifyingKey {
         vk_body_bytes: &[u8],
         footer: &CircuitFooter,
     ) -> crate::ZkResult<Self> {
-        match footer.appstate_key() {
-            pasta_curves::vesta::Affine::ID => Ok(AnyVerifyingKey::Vesta(
+        match (footer.prover_id, footer.curve_id) {
+            (0, 0) => Ok(AnyVerifyingKey::Vesta(
                 crate::curves::VestaVerifyingKey::from_split_bytes(
                     param_bytes,
                     vk_body_bytes,

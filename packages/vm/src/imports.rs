@@ -11,8 +11,6 @@ use cosmwasm_crypto::{
 use cosmwasm_crypto::{
     ECDSA_PUBKEY_MAX_LEN, ECDSA_SIGNATURE_LEN, EDDSA_PUBKEY_LEN, MESSAGE_HASH_MAX_LEN,
 };
-#[cfg(feature = "zk")]
-use cosmwasm_std::{CircuitResponse, Empty, QueryRequest, WasmQuery};
 use rand_core::OsRng;
 
 #[cfg(feature = "iterator")]
@@ -823,7 +821,12 @@ pub fn do_ed25519_batch_verify<
     Ok(code)
 }
 
-/// Fetches VK from x/wasm module via WasmQuery::Circuit and verifies a Halo2 proof.
+/// Path A proof verification:
+/// 1. Lightweight `WasmQuery::CircuitInfo` → 72-byte `circuit_key` (no full blob on the wire).
+/// 2. Host circuit cache `load_circuit(key)` → already-deserialized `AnyVerifyingKey`.
+/// 3. On cache miss only: full `WasmQuery::Circuit` blob as cold path.
+///
+/// Never reads the contract's sandboxed KVStore for circuit data.
 #[cfg(feature = "zk")]
 pub fn do_proof_instance_verify<
     A: BackendApi + 'static,
@@ -837,6 +840,11 @@ pub fn do_proof_instance_verify<
     instances_ptr: u32,
     instances_len: u32,
 ) -> VmResult<u32> {
+    use cosmwasm_std::{
+        from_json, Binary, ContractResult, Empty, QueryRequest, SystemResult, WasmQuery,
+    };
+    use cosmwasm_std::{CircuitInfoResponse, CircuitResponse};
+
     let (data, mut store) = env.data_and_store_mut();
     charge_host_call_gas(data, &mut store)?;
 
@@ -853,42 +861,103 @@ pub fn do_proof_instance_verify<
         std::cmp::min(instances_len as usize, MAX_LENGTH_INSTANCES),
     )?;
 
-    // Charge gas for proof verification
     let gas_info = GasInfo::with_cost(
         data.gas_config
             .halo2_proof_instance_verify_cost
             .total_cost(1)?,
     );
     process_gas_info(data, &mut store, gas_info)?;
-    let (res, storage_gas) = data.with_storage_from_context::<_, _>(|storage| {
-        Ok(storage.get(&crate::zk::get_circuit_key(zkid.into())))
-    })?;
 
-    process_gas_info(data, &mut store, storage_gas)?;
-    // Parse query response
-    let res = match res? {
-        Some(r) => Ok(r),
-        None => Err(VmError::generic_err("Failed to parse CircuitResponse:")),
-    }?;
+    // ── Step 1: resolve zkid → circuit_key via CircuitInfo (metadata only) ──
+    let info_req = QueryRequest::<Empty>::Wasm(WasmQuery::CircuitInfo {
+        zk_id: zkid as u64,
+    });
+    let info_raw = match query_raw(data, &mut store, &info_req)? {
+        SystemResult::Ok(ContractResult::Ok(bin)) => bin,
+        SystemResult::Ok(ContractResult::Err(e)) => {
+            return Err(VmError::generic_err(format!("CircuitInfo query error: {e}")));
+        }
+        SystemResult::Err(e) => {
+            return Err(VmError::generic_err(format!(
+                "CircuitInfo system error: {e}"
+            )));
+        }
+    };
+    let info: CircuitInfoResponse = from_json(info_raw.as_slice())
+        .map_err(|e| VmError::generic_err(format!("parse CircuitInfoResponse: {e}")))?;
 
-    let res = crate::zk::deserialize_circuit_data(
-        &crate::serde::from_slice::<CircuitResponse>(&res, res.len())?.data,
-    )?;
+    let circuit_key: [u8; 72] = info
+        .circuit_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| {
+            VmError::generic_err(format!(
+                "circuit_key must be 72 bytes, got {}",
+                info.circuit_key.len()
+            ))
+        })?;
 
-    let v = zk_cosmwasm::AnyVerifyingKey::try_from(res.body.as_slice())?;
+    // ── Step 2: Path A — host cache load (no full circuit over querier) ──
+    // Outer Option: loader installed? Inner Option: cache hit?
+    let cached_vk = data
+        .with_circuit_loader(|loader| loader(circuit_key))?
+        .flatten();
+
+    let vk = if let Some(vk) = cached_vk {
+        vk
+    } else {
+        // ── Step 3: cold path — full circuit bytes only if cache miss ──
+        let circuit_req = QueryRequest::<Empty>::Wasm(WasmQuery::Circuit {
+            zk_id: zkid as u64,
+        });
+        let circuit_raw = match query_raw(data, &mut store, &circuit_req)? {
+            SystemResult::Ok(ContractResult::Ok(bin)) => bin,
+            SystemResult::Ok(ContractResult::Err(e)) => {
+                return Err(VmError::generic_err(format!("Circuit query error: {e}")));
+            }
+            SystemResult::Err(e) => {
+                return Err(VmError::generic_err(format!(
+                    "Circuit system error: {e}"
+                )));
+            }
+        };
+        let circuit_resp: CircuitResponse = from_json(circuit_raw.as_slice())
+            .map_err(|e| VmError::generic_err(format!("parse CircuitResponse: {e}")))?;
+        let serialized = crate::zk::deserialize_circuit_data(circuit_resp.data.as_slice())?;
+        let mut full = serialized.body;
+        full.extend_from_slice(&serialized.footer);
+        zk_cosmwasm::AnyVerifyingKey::try_from(full.as_slice())
+            .map_err(|e| VmError::zk_err(e))?
+    };
+
     let i = zk_cosmwasm::AnyInstance::try_from_bytes(zkid, instances_bytes.as_slice())?;
     let p = zk_cosmwasm::Proof::new(proof_bytes);
 
-    match p.verify(&v, &[i]) {
-        Ok(_) => {
-            eprintln!("✅ Proof verification succeeded!");
-            Ok(0)
-        }
-        Err(e) => {
-            eprintln!("❌ Proof verification failed: {:?}", e);
-            Ok(1)
-        }
+    match p.verify(&vk, &[i]) {
+        Ok(_) => Ok(0),
+        Err(_) => Ok(1),
     }
+}
+
+/// Helper: run a cosmwasm query through the instance querier and return the system result.
+#[cfg(feature = "zk")]
+fn query_raw<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
+    data: &Environment<A, S, Q>,
+    store: &mut impl wasmer::AsStoreMut,
+    request: &cosmwasm_std::QueryRequest<cosmwasm_std::Empty>,
+) -> VmResult<cosmwasm_std::SystemResult<cosmwasm_std::ContractResult<cosmwasm_std::Binary>>> {
+    use cosmwasm_std::to_json_vec;
+
+    let request_bin = to_json_vec(request)
+        .map_err(|e| VmError::generic_err(format!("serialize query request: {e}")))?;
+
+    let gas_remaining = data.get_gas_left(store);
+    let (result, gas_info) = data.with_querier_from_context::<_, _>(|querier| {
+        Ok(querier.query_raw(&request_bin, gas_remaining))
+    })?;
+    process_gas_info(data, store, gas_info)?;
+    // result: Result<SystemResult<ContractResult<Binary>>, BackendError>
+    result.map_err(|e| VmError::backend_err(e))
 }
 
 /// Prints a debug message to console.

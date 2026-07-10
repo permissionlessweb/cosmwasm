@@ -730,14 +730,14 @@ impl Api for ExternalApi {
         proof: &[u8],
         i: &[u8],
     ) -> Result<bool, VerificationError> {
-        // The handler fetches the circuit VK from the x/wasm module using a StargateQuery.
-        // This avoids storing circuit bytes in each contract's state.
-        //
-        // Usage flow:
-        // 1. Circuit is uploaded to x/wasm module and assigned a zkid
-        // 2. Contract calls this function with zkid, proof, and instances
-        // 3. Handler queries x/wasm module for circuit bytes using zkid
-        // 4. Handler verifies the proof with the fetched VK
+        // Path A host verification (cosmwasm-vm):
+        // 1. Circuit is uploaded to x/wasm and assigned a zkid; wasmvm holds
+        //    the deserialized key under a 72-byte circuit_key.
+        // 2. Contract calls this import with zkid, proof, and instances only.
+        // 3. Host resolves zkid → circuit_key via WasmQuery::CircuitInfo
+        //    (metadata only — no full blob on the wire).
+        // 4. Host loads AnyVerifyingKey from the circuit cache and verifies.
+        // 5. On cache miss only, host falls back to WasmQuery::Circuit for bytes.
 
         // Convert proof to Wasm memory region
         let proof_send = Region::from_slice(proof);

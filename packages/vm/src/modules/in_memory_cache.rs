@@ -358,7 +358,7 @@ mod tests {
             size_estimate: 900_000,
         };
         cache.store(&checksum1, module).unwrap();
-        assert_eq!(cache.size(), 900_032);
+        assert_eq!(cache.size(), 900_000 + std::mem::size_of::<CacheKey>());
 
         // Add 2
         let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT);
@@ -368,7 +368,10 @@ mod tests {
             size_estimate: 800_000,
         };
         cache.store(&checksum2, module).unwrap();
-        assert_eq!(cache.size(), 900_032 + 800_032);
+        assert_eq!(
+            cache.size(),
+            900_000 + 800_000 + 2 * std::mem::size_of::<CacheKey>()
+        );
 
         // Add 3 (pushes out the previous two)
         let engine3 = make_compiling_engine(TESTING_MEMORY_LIMIT);
@@ -378,7 +381,7 @@ mod tests {
             size_estimate: 1_500_000,
         };
         cache.store(&checksum3, module).unwrap();
-        assert_eq!(cache.size(), 1_500_032);
+        assert_eq!(cache.size(), 1_500_000 + std::mem::size_of::<CacheKey>());
     }
 
     #[test]

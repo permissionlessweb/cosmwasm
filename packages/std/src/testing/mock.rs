@@ -2977,11 +2977,12 @@ mod tests {
                 #[cfg(feature = "zk")]
                 WasmQuery::CircuitInfo { zk_id } => {
                     if zk_id == &4 {
-                        use crate::{Checksum, CircuitInfoResponse};
+                        use crate::CircuitInfoResponse;
+                        // 72-byte wasmvm circuit key placeholder for tests
                         let response = CircuitInfoResponse {
                             zk_id: 4,
                             creator: Addr::unchecked("lalala"),
-                            checksum: Checksum::generate("lelel".as_bytes()),
+                            circuit_key: Binary::from(vec![0xAB; 72]),
                         };
                         SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
                     } else {
