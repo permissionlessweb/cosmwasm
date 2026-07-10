@@ -161,7 +161,7 @@ impl CircuitFooter {
             cs_len: u32::from_le_bytes(bytes[8..12].try_into()?),
             vk_len: u32::from_le_bytes(bytes[12..16].try_into()?),
             param_checksum: bytes[16..48].try_into()?,
-            vk_checksum: bytes[bytes.len() - 32..].try_into()?,
+            vk_checksum: bytes[48..80].try_into()?,
         })
     }
 }

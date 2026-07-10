@@ -4,31 +4,9 @@
 
 ## Introduction
 
-This document describes the virtual memory caching architecture implemented in CosmWasm VM to support Halo2 zero-knowledge proof circuit binary keys. By extending the existing multi-tier caching infrastructure, we enable efficient storage and retrieval of cryptographic verification keys alongside compiled WebAssembly modules.
+This document describes the three-tier caching architecture used to store and retrieve Halo2 zero-knowledge proof circuit data. By extending the existing CosmWasm VM caching infrastructure with separate param/vk/circuit storage paths, we minimize memory pressure while keeping hot circuit keys instantly accessible.
 
-Zero-knowledge proofs require verification keys (VKs) that can be computationally expensive to deserialize. Our caching strategy draws inspiration from operating system virtual memory principles—particularly demand paging and tiered memory hierarchies—to minimize latency while managing memory constraints effectively.
-
----
-
-## Virtual Memory Foundations
-
-### Memory Hierarchy Principles
-
-Just as operating systems manage physical memory through virtual memory abstractions, our caching layer abstracts the storage and retrieval of circuit keys across multiple tiers. The fundamental insight from virtual memory systems is that not all data needs to reside in fast storage simultaneously—*demand paging* loads data only when accessed.
-
-Our implementation mirrors this through a three-tier hierarchy:
-
-1. **Pinned Memory Cache**: Analogous to wired/pinned pages in OS memory management, these entries are never evicted and remain instantly accessible.
-
-2. **File System Cache**: Serves as backing store (similar to swap space), providing persistent storage with higher access latency.
-
-<!-- 2. **In-Memory LRU Cache**: Functions like the page cache, holding recently-used entries with automatic eviction based on access patterns. -->
-
-### Checksum-Based Addressing
-
-Virtual memory systems translate virtual addresses to physical addresses through page tables. Our cache uses a similar indirection mechanism: each circuit key is identified by a **Checksum**—a content-addressed hash that serves as the unique identifier across all cache tiers.
-
-This design provides integrity verification (analogous to page table validity bits) and enables content deduplication when multiple contracts reference identical verification keys.
+The key insight: commitment parameters are 65KB+ and identical across all circuits sharing the same `k` value. Storing a copy of the params alongside every VK in pinned memory would waste hundreds of KB per circuit. Instead, params are stored independently and reconstructed only when the circuit is loaded from disk.
 
 ---
 
@@ -36,103 +14,100 @@ This design provides integrity verification (analogous to page table validity bi
 
 ### Cache Hierarchy Overview
 
-The cache infrastructure consists of three distinct layers, each optimized for different access patterns and persistence requirements. Both WASM modules and Halo2 circuit keys flow through this unified hierarchy.
+| Layer | Key Type | Eviction Policy | Persistence |
+|-------|----------|-----------------|-------------|
+| **Pinned Memory** | `[u8; 72]` (circuit) / `[u8; 36]` (param) | Manual only | Until node restart |
+| **In-Memory LRU** | `CacheKey` enum (unified) | LRU automatic | Until node restart |
+| **File System** | `[u8; 72]` / `[u8; 36]` hex filenames | Manual only | Survives restart |
 
-| Layer | Speed | Eviction Policy | Persistence |
-|-------|-------|-----------------|-------------|
-| **Pinned Memory** | Fastest | Manual only | Until node restart |
-| **File System** | Slower | Manual only | Survives restart |
-<!-- | **In-Memory (LRU)** | Fast | LRU automatic | Until node restart | -->
+### CacheKey
 
-### Pinned Memory Cache
-
-The `PinnedMemoryCache` provides the fastest access tier for both WASM modules and circuit keys. Entries in this cache are never automatically evicted, making it ideal for frequently-accessed verification keys that must be available with minimal latency.
-
-**Key characteristics:**
-
-- Separate HashMaps for modules and circuits enable independent management
-- Hit counters track access frequency for observability and optimization decisions
-- Size computation aggregates both module estimates and actual circuit byte sizes
-- Thread-safe access through parent Cache's Mutex wrapper
-
-#### Data Structures
-
-The cache wraps circuit entries in an `InstrumentedCircuit` struct that tracks usage metrics:
+The `InMemoryCache` uses a unified `CacheKey` enum to store modules, circuits, and params in a single LRU cache:
 
 ```rust
-pub struct InstrumentedCircuit {
-    /// Number of loads from memory this module received
-    pub hits: u32,
-    /// The actual cached circuit
-    pub circuit: zk_cosmwasm::PinnedCircuit,
+pub enum CacheKey {
+    Checksum(Checksum),       // 32-byte WASM module checksum
+    PartialKey([u8; 36]),     // 36-byte param or vk file key
+    CircuitKey([u8; 72]),     // 72-byte compound circuit key
 }
 ```
 
-The `PinnedMemoryCache` maintains parallel storage for modules and circuits:
+A single `WeightScale` implementation handles all three variants, using `size_estimate` for weight calculation.
+
+---
+
+## On-Disk Storage Layout
+
+### Directory Structure
+
+```
+base_dir/
+  state/
+    wasm/
+      <checksum>.wasm                    ← raw WASM bytecode
+      zk_param/
+        <36-byte-hex-key>.bin            ← params only (no footer)
+      zk_vk/
+        <36-byte-hex-key>.bin            ← cs + vk (no footer)
+      zk_circuit/
+        <72-byte-hex-key>.bin            ← params + cs + vk + 80-byte footer
+  cache/
+    modules/
+      <version>/<target>/
+        <checksum>.module                ← compiled wasmer module
+```
+
+### File Key Derivation
+
+Each component is content-addressed using a key derived from the circuit footer:
+
+```
+param_key  = [4-byte appstate_key_le][32-byte param_checksum]  → 36 bytes → hex filename
+vk_key     = [4-byte appstate_key_le][32-byte vk_checksum]     → 36 bytes → hex filename
+circuit_key = [param_key][vk_key]                                → 72 bytes → hex filename
+```
+
+The `appstate_key` is a u32 combining `prover_id`, `curve_id`, `k`, and a zero byte (`u32::from_be_bytes([prover_id, curve_id, k, 0])`). This ensures circuits with different parameters cannot collide, even if they happen to share the same checksum.
+
+Implementation: `CircuitFooter::to_param_key()`, `to_vk_key()`, `to_circuit_key()` in `packages/zk/src/footer.rs`.
+
+---
+
+## Data Structures
+
+### CachedCircuit
 
 ```rust
-pub struct PinnedMemoryCache {
-    modules: HashMap<Checksum, InstrumentedModule>,
-    circuits: HashMap<Checksum, InstrumentedCircuit>,
+pub struct CachedCircuit {
+    pub vk: zk_cosmwasm::AnyVerifyingKey,  // fully deserialized VK with params
+    pub size_estimate: usize,               // raw byte size of the serialized form
 }
 ```
 
-#### Core Operations
+Holds a fully deserialized `AnyVerifyingKey` (params + vk + footer). This is what gets stored in all three cache tiers when a circuit is loaded.
 
-| Operation | Description |
-|-----------|-------------|
-| `store_circuit()` | Insert a deserialized VK with initial hit count of 0 |
-| `load_circuit()` | Retrieve VK and increment hit counter (saturating add) |
-| `remove()` | Remove entry by checksum, with `zk` flag selecting circuits vs modules |
-| `has()` | Check existence without loading |
-| `size()` | Aggregate memory footprint across all entries |
-<!-- 
-### In-Memory LRU Cache
-
-The `InMemoryCache` implements a bounded cache with Least Recently Used (LRU) eviction semantics. This tier automatically manages memory pressure by evicting cold entries when capacity limits are reached.
-
-Currently, this layer caches WASM modules with weight-based capacity management. The cache uses a custom `SizeScale` implementation to track actual memory consumption rather than entry count, ensuring memory budgets are respected accurately.
+### CachedParam
 
 ```rust
-struct SizeScale;
-
-impl WeightScale<Checksum, CachedModule> for SizeScale {
-    fn weight(&self, key: &Checksum, value: &CachedModule) -> usize {
-        std::mem::size_of_val(key) + value.size_estimate
-    }
-}
-``` -->
-
-**Design considerations for circuit integration:**
-
-- Circuit keys vary significantly in size based on proof system complexity
-- Weight-based eviction prevents a few large circuits from monopolizing cache
-<!-- - The CLruCache implementation provides O(1) access and eviction -->
-
-### File System Cache
-
-The `FileSystemCache` provides persistent storage that survives node restarts. This tier acts as the authoritative backing store—analogous to swap space in virtual memory systems—from which higher tiers are populated on demand.
-
-**Circuit key storage:**
-
-- Files named by checksum hex with `.bin` extension
-- First byte encodes circuit type metadata
-- Remaining bytes contain serialized verification key
-- Versioned directory structure enables cache invalidation on upgrades
-
-```rust
-/// Stores a serialized verifying key to the file system.
-pub fn store_circuit(&mut self, checksum: &Checksum, vk: &[u8]) -> VmResult<usize> {
-    mkdir_p(&self.modules_path)
-        .map_err(|_e| VmError::cache_err("Error creating circuits directory"))?;
-
-    let path = self.circuit_file(checksum);
-    fs::write(&path, vk)
-        .map_err(|e| VmError::cache_err(format!("Error writing circuit to disk: {e}")))?;
-
-    Ok(vk.len())
+pub struct CachedParam {
+    pub params: Vec<u8>,       // raw commitment-parameter bytes
+    pub size_estimate: usize,
 }
 ```
+
+Holds only the raw param bytes — no deserialization, no VK. This is stored in the pinned and LRU caches so that param files don't need to be re-read from disk when loading a circuit that shares params with another circuit.
+
+### CacheEntry (Unified LRU)
+
+```rust
+pub enum CacheEntry {
+    Module(CachedModule),    // wasmer compiled module
+    Circuit(CachedCircuit),  // deserialized VK + params
+    Param(CachedParam),      // raw param bytes
+}
+```
+
+All three variants share a single `CLruCache` with weight-based eviction, ensuring total memory never exceeds the configured `memory_cache_size_bytes`.
 
 ---
 
@@ -140,123 +115,159 @@ pub fn store_circuit(&mut self, checksum: &Checksum, vk: &[u8]) -> VmResult<usiz
 
 ### Storage Flow
 
-When a contract with ZK capabilities is instantiated, both WASM bytecode and verification keys are stored through a unified flow. The `store_code_with_circuit` method orchestrates this process:
+When a circuit is stored via `Cache::store_circuit(zk_bytes, persist)`:
 
 ```
-┌─────────────────┐
-│  CodeBundle     │
-│  (wasm + vk)    │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   Validation    │──── check_wasm() + check_circuit()
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│    Checksum     │──── Content-addressed hash generation
-│   Generation    │
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    ▼         ▼
-┌───────┐ ┌───────┐
-│ WASM  │ │  VK   │
-│ Store │ │ Store │
-└───┬───┘ └───┬───┘
-    │         │
-    ▼         ▼
-┌─────────────────┐
-│  File System    │──── Persistent backing store
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Pinned Memory   │──── Immediate availability
-│    Cache        │
-└─────────────────┘
+[params][cs][vk][80-byte footer]
+    │
+    ▼
+check_circuit()  ← validates both SHA256 checksums
+    │
+    ▼
+parse footer
+    │
+    ▼
+save_circuit_parts(param_dir, vk_dir, circuit_dir, zk_bytes, footer)
+    │
+    ├──→ zk_param/{param_key}.bin     = params only
+    ├──→ zk_vk/{vk_key}.bin           = cs + vk (no footer)
+    └──→ zk_circuit/{circuit_key}.bin = full blob (params + cs + vk + footer)
+    │
+    ▼
+pin_circuit(circuit_key)
+    │
+    ├──→ FileSystemCache.load_circuit(circuit_key)   ← deserializes from disk
+    └──→ PinnedMemoryCache.store_circuit(circuit_key, cached_circuit)
 ```
 
-**Step-by-step:**
+The free function `save_circuit_parts()` handles the actual file writes. The wrapper `save_circuit_to_disk()` delegates to it with all three directories set to the same path (for unit tests that use a flat temp dir).
 
-1. **Validation**: Both WASM and VK undergo integrity checks when checked mode is enabled
-2. **Checksum Generation**: Content-addressed hashes computed for both artifacts
-3. **Disk Persistence**: Both artifacts written to versioned file system paths
-4. **Cache Population**: VK deserialized and pinned in memory for immediate availability
-5. **Memory Tracking**: Cache size metrics updated to reflect new entry
+### Retrieval Flow
 
-### Retrieval Strategy
-
-Circuit key retrieval follows a tiered lookup strategy mirroring page fault handling in virtual memory:
+When a circuit is loaded via `Cache::load_circuit(circuit_key)`:
 
 ```
-┌──────────────────┐
-│  get_pinned_     │
-│  circuit()       │
-└────────┬─────────┘
-         │
-         ▼
-┌──────────────────┐     ┌─────────────┐
-│  Pinned Cache    │────▶│   Return    │ HIT
-│     Lookup       │     │  Arc<VK>    │
-└────────┬─────────┘     └─────────────┘
-         │ MISS
-         ▼
-┌──────────────────┐     ┌─────────────┐
-│  File System     │────▶│ Deserialize │ HIT
-│     Load         │     │  & Pin      │
-└────────┬─────────┘     └─────────────┘
-         │ MISS
-         ▼
-┌──────────────────┐
-│     Error:       │
-│  VK not found    │
-└──────────────────┘
+load_circuit(circuit_key)
+    │
+    ├── PinnedMemoryCache hit?  → return CachedCircuit    ← <1 μs
+    │
+    ├── InMemoryCache hit?      → return CachedCircuit    ← <1 μs
+    │
+    ├── FileSystemCache hit?    → return, store in LRU    ← 1-10 ms
+    │
+    └── MISS: load_circuit_with_path(wasm_path, param_key, vk_key)
+            │
+            ├── zk_param/{param_key}.bin exists AND
+            │   zk_vk/{vk_key}.bin exists?
+            │   → read both files
+            │   → validate checksums
+            │   → AnyVerifyingKey::from_split_bytes(...)
+            │   → store in FS cache + LRU cache
+            │
+            └── monolithic fallback:
+                → zk_circuit/{circuit_key}.bin
+                → load_circuit_from_disk()
+                → AnyVerifyingKey::from_bytes()
 ```
 
-- **Pinned cache hit**: Return immediately, increment hit counter
-- **Pinned cache miss**: Load from file system ("page fault")
-- **File system hit**: Deserialize VK, optionally pin to memory
-- **File system miss**: Error—VK must be stored before use
+### Pin and Unpin
 
-The `get_pinned_circuit` method returns an `Arc<LoadedVk>`, enabling zero-copy sharing across concurrent proof verifications without cloning the underlying cryptographic data.
+`pin_circuit(circuit_key)`:
 
-### Pin and Unpin Operations
+1. Check pinned cache — idempotent, skip if already pinned
+2. Try `FileSystemCache.load_circuit()` — deserialized VK is ready
+3. Fallback: `load_circuit_with_path()` → reconstruct from split files → serialize to FS cache → load back
+4. Store in `PinnedMemoryCache`
 
-The pinning mechanism provides explicit control over memory residency, similar to `mlockall()` in POSIX systems. Pinned entries bypass LRU eviction, guaranteeing availability for latency-sensitive operations.
+`unpin_circuit(circuit_key)`:
 
-**pin_circuit:**
+1. Remove from `PinnedMemoryCache`
+2. Remove from `FileSystemCache`
+3. (LRU cache evicts naturally)
+
+### Removal
+
+`remove_circuit(circuit_key)`:
+1. Remove from `FileSystemCache` (circuit module file)
+2. Remove from `PinnedMemoryCache`
+3. Remove circuit blob from disk under `zk_circuit/`
+
+---
+
+## Pinned Memory Cache
+
+Provides the fastest access tier. Entries are never automatically evicted.
 
 ```rust
-fn pin_circuit(&self, checksum: &Checksum) -> VmResult<()> {
-    let mut cache = self.inner.lock().unwrap();
-    
-    // Idempotent: skip if already pinned
-    if cache.pinned_circuit_cache.contains_key(checksum) {
-        return Ok(());
-    }
-    
-    // Load from disk and deserialize
-    if let Some(serialized_vk) = self.load_circuit_from_disk(&cache.wasm_path, checksum)? {
-        let loaded_vk = LoadedVk::from_bytes(&serialized_vk.bytes)?;
-        let vk_size = loaded_vk.actual_size_bytes();
-        
-        // Update memory tracking
-        cache.pinned_circuit_memory += vk_size;
-        cache.pinned_circuit_cache.insert(*checksum, Arc::new(loaded_vk));
-        Ok(())
-    } else {
-        Err(VmError::generic_err("No VK found for checksum"))
+pub struct PinnedMemoryCache {
+    modules: HashMap<Checksum, InstrumentedModule>,       // 32-byte key
+    circuits: HashMap<[u8; 72], InstrumentedCircuit>,      // 72-byte circuit key
+    params: HashMap<[u8; 36], InstrumentedParam>,          // 36-byte param key
+}
+```
+
+### Core Operations
+
+| Operation | Key Type | Description |
+|-----------|----------|-------------|
+| `store_circuit()` | `[u8; 72]` | Insert deserialized VK with hit count 0 |
+| `load_circuit()` | `[u8; 72]` | Retrieve VK, increment hit counter |
+| `has_circuit()` | `[u8; 72]` | Check existence without loading |
+| `store_param()` | `[u8; 36]` | Insert raw param bytes |
+| `load_param()` | `[u8; 36]` | Retrieve raw param bytes |
+| `remove_circuit()` | `[u8; 72]` | Remove circuit entry |
+| `remove_param()` | `[u8; 36]` | Remove param entry |
+
+---
+
+## In-Memory LRU Cache
+
+Provides bounded, automatically-evicted storage for modules, circuits, and params. All three types share a single weight-bounded `CLruCache`:
+
+```rust
+impl WeightScale<CacheKey, CacheEntry> for SizeScale {
+    fn weight(&self, key: &CacheKey, value: &CacheEntry) -> usize {
+        let val_size = match value {
+            CacheEntry::Module(m) => m.size_estimate,
+            CacheEntry::Circuit(c) => c.size_estimate,
+            CacheEntry::Param(p) => p.size_estimate,
+        };
+        std::mem::size_of_val(key) + val_size
     }
 }
 ```
 
-**unpin_circuit:**
+### Core Operations
 
-- Removes entry from pinned cache
-- Decrements memory usage counter
-- Does not remove from file system (can be re-pinned later)
+| Operation | Key Type | Description |
+|-----------|----------|-------------|
+| `store()` | `Checksum` | Insert compiled wasmer module |
+| `load()` | `Checksum` | Retrieve compiled module |
+| `store_circuit()` | `[u8; 72]` | Insert deserialized VK |
+| `load_circuit()` | `[u8; 72]` | Retrieve deserialized VK |
+| `store_param()` | `[u8; 36]` | Insert raw param bytes |
+| `load_param()` | `[u8; 36]` | Retrieve raw param bytes |
+| `load_vk()` | `[u8; 36]` | Retrieve cs+vk body (partial key) |
+
+---
+
+## File System Cache
+
+Provides persistent storage that survives node restarts. Circuit keys are stored as hex-encoded filenames with `.module` extension in the versioned modules directory.
+
+```rust
+impl FileSystemCache {
+    fn circuit_file(&self, circuit_file_key: &[u8; 72]) -> PathBuf;
+    fn param_file(&self, param_file_key: &[u8; 36]) -> PathBuf;
+
+    pub fn load_circuit(&self, circuit_file_key: &[u8; 72]) -> VmResult<Option<CachedCircuit>>;
+    pub fn store_circuit(&mut self, circuit_file_key: &[u8; 72], zk: &[u8]) -> VmResult<usize>;
+    pub fn remove_circuit(&mut self, circuit_file_key: &[u8; 72]) -> VmResult<()>;
+    pub fn remove_params(&mut self, param_file_key: &[u8; 36]) -> VmResult<()>;
+}
+```
+
+Circuit files are stored as serialized blob bytes (params + cs + vk + footer). When loaded, the bytes are deserialized via `AnyVerifyingKey::try_from(bytes)` and the resulting `size_estimate` is the byte length of `to_bytes_with_params()`.
 
 ---
 
@@ -264,31 +275,19 @@ fn pin_circuit(&self, checksum: &Checksum) -> VmResult<()> {
 
 ### Size Tracking
 
-Accurate memory accounting is essential for preventing out-of-memory conditions. The cache tracks size at multiple levels:
-
-| Level | Method | Description |
-|-------|--------|-------------|
-| Per-entry | `actual_size_bytes()` | Exact memory footprint of LoadedVk |
-| Per-cache | `size()` | Aggregates all entries with checksum overhead |
-| Global | `pinned_circuit_memory` | Total pinned circuit memory across cache |
-
-The `PinnedMemoryCache::size()` implementation:
+The `PinnedMemoryCache::size()` method aggregates across both modules and circuits:
 
 ```rust
 pub fn size(&self) -> usize {
-    let module_size: usize = self.modules.iter()
-        .map(|(key, module)| std::mem::size_of_val(key) + module.module.size_estimate)
-        .sum();
+    let module_size: usize = self.iter()
+        .map(|(key, m)| std::mem::size_of_val(key) + m.module.size_estimate).sum();
 
-    let circuit_size: usize = self.circuits.iter()
-        .map(|(key, zk)| std::mem::size_of_val(key) + zk.circuit.actual_size_bytes())
-        .sum();
+    let circuit_size: usize = self.iter_circuits()
+        .map(|(key, zk)| std::mem::size_of_val(key) + zk.circuit.size_estimate).sum();
 
     module_size + circuit_size
 }
 ```
-
-### Metrics and Observability
 
 The `Stats` and `Metrics` structs provide visibility into cache behavior:
 
@@ -309,61 +308,56 @@ pub struct Metrics {
 }
 ```
 
-These metrics enable operators to monitor cache efficiency and tune configuration parameters.
+### PinnedMetrics
+
+```rust
+pub struct PinnedMetrics {
+    pub per_module: Vec<(CacheKey, PerModuleMetrics)>,
+}
+
+pub struct PerModuleMetrics {
+    pub hits: u32,
+    pub size: usize,
+}
+```
+
+The `CacheKey` variant in the metrics tuple indicates the entry type: `Checksum` for WASM modules, `CircuitKey` for circuits.
 
 ---
 
 ## Thread Safety
 
-All cache operations are protected by a `Mutex<CacheInner>` to ensure thread-safe access in concurrent blockchain execution environments:
+All cache operations are protected by a `Mutex<CacheInner>`:
 
 ```rust
 pub struct Cache<A: BackendApi, S: Storage, Q: Querier> {
     available_capabilities: HashSet<String>,
     inner: Mutex<CacheInner>,
     instance_memory_limit: Size,
-    // ... type markers
     instantiation_lock: Mutex<()>,
     wasm_limits: WasmLimits,
 }
 ```
 
-The `Arc` wrapper on `LoadedVk` enables shared ownership across threads without cloning expensive cryptographic data structures.
+An additional `instantiation_lock` prevents concurrent access to `WasmerInstance::new`.
 
 ---
 
-## Relationship to Virtual Memory Concepts
+## Related Code Locations
 
-| Virtual Memory Concept | Cache Implementation |
-|------------------------|---------------------|
-| Page Table | HashMap<Checksum, Entry> |
-| Virtual Address | Checksum (content hash) |
-| Physical Frame | Actual bytes in memory |
-| Demand Paging | Load from FS on cache miss |
-| Page Fault | Cache miss triggers disk load |
-| Wired/Pinned Pages | PinnedMemoryCache entries |
-| Page Cache | InMemoryCache (LRU) |
-| Swap Space | FileSystemCache |
-| Valid/Invalid Bit | `has()` check |
-| RSS (Resident Set Size) | `size_pinned_memory_cache` |
-| VSZ (Virtual Size) | Total stored on disk |
-
----
-
-## Summary
-
-The CosmWasm VM cache layer for Halo2 circuit keys provides a unified, multi-tier storage architecture that balances access speed against memory constraints. By applying virtual memory principles to cryptographic key management, we achieve:
-
-- **Low latency**: Pinned cache provides instant access for hot verification keys
-- **Memory efficiency**: size tracking prevent unbounded growth
-- **Persistence**: File system backing ensures keys survive node restarts
-- **Observability**: Hit counters and metrics enable operational tuning
-- **Thread safety**: Mutex protection and Arc sharing support concurrent access
-
-This architecture enables efficient zero-knowledge proof verification in blockchain smart contracts while maintaining the deterministic execution guarantees required by consensus systems.
-
-## Research
-
-- <https://nghiant3223.github.io/2025/05/29/fundamental_of_virtual_memory.html>
-- <https://github.com/cosmwasm/wasmd>
-- <https://github.com/cosmwasm/wasmvm>
+| Component | Location |
+|-----------|----------|
+| `Cache` (main struct + store_code) | `packages/vm/src/cache.rs` |
+| `Cache::store_circuit()` | `packages/vm/src/cache.rs:650` |
+| `Cache::load_circuit()` | `packages/vm/src/cache.rs:786` |
+| `Cache::pin_circuit()` | `packages/vm/src/cache.rs:725` |
+| `Cache::remove_circuit()` | `packages/vm/src/cache.rs:694` |
+| `save_circuit_parts()` (split writer) | `packages/vm/src/cache.rs:1173` |
+| `load_circuit_with_path()` (split reader) | `packages/vm/src/cache.rs:890` |
+| `PinnedMemoryCache` | `packages/vm/src/modules/pinned_memory_cache.rs` |
+| `InMemoryCache` | `packages/vm/src/modules/in_memory_cache.rs` |
+| `FileSystemCache` (circuit methods) | `packages/vm/src/modules/file_system_cache.rs` |
+| `CachedCircuit`, `CachedParam`, `CacheEntry` | `packages/vm/src/modules/cached_module.rs` |
+| `CacheKey` enum | `packages/vm/src/cache.rs:44` |
+| `AnyVerifyingKey` | `packages/zk/src/circuits.rs` |
+| `CircuitFooter` (key derivation) | `packages/zk/src/footer.rs` |

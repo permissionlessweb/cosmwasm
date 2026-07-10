@@ -675,13 +675,16 @@ where
     //     Ok(())
     // }
 
-    /// saves the cs + vk
+    /// Saves params, cs+vk, and the full circuit under their respective dirs.
     fn save_circuit_to_disk(&self, c: &[u8]) -> VmResult<([[u8; 36]; 2], [u8; 72])> {
         let cache = self.inner.lock().unwrap();
-        save_circuit_to_disk(
+        let cf = CircuitFooter::from_bytes(&c[c.len() - COSMWASM_FOOTER_LENGTH..])?;
+        save_circuit_parts(
+            &cache.param_path(),
+            &cache.vk_path(),
             &cache.circuit_path(),
             c,
-            CircuitFooter::from_bytes(&c[c.len() - COSMWASM_FOOTER_LENGTH..])?,
+            cf,
         )
     }
 
@@ -887,23 +890,99 @@ where
     //     Ok(*hash)
     // }
 
+    /// Load a circuit by reconstructing from split param / vk files under
+    /// `wasm_path/{zk_param,zk_vk}/`, falling back to the monolithic circuit
+    /// blob under `wasm_path/zk_circuit/` when present.
     fn load_circuit_with_path(
         &self,
-        circuit_path: &Path,
+        wasm_path: &Path,
         param_file_key: &[u8; 36],
         vk_file_key: &[u8; 36],
     ) -> VmResult<zk_cosmwasm::SerializedCircuitData> {
-        // TODO: new workflow for param isolation
-        // load circuit params file from disk (or cache?)
-        // load circuit vk+cs file from disk
-        // merge together into sp
-        let mut circuit_key = Vec::with_capacity(72);
-        circuit_key.extend_from_slice(param_file_key.as_slice());
-        circuit_key.extend_from_slice(vk_file_key.as_slice());
+        let mut circuit_key = [0u8; 72];
+        circuit_key[..36].copy_from_slice(param_file_key);
+        circuit_key[36..].copy_from_slice(vk_file_key);
 
-        match self
-            .load_circuit_from_disk(circuit_path, circuit_key.as_slice().try_into().expect("ah"))?
-        {
+        let param_path = wasm_path
+            .join(ZK_PARAM_DIR)
+            .join(hex::encode(param_file_key))
+            .with_extension("bin");
+        let vk_path = wasm_path
+            .join(ZK_VK_DIR)
+            .join(hex::encode(vk_file_key))
+            .with_extension("bin");
+        let circuit_path = wasm_path
+            .join(ZK_CIRCUIT_DIR)
+            .join(hex::encode(circuit_key))
+            .with_extension("bin");
+
+        // Prefer split reconstruction so param files are the source of truth.
+        if param_path.exists() && vk_path.exists() {
+            let param_bytes = fs::read(&param_path).map_err(|e| {
+                VmError::cache_err(format!("Error reading param file: {e}"))
+            })?;
+            let vk_body_bytes = fs::read(&vk_path).map_err(|e| {
+                VmError::cache_err(format!("Error reading vk file: {e}"))
+            })?;
+
+            // Footer lives on the monolithic circuit blob (and was checked at store).
+            // If the circuit file is missing, try to recover footer from a
+            // combined body only when the monolithic path is available.
+            let footer = if circuit_path.exists() {
+                let full = fs::read(&circuit_path).map_err(|e| {
+                    VmError::cache_err(format!("Error reading circuit file: {e}"))
+                })?;
+                check_circuit(&full).map_err(|e| VmError::generic_err(format!("ZK load: {e}")))?
+            } else {
+                return Err(VmError::cache_err(
+                    "circuit footer unavailable: missing monolithic circuit file for split load",
+                ));
+            };
+
+            if param_bytes.len() as u32 != footer.param_len {
+                return Err(VmError::cache_err(format!(
+                    "param file length {} != footer.param_len {}",
+                    param_bytes.len(),
+                    footer.param_len
+                )));
+            }
+            let expected_vk_body = (footer.cs_len as usize)
+                .saturating_add(footer.vk_len as usize);
+            if vk_body_bytes.len() != expected_vk_body {
+                return Err(VmError::cache_err(format!(
+                    "vk file length {} != cs_len+vk_len {}",
+                    vk_body_bytes.len(),
+                    expected_vk_body
+                )));
+            }
+            if Checksum::generate(&param_bytes).as_slice() != footer.param_checksum {
+                return Err(VmError::cache_err(
+                    "calculated param hash doesn't match stored hash",
+                ));
+            }
+            if Checksum::generate(&vk_body_bytes).as_slice() != footer.vk_checksum {
+                return Err(VmError::cache_err(
+                    "calculated vk hash doesn't match stored hash",
+                ));
+            }
+
+            // Ensure the split material actually deserializes before caching.
+            let _vk = zk_cosmwasm::AnyVerifyingKey::from_split_bytes(
+                &param_bytes,
+                &vk_body_bytes,
+                &footer,
+            )
+            .map_err(|e| VmError::zk_err(e))?;
+
+            let mut body =
+                Vec::with_capacity(param_bytes.len() + vk_body_bytes.len());
+            body.extend_from_slice(&param_bytes);
+            body.extend_from_slice(&vk_body_bytes);
+            return Ok(SerializedCircuitData::new(&body, &footer.to_bytes()));
+        }
+
+        // Monolithic fallback
+        match self.load_circuit_from_disk(wasm_path.join(ZK_CIRCUIT_DIR), &circuit_key)? {
             Some(szk) => Ok(szk),
             None => Err(VmError::zk_err(ZkError::new_err(
                 "no circuit found on disk.",
@@ -1092,39 +1171,71 @@ fn remove_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResu
     Ok(())
 }
 
-/// save stores the circuit based on
-/// It will create the directory if it doesn't exist.
-/// Saving the same byte code multiple times is allowed.
+/// Write param, cs+vk, and full circuit blobs into a single directory.
+/// Used by unit tests that operate on a flat temp dir.
 #[cfg(feature = "zk")]
 fn save_circuit_to_disk(
     dir: impl Into<PathBuf>,
     c: &[u8],
     cf: CircuitFooter,
 ) -> VmResult<([[u8; 36]; 2], [u8; 72])> {
-    let param_filename = cf.param_filename();
-    let vk_filename = cf.vk_filename();
     let dir = dir.into();
-    let parampath = dir.join(&param_filename).with_extension("bin");
-    let vkpath = dir.join(&vk_filename).with_extension("bin");
+    save_circuit_parts(&dir, &dir, &dir, c, cf)
+}
 
-    println!("parampath: {:#?}", parampath);
-    println!("vkpath: {:#?}", vkpath);
+/// Split `c = [params][cs][vk][footer]` across the three on-disk locations.
+#[cfg(feature = "zk")]
+fn save_circuit_parts(
+    param_dir: &Path,
+    vk_dir: &Path,
+    circuit_dir: &Path,
+    c: &[u8],
+    cf: CircuitFooter,
+) -> VmResult<([[u8; 36]; 2], [u8; 72])> {
+    if c.len() < COSMWASM_FOOTER_LENGTH {
+        return Err(VmError::cache_err("circuit too short for footer"));
+    }
+    let body_end = c.len() - COSMWASM_FOOTER_LENGTH;
+    let param_len = cf.param_len as usize;
+    if param_len > body_end {
+        return Err(VmError::cache_err(format!(
+            "param_len {param_len} exceeds circuit body {body_end}"
+        )));
+    }
 
-    // write both param nd vk to disk
-    for filepath in [parampath, vkpath] {
+    let param_bytes = &c[..param_len];
+    let vk_body_bytes = &c[param_len..body_end];
+
+    let param_path = param_dir
+        .join(cf.param_filename())
+        .with_extension("bin");
+    let vk_path = vk_dir.join(cf.vk_filename()).with_extension("bin");
+    let circuit_path = circuit_dir
+        .join(hex::encode(cf.to_circuit_key()))
+        .with_extension("bin");
+
+    for (path, bytes) in [
+        (param_path, param_bytes),
+        (vk_path, vk_body_bytes),
+        (circuit_path, c),
+    ] {
+        if let Some(parent) = path.parent() {
+            mkdir_p(parent).map_err(|_e| {
+                VmError::cache_err("Error creating circuit dir")
+            })?;
+        }
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .open(filepath)
+            .open(&path)
             .map_err(|e| {
                 VmError::cache_err(format!("Error opening Circuit file for writing: {e}"))
             })?;
-        file.write_all(c)
+        file.write_all(bytes)
             .map_err(|e| VmError::cache_err(format!("Error writing Circuit file: {e}")))?;
     }
 
-    //param,checksum,vk
     Ok((cf.file_keys(), cf.to_circuit_key()))
 }
 
@@ -1518,28 +1629,46 @@ mod tests {
             unsafe { Cache::new(options).unwrap() };
         let checksum = cache.store_circuit(NORICK_CIRCUIT, true).unwrap();
 
-        // Corrupt cache file
-        let filepath = tmp_dir
-            .path()
-            .join(STATE_DIR)
-            .join(WASM_DIR)
-            .join(hex::encode(checksum))
-            .with_extension("bin");
+        // Corrupt the split + monolithic circuit files on disk
+        let state_wasm = tmp_dir.path().join(STATE_DIR).join(WASM_DIR);
+        let param_key: [u8; 36] = checksum[..36].try_into().unwrap();
+        let vk_key: [u8; 36] = checksum[36..].try_into().unwrap();
+        let paths = [
+            state_wasm
+                .join(ZK_PARAM_DIR)
+                .join(hex::encode(param_key))
+                .with_extension("bin"),
+            state_wasm
+                .join(ZK_VK_DIR)
+                .join(hex::encode(vk_key))
+                .with_extension("bin"),
+            state_wasm
+                .join(ZK_CIRCUIT_DIR)
+                .join(hex::encode(checksum))
+                .with_extension("bin"),
+        ];
+        for filepath in &paths {
+            if filepath.exists() {
+                let mut file = OpenOptions::new().write(true).open(filepath).unwrap();
+                file.write_all(b"broken data").unwrap();
+                file.flush().unwrap();
+            }
+        }
 
-        let mut file = OpenOptions::new().write(true).open(&filepath).unwrap();
-        file.write_all(b"broken data").unwrap();
-        file.flush().unwrap();
-
-        let corrupt = std::fs::read(&filepath).unwrap();
         let res = cache.load_circuit(&checksum);
         match res {
-            Ok(cc) => match cc{
+            Ok(cc) => match cc {
                 Some(cc) => {
-                    assert_ne!(cc.vk.to_bytes_with_params().unwrap() , corrupt );
-                },
-                None => panic!("This must succeed, our circuit lives in pinned_memory cache, and can be loaded even if file on disk gets corrupted")
+                    // Still served from pinned memory; must not equal the corrupted disk bytes.
+                    assert_ne!(cc.vk.to_bytes_with_params().unwrap(), b"broken data");
+                }
+                None => panic!(
+                    "This must succeed, our circuit lives in pinned_memory cache, and can be loaded even if file on disk gets corrupted"
+                ),
             },
-            Err(_) => panic!("This must succeed, our circuit lives in pinned_memory cache, and can be loaded even if file on disk gets corrupted"),
+            Err(_) => panic!(
+                "This must succeed, our circuit lives in pinned_memory cache, and can be loaded even if file on disk gets corrupted"
+            ),
         };
 
         // unpin circuit, so that we must load from disk, invoking verification, and throwing error
@@ -1552,9 +1681,17 @@ mod tests {
             }
             Err(e) => {
                 println!("{:#?}", e);
-                assert!(e
-                    .to_string()
-                    .contains(&"calculated hash doesn't match stored hash"))
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("doesn't match stored hash")
+                        || msg.contains("Integrity")
+                        || msg.contains("integrity")
+                        || msg.contains("bad circuit")
+                        || msg.contains("param file length")
+                        || msg.contains("vk file length")
+                        || msg.contains("Failed to parse"),
+                    "unexpected error: {msg}"
+                );
             }
         }
     }

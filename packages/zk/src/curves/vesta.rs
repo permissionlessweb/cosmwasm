@@ -154,6 +154,39 @@ impl VestaVerifyingKey {
 
         Ok(Self::new(p.params, vk, footer))
     }
+
+    /// Reconstruct from separate param file bytes and cs+vk body bytes.
+    pub fn from_split_bytes(
+        param_bytes: &[u8],
+        vk_body_bytes: &[u8],
+        footer: crate::CircuitFooter,
+    ) -> ZkResult<Self> {
+        if param_bytes.len() as u32 != footer.param_len {
+            return Err(ZkError::new_err(format!(
+                "param bytes length {} != footer.param_len {}",
+                param_bytes.len(),
+                footer.param_len
+            )));
+        }
+        let expected_vk_body = footer.cs_len as usize + footer.vk_len as usize;
+        if vk_body_bytes.len() != expected_vk_body {
+            return Err(ZkError::new_err(format!(
+                "vk body length {} != cs_len+vk_len {}",
+                vk_body_bytes.len(),
+                expected_vk_body
+            )));
+        }
+
+        let mut param_reader = std::io::Cursor::new(param_bytes);
+        let params =
+            halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(&mut param_reader)?;
+        let mut vk_reader = std::io::Cursor::new(vk_body_bytes);
+        Self::from_bytes_without_params(
+            &mut vk_reader,
+            footer,
+            VestaParams::try_from(params)?,
+        )
+    }
 }
 
 impl VestaVerifyingKey {

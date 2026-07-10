@@ -77,31 +77,47 @@ impl InMemoryCache {
             Ok(None)
         }
     }
-    /// Looks up a module in the cache and creates a new module
+    pub fn store_param(
+        &mut self,
+        param_file_key: &[u8; 36],
+        cached_param: &super::CachedParam,
+    ) -> VmResult<()> {
+        if let Some(cache) = &mut self.cache {
+            cache
+                .put_with_weight(
+                    CacheKey::PartialKey(*param_file_key),
+                    CacheEntry::Param(cached_param.clone()),
+                )
+                .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
+        }
+        Ok(())
+    }
+
+    /// Looks up raw param bytes in the unified LRU cache.
     pub fn load_param(
         &mut self,
         param_file_key: &[u8; 36],
-    ) -> VmResult<Option<super::CachedCircuit>> {
-        println!("loading param from in_memory_cache;");
+    ) -> VmResult<Option<super::CachedParam>> {
         if let Some(modules) = &mut self.cache {
-            println!("in_memory_cache exists;");
             match modules.get(&CacheKey::PartialKey(*param_file_key)) {
                 Some(cached) => match cached {
-                    CacheEntry::Circuit(zk) => Ok(Some(zk.clone())),
+                    CacheEntry::Param(p) => Ok(Some(p.clone())),
                     _ => Ok(None),
                 },
                 None => Ok(None),
             }
         } else {
-            println!("no in_memory_cache;");
             Ok(None)
         }
     }
-    /// Looks up a module in the cache and creates a new module
+
+    /// Looks up a circuit stored under a 36-byte vk file key.
+    ///
+    /// Note: full circuits are normally keyed by the 72-byte circuit key via
+    /// [`Self::load_circuit`]. This exists for partial-key lookups of cs+vk
+    /// material that was cached under `CacheKey::PartialKey`.
     pub fn load_vk(&mut self, vk_file_key: &[u8; 36]) -> VmResult<Option<super::CachedCircuit>> {
-        println!("loading param from in_memory_cache;");
         if let Some(modules) = &mut self.cache {
-            println!("in_memory_cache exists;");
             match modules.get(&CacheKey::PartialKey(*vk_file_key)) {
                 Some(cached) => match cached {
                     CacheEntry::Circuit(zk) => Ok(Some(zk.clone())),
@@ -110,7 +126,6 @@ impl InMemoryCache {
                 None => Ok(None),
             }
         } else {
-            println!("no in_memory_cache;");
             Ok(None)
         }
     }

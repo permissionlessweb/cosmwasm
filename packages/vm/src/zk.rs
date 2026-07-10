@@ -57,15 +57,40 @@ pub fn check_circuit(bytes: &[u8]) -> ZkResult<CircuitFooter> {
         )));
     };
     let footer_bytes = &bytes[total_len - COSMWASM_FOOTER_LENGTH..];
-    let body_bytes = &bytes[..total_len - footer_bytes.len()];
     let footer = CircuitFooter::from_bytes(footer_bytes)
         .map_err(|e| ZkError::new_err(format!("Failed to parse CircuitFooter: {}", e)))?;
 
-    let computed = Checksum::generate(body_bytes);
+    let param_len = footer.param_len as usize;
+    let vk_body_end = total_len - COSMWASM_FOOTER_LENGTH;
 
-    match computed.as_slice() == footer.vk_checksum {
-        true => Ok(footer),
-        false => Err(ZkError::IntegrityErr {}),
+    // Split body into param bytes and vk+cs bytes
+    let param_bytes = &bytes[..param_len];
+    let vk_body_bytes = &bytes[param_len..vk_body_end];
+
+    let computed_param = Checksum::generate(param_bytes);
+    let computed_vk = Checksum::generate(vk_body_bytes);
+
+    match (
+        computed_param.as_slice() == footer.param_checksum,
+        computed_vk.as_slice() == footer.vk_checksum,
+    ) {
+        (true, true) => Ok(footer),
+        (false, _) => {
+            tracing::error!(
+                "param checksum mismatch: computed={}, expected={}",
+                hex::encode(computed_param.as_slice()),
+                hex::encode(footer.param_checksum)
+            );
+            Err(ZkError::IntegrityErr {})
+        }
+        (_, false) => {
+            tracing::error!(
+                "vk checksum mismatch: computed={}, expected={}",
+                hex::encode(computed_vk.as_slice()),
+                hex::encode(footer.vk_checksum)
+            );
+            Err(ZkError::IntegrityErr {})
+        }
     }
 }
 

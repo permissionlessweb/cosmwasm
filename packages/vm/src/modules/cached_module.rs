@@ -1,5 +1,4 @@
 use wasmer::{Engine, Module};
-use zk_cosmwasm::curves::ZkCurve;
 
 /// Some manual tests on Simon's machine showed that Engine is roughly 3-5 KB big,
 /// so give it a constant 10 KiB estimate.
@@ -46,6 +45,17 @@ pub struct CachedCircuit {
 
 #[derive(Debug, Clone)]
 pub struct CachedParam {
-    pub vk: zk_cosmwasm::AnyVerifyingKey,
+    /// Raw commitment-parameter bytes (not a verifying key).
+    pub params: Vec<u8>,
     pub size_estimate: usize,
+}
+
+impl CachedParam {
+    pub fn from_bytes(params: Vec<u8>) -> Self {
+        let size_estimate = params.len();
+        Self {
+            params,
+            size_estimate,
+        }
+    }
 }

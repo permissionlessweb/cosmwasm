@@ -118,6 +118,26 @@ impl AnyVerifyingKey {
             _ => Err(ZkError::CurveMismatch),
         }
     }
+
+    /// Reconstruct from separate param and (cs+vk) byte slices, using the
+    /// footer to identify the curve and validate the split boundaries.
+    /// This is the primary entry point used when loading from separate param/vk files.
+    pub fn from_split_bytes(
+        param_bytes: &[u8],
+        vk_body_bytes: &[u8],
+        footer: &CircuitFooter,
+    ) -> crate::ZkResult<Self> {
+        match footer.appstate_key() {
+            pasta_curves::vesta::Affine::ID => Ok(AnyVerifyingKey::Vesta(
+                crate::curves::VestaVerifyingKey::from_split_bytes(
+                    param_bytes,
+                    vk_body_bytes,
+                    *footer,
+                )?,
+            )),
+            _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
+        }
+    }
 }
 
 pub enum AnyInstance {

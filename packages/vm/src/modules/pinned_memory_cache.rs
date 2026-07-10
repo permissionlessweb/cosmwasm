@@ -191,6 +191,17 @@ impl PinnedMemoryCache {
             None => Ok(None),
         }
     }
+
+    /// Load raw param bytes by 36-byte param file key.
+    pub fn load_param(&mut self, param_file_key: &[u8; 36]) -> VmResult<Option<CachedParam>> {
+        match self.params.get_mut(param_file_key) {
+            Some(cached) => {
+                cached.hits = cached.hits.saturating_add(1);
+                Ok(Some(cached.param.clone()))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 #[cfg(test)]
