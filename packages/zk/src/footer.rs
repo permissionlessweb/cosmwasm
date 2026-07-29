@@ -2,28 +2,41 @@ use halo2_proofs::COSMWASM_FOOTER_LENGTH;
 
 use crate::curves::CurveType;
 use crate::errors::{ZkError, ZkResult};
-use crate::CircuitType;
+use crate::circuits::CircuitType;
 
 /// Circuit footer metadata - [[COSMWASM_FOOTER_LENGTH]] bytes containing complete constraint system specification.
 /// V2 CS-inclusive format: enables generic deserialization via DynamicCircuit
 /// without needing the original circuit type.
+///
+/// # Empty-param (Groth16 / BN254) convention
+///
+/// Proving systems without reusable Halo2-style params use:
+/// - `prover_id` = [`CircuitType::Groth16`] (1)
+/// - `curve_id` = 4 ([`CurveType::Bn254`]) when BN254
+/// - `k` = 0 (unused)
+/// - `param_len` = 0, `cs_len` = 0, `vk_len` = |vk_bytes|
+/// - `param_checksum` = SHA-256 of the empty byte string (`SHA256([])`)
+/// - `vk_checksum` = SHA-256 of the vk body bytes
+///
+/// Blob layout remains `[params | cs+vk | footer]` with a zero-length params
+/// prefix. Split storage still writes an empty `zk_param/{param_key}.bin`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CircuitFooter {
-    /// Circuit proving type identifier (currently only Plonkish=0)
+    /// Circuit proving type identifier (`CircuitType`: Plonkish=0, Groth16=1)
     pub prover_id: u8,
-    /// Circuit constraint system curve identifier (Currently only Pasta)
+    /// Circuit constraint system curve identifier (`CurveType`)
     pub curve_id: u8,
-    /// K element in circuit constraint system.
+    /// K element in circuit constraint system (0 when unused, e.g. Groth16).
     pub k: u8,
     /// Number of public input scalars required by this circuit
     pub i: u8,
-    /// Number of public input scalars required by this circuit
+    /// Byte length of reusable params (0 for Groth16 / empty-param path)
     pub param_len: u32,
     /// byte length of constraint systems
     pub cs_len: u32,
     /// byte length of vk
     pub vk_len: u32,
-    /// checksum of param file
+    /// checksum of param file (`SHA256([])` when `param_len == 0`)
     pub param_checksum: [u8; 32],
     /// checksum of vk file
     pub vk_checksum: [u8; 32],

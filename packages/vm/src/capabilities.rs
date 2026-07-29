@@ -4,6 +4,62 @@ use crate::static_analysis::ExportInfo;
 
 const REQUIRES_PREFIX: &str = "requires_";
 
+/// Canonical capability strings for optional multi-curve / algebraic hosts.
+///
+/// Contracts that need a host export `requires_<capability>` (see
+/// [`required_capabilities_from_module`]). Chains pass the intersection of
+/// these names (plus core CosmWasm caps) into the wasmvm cache as available
+/// capabilities.
+///
+/// **Honesty:** these names document the *intended* advertisement surface.
+/// Enabling a cargo feature on this crate does **not** by itself flip chain
+/// genesis flags — operators must still configure wasmd/app available caps.
+pub mod multi_curve_caps {
+    /// BN254 ECADD / ECMUL / pairing hosts (`feature = "bn254"`).
+    pub const BN254: &str = "bn254";
+    /// BLAKE2b-256 / BLAKE3-256 hosts (`feature = "hash-blake"`). CPU only.
+    pub const HASH_BLAKE: &str = "hash_blake";
+    /// Poseidon Pasta + poseidon377 hosts (`feature = "hash-poseidon"`).
+    pub const HASH_POSEIDON: &str = "hash_poseidon";
+    /// RedPallas / RedJubjub verify hosts (`feature = "redpallas"`).
+    pub const REDPALLAS: &str = "redpallas";
+    /// Path A Halo2 verify hosts (`feature = "zk"`).
+    pub const ZK: &str = "zk";
+}
+
+/// Returns capability names enabled by **this** `cosmwasm-vm` build's cargo features.
+///
+/// Use when assembling the chain's available-capabilities set so guest
+/// `requires_*` exports match the linked host imports. Feature-off default
+/// returns only `zk` when the default `zk` feature is on (see package features).
+///
+/// Does **not** claim chain genesis already advertises these — that is an
+/// operator / wasmd residual (RH3 docs).
+pub fn feature_gated_host_capabilities() -> HashSet<String> {
+    let mut set = HashSet::new();
+    #[cfg(feature = "bn254")]
+    {
+        set.insert(multi_curve_caps::BN254.to_string());
+    }
+    #[cfg(feature = "hash-blake")]
+    {
+        set.insert(multi_curve_caps::HASH_BLAKE.to_string());
+    }
+    #[cfg(feature = "hash-poseidon")]
+    {
+        set.insert(multi_curve_caps::HASH_POSEIDON.to_string());
+    }
+    #[cfg(feature = "redpallas")]
+    {
+        set.insert(multi_curve_caps::REDPALLAS.to_string());
+    }
+    #[cfg(feature = "zk")]
+    {
+        set.insert(multi_curve_caps::ZK.to_string());
+    }
+    set
+}
+
 /// Takes a comma-separated string, splits it by commas, removes empty elements and returns a set of capabilities.
 /// This can be used e.g. to initialize the cache.
 pub fn capabilities_from_csv(csv: &str) -> HashSet<String> {
@@ -43,6 +99,22 @@ mod tests {
         assert!(set.contains("foo"));
         assert!(set.contains("bar"));
         assert!(set.contains("baz"));
+    }
+
+    #[test]
+    fn feature_gated_host_capabilities_respects_cfg() {
+        let set = feature_gated_host_capabilities();
+        // Default package features include `zk`; multi-curve stay off unless opted in.
+        #[cfg(feature = "zk")]
+        assert!(set.contains(multi_curve_caps::ZK));
+        #[cfg(not(feature = "bn254"))]
+        assert!(!set.contains(multi_curve_caps::BN254));
+        #[cfg(not(feature = "hash-blake"))]
+        assert!(!set.contains(multi_curve_caps::HASH_BLAKE));
+        #[cfg(not(feature = "hash-poseidon"))]
+        assert!(!set.contains(multi_curve_caps::HASH_POSEIDON));
+        #[cfg(not(feature = "redpallas"))]
+        assert!(!set.contains(multi_curve_caps::REDPALLAS));
     }
 
     #[test]

@@ -14,13 +14,24 @@ use crate::conversion::{ref_to_u32, to_u32};
 use crate::environment::Environment;
 use crate::errors::{CommunicationError, VmError, VmResult};
 #[cfg(feature = "zk")]
-use crate::imports::do_proof_instance_verify;
+use crate::imports::{do_proof_instance_batch_verify, do_proof_instance_verify};
 use crate::imports::{
     do_abort, do_addr_canonicalize, do_addr_humanize, do_addr_validate, do_bls12_381_aggregate_g1,
     do_bls12_381_aggregate_g2, do_bls12_381_hash_to_g1, do_bls12_381_hash_to_g2,
     do_bls12_381_pairing_equality, do_db_read, do_db_remove, do_db_write, do_debug,
     do_ed25519_batch_verify, do_ed25519_verify, do_query_chain, do_secp256k1_recover_pubkey,
     do_secp256k1_verify, do_secp256r1_recover_pubkey, do_secp256r1_verify,
+};
+#[cfg(feature = "bn254")]
+use crate::imports::{do_bn254_add, do_bn254_pairing_equality, do_bn254_scalar_mul};
+#[cfg(feature = "hash-blake")]
+use crate::imports::{do_blake2b_256, do_blake3_256};
+#[cfg(feature = "hash-poseidon")]
+use crate::imports::{do_poseidon_hash_pallas, do_poseidon_hash_vesta, do_poseidon377_hash};
+#[cfg(feature = "redpallas")]
+use crate::imports::{
+    do_redjubjub_binding_verify, do_redjubjub_spendauth_verify, do_redpallas_binding_verify,
+    do_redpallas_spendauth_verify,
 };
 #[cfg(feature = "iterator")]
 use crate::imports::{do_db_next, do_db_next_key, do_db_next_value, do_db_scan};
@@ -201,6 +212,84 @@ where
             Function::new_typed_with_env(&mut store, &fe, do_bls12_381_hash_to_g2),
         );
 
+        // ── BN254 curve host functions ──────────────────────────────────
+        // EIP-196 ECADD: concatenated 128-byte input (2 G1 points), 64-byte G1 output.
+        #[cfg(feature = "bn254")]
+        env_imports.insert(
+            "bn254_add",
+            Function::new_typed_with_env(&mut store, &fe, do_bn254_add),
+        );
+
+        // EIP-196 ECMUL: concatenated 96-byte input (G1 point + scalar), 64-byte G1 output.
+        #[cfg(feature = "bn254")]
+        env_imports.insert(
+            "bn254_scalar_mul",
+            Function::new_typed_with_env(&mut store, &fe, do_bn254_scalar_mul),
+        );
+
+        // EIP-197 ECPAIRING: 192*N byte input (N G1+G2 pairs), returns u32 (0=valid, 1=invalid).
+        #[cfg(feature = "bn254")]
+        env_imports.insert(
+            "bn254_pairing_equality",
+            Function::new_typed_with_env(&mut store, &fe, do_bn254_pairing_equality),
+        );
+
+        // ── Blake hash host functions (feature "hash-blake") ─────────────────
+        // BLAKE2b-256: input bytes → 32-byte digest.
+        #[cfg(feature = "hash-blake")]
+        env_imports.insert(
+            "blake2b_256",
+            Function::new_typed_with_env(&mut store, &fe, do_blake2b_256),
+        );
+
+        // BLAKE3-256: input bytes → 32-byte digest.
+        #[cfg(feature = "hash-blake")]
+        env_imports.insert(
+            "blake3_256",
+            Function::new_typed_with_env(&mut store, &fe, do_blake3_256),
+        );
+
+        // ── Poseidon host functions (feature "hash-poseidon") ────────────────
+        // Zcash Pasta P128Pow5T3 over pallas / vesta base fields.
+        #[cfg(feature = "hash-poseidon")]
+        env_imports.insert(
+            "poseidon_hash_pallas",
+            Function::new_typed_with_env(&mut store, &fe, do_poseidon_hash_pallas),
+        );
+        #[cfg(feature = "hash-poseidon")]
+        env_imports.insert(
+            "poseidon_hash_vesta",
+            Function::new_typed_with_env(&mut store, &fe, do_poseidon_hash_vesta),
+        );
+        // Penumbra Poseidon377 over BLS12-377 scalar (domain + message elements).
+        #[cfg(feature = "hash-poseidon")]
+        env_imports.insert(
+            "poseidon377_hash",
+            Function::new_typed_with_env(&mut store, &fe, do_poseidon377_hash),
+        );
+
+        // ── RedPallas / RedJubjub (feature "redpallas") ──────────────────────
+        #[cfg(feature = "redpallas")]
+        env_imports.insert(
+            "redpallas_spendauth_verify",
+            Function::new_typed_with_env(&mut store, &fe, do_redpallas_spendauth_verify),
+        );
+        #[cfg(feature = "redpallas")]
+        env_imports.insert(
+            "redpallas_binding_verify",
+            Function::new_typed_with_env(&mut store, &fe, do_redpallas_binding_verify),
+        );
+        #[cfg(feature = "redpallas")]
+        env_imports.insert(
+            "redjubjub_spendauth_verify",
+            Function::new_typed_with_env(&mut store, &fe, do_redjubjub_spendauth_verify),
+        );
+        #[cfg(feature = "redpallas")]
+        env_imports.insert(
+            "redjubjub_binding_verify",
+            Function::new_typed_with_env(&mut store, &fe, do_redjubjub_binding_verify),
+        );
+
         // Verifies message hashes against a signature with a public key, using the secp256k1 ECDSA parametrization.
         // Returns 0 on verification success, 1 on verification failure, and values greater than 1 in case of error.
         // Ownership of input pointers is not transferred to the host.
@@ -249,6 +338,14 @@ where
         env_imports.insert(
             "proof_instance_verify",
             Function::new_typed_with_env(&mut store, &fe, do_proof_instance_verify),
+        );
+
+        // Batch Path A verify (section-encoded zkids/proofs/instances). Gas scheduled
+        // before backend; CPU golden / optional GPU via select_backend().batch_verify.
+        #[cfg(feature = "zk")]
+        env_imports.insert(
+            "proof_instance_batch_verify",
+            Function::new_typed_with_env(&mut store, &fe, do_proof_instance_batch_verify),
         );
 
         // Allows the contract to emit debug logs that the host can either process or ignore.

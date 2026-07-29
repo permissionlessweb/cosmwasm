@@ -593,3 +593,14 @@ Licensed under [Apache License, Version 2.0](https://www.apache.org/licenses/LIC
 
 Any contribution intentionally submitted for inclusion in this crate by you,
 shall be licensed as above, without any additional terms or conditions.
+
+## Documentation book
+
+End-user developer docs (mdBook, CosmWasm Book style) live in [`book/`](./book/):
+
+```bash
+cd book && mdbook serve --open
+```
+
+- **Part I** — using the VM, light clients, libraries, demos
+- **Part II** — community program (audit / hackathon), separate from usage docs

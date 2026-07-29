@@ -1,7 +1,9 @@
 use crate::{
-    curves::{VestaInstance, VestaVerifyingKey, ZkCurve},
+    curves::{VestaInstance, VestaVerifyingKey, VoteInstance, VoteVerifyingKey, ZkCurve},
     CircuitFooter, ZkError, ZkResult,
 };
+#[cfg(feature = "bn254")]
+use crate::curves::{Bn254Instance, Bn254VerifyingKey};
 use halo2_proofs::{
     circuit::Layouter,
     plonk::{self, Circuit, ConstraintSystem},
@@ -16,6 +18,9 @@ impl Proof {
     pub fn new(bytes: Vec<u8>) -> Self {
         Proof(bytes)
     }
+    /// CPU-path verify (golden). Optional feature `gpu` may route through
+    /// `VerifierBackend` (see docs/research/gpu-accel/DESIGN-G1-verifier-backend.md);
+    /// accept/reject must remain bit-identical to this path.
     pub fn verify(&self, vk: &AnyVerifyingKey, i: &[AnyInstance]) -> Result<(), ZkError> {
         vk.verify(&self, i)
     }
@@ -63,9 +68,20 @@ pub struct CwConstraintSystem<C: ZkCurve> {
     pub(crate) cs: C::ConstraintSystem,
 }
 
+/// A verifying key for any supported curve/circuit.
+///
+/// Dispatched by `curve_id` from the `CircuitFooter`:
+///   0 = Pasta (Vesta)
+///   1 = Vote delegation (ZKP #1)
+///   2 = Vote commitment (ZKP #2)
+///   3 = Share reveal (ZKP #3)
+///   4 = BN254 (Groth16)
 #[derive(Debug, Clone)]
 pub enum AnyVerifyingKey {
     Vesta(VestaVerifyingKey),
+    Vote(VoteVerifyingKey),
+    #[cfg(feature = "bn254")]
+    Bn254(Bn254VerifyingKey),
 }
 
 impl TryFrom<&[u8]> for AnyVerifyingKey {
@@ -83,38 +99,138 @@ impl TryFrom<&[u8]> for AnyVerifyingKey {
         let footer =
             crate::CircuitFooter::from_bytes(&bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..])?;
 
-        // get specific circuit identifier for proper methods
-        match (footer.prover_id, footer.curve_id) {
-            (0, 0) => {
-                Ok(AnyVerifyingKey::Vesta(VestaVerifyingKey::try_from(bytes)?))
-            }
+        // Dispatch on curve_id as the sole routing key.
+        // curve_id is self-describing — each distinct circuit/curve has its own ID.
+        match footer.curve_id {
+            0 => Ok(AnyVerifyingKey::Vesta(VestaVerifyingKey::try_from(bytes)?)),
+            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(VoteVerifyingKey::try_from(bytes)?)),
+            #[cfg(feature = "bn254")]
+            4 => Ok(AnyVerifyingKey::Bn254(Bn254VerifyingKey::try_from(bytes)?)),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
 }
 
 impl AnyVerifyingKey {
+    /// Footer `curve_id` used for instance dispatch (independent of app `zkid`).
+    pub fn curve_id(&self) -> u8 {
+        match self {
+            AnyVerifyingKey::Vesta(vk) => vk.footer.curve_id,
+            AnyVerifyingKey::Vote(vk) => vk.footer.curve_id,
+            #[cfg(feature = "bn254")]
+            AnyVerifyingKey::Bn254(vk) => vk.footer.curve_id,
+        }
+    }
+
+    /// Footer `prover_id` (`CircuitType`).
+    pub fn prover_id(&self) -> u8 {
+        match self {
+            AnyVerifyingKey::Vesta(vk) => vk.footer.prover_id,
+            AnyVerifyingKey::Vote(vk) => vk.footer.prover_id,
+            #[cfg(feature = "bn254")]
+            AnyVerifyingKey::Bn254(vk) => vk.footer.prover_id,
+        }
+    }
+
+    /// Expected public-input count from footer (`i`).
+    pub fn public_input_count(&self) -> u8 {
+        match self {
+            AnyVerifyingKey::Vesta(vk) => vk.footer.i,
+            AnyVerifyingKey::Vote(vk) => vk.footer.i,
+            #[cfg(feature = "bn254")]
+            AnyVerifyingKey::Bn254(vk) => vk.footer.i,
+        }
+    }
+
+    /// Path A identity: `footer.to_circuit_key()` (72 B). Used to re-bind cold
+    /// loads to `CircuitInfo.circuit_key` (H-06).
+    pub fn circuit_key(&self) -> [u8; 72] {
+        match self {
+            AnyVerifyingKey::Vesta(vk) => vk.footer.to_circuit_key(),
+            AnyVerifyingKey::Vote(vk) => vk.footer.to_circuit_key(),
+            #[cfg(feature = "bn254")]
+            AnyVerifyingKey::Bn254(vk) => vk.footer.to_circuit_key(),
+        }
+    }
+
+    /// Footer layout fields for metadata binding (H-05).
+    pub fn footer(&self) -> &crate::CircuitFooter {
+        match self {
+            AnyVerifyingKey::Vesta(vk) => &vk.footer,
+            AnyVerifyingKey::Vote(vk) => &vk.footer,
+            #[cfg(feature = "bn254")]
+            AnyVerifyingKey::Bn254(vk) => &vk.footer,
+        }
+    }
+
     pub fn to_bytes_with_params(&self) -> crate::ZkResult<Vec<u8>> {
         match self {
             AnyVerifyingKey::Vesta(vk) => Ok(vk.to_bytes_with_params()?),
+            AnyVerifyingKey::Vote(vk) => {
+                let mut bytes = vk.params_bytes.clone();
+                bytes.extend_from_slice(&vk.vk_body_bytes);
+                bytes.extend_from_slice(&vk.footer.to_bytes());
+                Ok(bytes)
+            }
+            #[cfg(feature = "bn254")]
+            AnyVerifyingKey::Bn254(vk) => {
+                let mut bytes = vk.vk_bytes.clone();
+                bytes.extend_from_slice(&vk.footer.to_bytes());
+                Ok(bytes)
+            }
         }
     }
     pub fn from_bytes(bytes: &[u8]) -> crate::ZkResult<Self> {
         let footer =
             crate::CircuitFooter::from_bytes(&bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..])?;
-        match (footer.prover_id, footer.curve_id) {
-            (0, 0) => Ok(AnyVerifyingKey::Vesta(
+        match footer.curve_id {
+            0 => Ok(AnyVerifyingKey::Vesta(
                 VestaVerifyingKey::from_bytes_with_params(bytes)?,
+            )),
+            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(
+                VoteVerifyingKey::try_from(bytes)?,
+            )),
+            #[cfg(feature = "bn254")]
+            4 => Ok(AnyVerifyingKey::Bn254(
+                Bn254VerifyingKey::try_from(bytes)?,
             )),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
 
     pub fn verify(&self, proof: &Proof, i: &[AnyInstance]) -> crate::ZkResult<()> {
+        // C-06: crypto-false → VerifyFailed so host Path A returns Ok(1);
+        // format/deserial errors stay FormatErr / other (VmError).
         match (self, i) {
             (AnyVerifyingKey::Vesta(vk), [AnyInstance::Vesta(i), ..]) => vk
                 .verify(proof, std::slice::from_ref(i))
-                .map_err(Into::into),
+                .map_err(|_plonk| ZkError::VerifyFailed),
+            (AnyVerifyingKey::Vote(vk), [AnyInstance::Vote(i), ..]) => {
+                let scalars = i.to_scalars();
+                // Fail closed if any PI limb failed to decode (do not silently drop).
+                if scalars.len() != i.public_inputs.len() {
+                    return Err(ZkError::InvalidScalar);
+                }
+                match vk.verify(&proof.0, &scalars) {
+                    Ok(()) => Ok(()),
+                    // Vote verify maps deserial failures as Aborted/new_err and
+                    // proof false as "proof verification failed: …".
+                    Err(e) if e.is_verify_failed() => Err(e),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        if msg.contains("proof verification failed") {
+                            Err(ZkError::VerifyFailed)
+                        } else {
+                            // Deserial / format paths use FormatErr when possible.
+                            Err(ZkError::format_err(msg))
+                        }
+                    }
+                }
+            }
+            #[cfg(feature = "bn254")]
+            (AnyVerifyingKey::Bn254(vk), [AnyInstance::Bn254(i), ..]) => {
+                vk.verify(proof, std::slice::from_ref(i))
+            }
             _ => Err(ZkError::CurveMismatch),
         }
     }
@@ -127,29 +243,62 @@ impl AnyVerifyingKey {
         vk_body_bytes: &[u8],
         footer: &CircuitFooter,
     ) -> crate::ZkResult<Self> {
-        match (footer.prover_id, footer.curve_id) {
-            (0, 0) => Ok(AnyVerifyingKey::Vesta(
+        match footer.curve_id {
+            0 => Ok(AnyVerifyingKey::Vesta(
                 crate::curves::VestaVerifyingKey::from_split_bytes(
                     param_bytes,
                     vk_body_bytes,
                     *footer,
                 )?,
             )),
+            1 | 2 | 3 => {
+                let mut serialized = Vec::new();
+                serialized.extend_from_slice(param_bytes);
+                serialized.extend_from_slice(vk_body_bytes);
+                serialized.extend_from_slice(&footer.to_bytes());
+                Ok(AnyVerifyingKey::Vote(VoteVerifyingKey::try_from(serialized.as_slice())?))
+            }
+            #[cfg(feature = "bn254")]
+            4 => Ok(AnyVerifyingKey::Bn254(
+                Bn254VerifyingKey::from_split_bytes(param_bytes, vk_body_bytes, *footer)?,
+            )),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
 }
 
+/// Public inputs for any supported curve/circuit.
 pub enum AnyInstance {
     Vesta(crate::curves::VestaInstance),
+    Vote(VoteInstance),
+    #[cfg(feature = "bn254")]
+    Bn254(crate::curves::Bn254Instance),
 }
 
-// / Circuit type identifier for VK deserialization.
+/// Circuit proving-system identifier for footer `prover_id`.
+///
+/// | Value | Variant   | Typical curves / circuits        |
+/// |-------|-----------|----------------------------------|
+/// | 0     | Plonkish  | Pasta Halo2 (Vesta / vote suite) |
+/// | 1     | Groth16   | BN254 (circom / ark-groth16)     |
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum CircuitType {
     #[default]
     Plonkish = 0,
+    /// Non-Plonkish proving system (Groth16 / BN254).
+    Groth16 = 1,
+}
+
+impl CircuitType {
+    /// Parse a footer `prover_id` byte into a known circuit type.
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Plonkish),
+            1 => Some(Self::Groth16),
+            _ => None,
+        }
+    }
 }
 
 impl TryFrom<AnyVerifyingKey> for CircuitType {
@@ -158,6 +307,9 @@ impl TryFrom<AnyVerifyingKey> for CircuitType {
     fn try_from(value: AnyVerifyingKey) -> Result<Self, Self::Error> {
         match value {
             AnyVerifyingKey::Vesta(_) => Ok(CircuitType::Plonkish),
+            AnyVerifyingKey::Vote(_) => Ok(CircuitType::Plonkish),
+            #[cfg(feature = "bn254")]
+            AnyVerifyingKey::Bn254(_) => Ok(CircuitType::Groth16),
         }
     }
 }
@@ -166,9 +318,7 @@ impl TryFrom<u8> for CircuitType {
     type Error = ZkError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            _ => Ok(CircuitType::Plonkish),
-        }
+        Self::from_u8(value).ok_or_else(|| ZkError::new_err("bad CircuitType"))
     }
 }
 
@@ -176,14 +326,22 @@ impl Into<u8> for CircuitType {
     fn into(self) -> u8 {
         match self {
             CircuitType::Plonkish => 0,
+            CircuitType::Groth16 => 1,
         }
     }
 }
 
 impl AnyInstance {
-    pub fn try_from_bytes(id: impl Into<u32>, bytes: &[u8]) -> ZkResult<Self> {
-        match id.into() {
+    /// Decode public inputs for a **curve_id** (footer field), not app `zkid`.
+    ///
+    /// Host Path A must pass `vk.curve_id()` here so zkid can be any app id
+    /// (e.g. 42) while BN254 still routes to Fr-limb parsing.
+    pub fn try_from_bytes(curve_id: impl Into<u32>, bytes: &[u8]) -> ZkResult<Self> {
+        match curve_id.into() {
             0u32 => Ok(AnyInstance::Vesta(VestaInstance::try_from(bytes)?)),
+            1u32 | 2u32 | 3u32 => Ok(AnyInstance::Vote(VoteInstance::from_bytes(bytes)?)),
+            #[cfg(feature = "bn254")]
+            4u32 => Ok(AnyInstance::Bn254(Bn254Instance::from_bytes(bytes)?)),
             _ => Err(ZkError::CurveMismatch),
         }
     }

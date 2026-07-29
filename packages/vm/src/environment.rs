@@ -55,6 +55,13 @@ pub struct GasConfig {
     pub bls12_381_hash_to_g2_cost: u64,
     /// bls12-381 pairing equality check cost
     pub bls12_381_pairing_equality_cost: LinearGasCost,
+    /// RedPallas (Orchard / Pallas) signature verify cost — scheduled, not wall-time.
+    ///
+    /// Provisional weight until `cargo bench` / calibrate on validator CPUs.
+    /// Intentionally above ed25519: Pallas group ops are heavier than Edwards25519.
+    pub redpallas_verify_cost: u64,
+    /// RedJubjub (Sapling / Jubjub) signature verify cost — scheduled, not wall-time.
+    pub redjubjub_verify_cost: u64,
     /// halo2 proof verification cost
     pub halo2_proof_instance_verify_cost: LinearGasCost,
     /// cost for writing memory regions
@@ -109,9 +116,22 @@ impl Default for GasConfig {
                 base: 2112 * GAS_PER_US,
                 per_item: 163 * GAS_PER_US,
             },
+            // RH5: dedicated RedPallas / RedJubjub weights (was ed25519_verify_cost).
+            // Provisional: ~120 µs Pallas RedDSA, ~80 µs Jubjub RedDSA @ GAS_PER_US
+            // (schedule units only — never wall µs at runtime). Re-calibrate with
+            // cosmwasm-crypto benches on target CPUs before production pin.
+            redpallas_verify_cost: 120 * GAS_PER_US,
+            redjubjub_verify_cost: 80 * GAS_PER_US,
+            // H-02 / docs/ZK-VERIFY-GAS.md — calibrated host:
+            //   cargo run -p zk-cosmwasm --features bn254 --bin verify_gas_calibrate --release
+            // Measured (aarch64 release): square Groth16 p95 ≈ 2.0 ms → need 2.7 ms @ 1.35×.
+            // base/per cover that with ≥1.2× headroom; per_item ≥ 200 µs/unit literature
+            // Halo2 size scale (DoS when proofs grow). Host units =
+            // 1 + ceil(proof/1024) + ceil(instances/32) in imports.rs.
+            // Re-run calibrate on validator CPUs after prover/layout changes.
             halo2_proof_instance_verify_cost: LinearGasCost {
-                base: 1000,
-                per_item: 163,
+                base: 2_700 * GAS_PER_US,  // ~2.7 ms fixed (rounded calibrate)
+                per_item: 200 * GAS_PER_US, // ~200 µs / unit
             },
             write_region_cost: LinearGasCost {
                 base: 230000,
@@ -646,6 +666,18 @@ mod tests {
                 "bls12_381_pairing_equality" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32, _d: u32| -> u32 { 0 }),
                 "bls12_381_hash_to_g1" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32, _d: u32| -> u32 { 0 }),
                 "bls12_381_hash_to_g2" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32, _d: u32| -> u32 { 0 }),
+                "bn254_add" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "bn254_scalar_mul" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "bn254_pairing_equality" => Function::new_typed(&mut store, |_a: u32| -> u32 { 0 }),
+                "blake2b_256" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "blake3_256" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "poseidon_hash_pallas" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "poseidon_hash_vesta" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "poseidon377_hash" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
+                "redpallas_spendauth_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
+                "redpallas_binding_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
+                "redjubjub_spendauth_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
+                "redjubjub_binding_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "secp256k1_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "secp256k1_recover_pubkey" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u64 { 0 }),
                 "secp256r1_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
@@ -653,6 +685,7 @@ mod tests {
                 "ed25519_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "ed25519_batch_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "proof_instance_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "proof_instance_batch_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "debug" => Function::new_typed(&mut store, |_a: u32| {}),
                 "abort" => Function::new_typed(&mut store, |_a: u32| {}),
             },

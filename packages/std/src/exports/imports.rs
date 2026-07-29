@@ -117,6 +117,60 @@ extern "C" {
         i_len: u32,
     ) -> u32;
 
+    /// Batch Path A verify (section-encoded zkids / proofs / instances).
+    /// Returns 0 if all valid (or empty), 1 if any crypto-invalid, >1 on error.
+    #[cfg(feature = "zk")]
+    fn proof_instance_batch_verify(zkids_ptr: u32, proofs_ptr: u32, instances_ptr: u32) -> u32;
+
+    /// BLAKE2b-256 (feature hash-blake). Writes 32-byte digest to out_ptr. Returns 0.
+    #[cfg(feature = "hash-blake")]
+    fn blake2b_256(input_ptr: u32, out_ptr: u32) -> u32;
+
+    /// BLAKE3-256 (feature hash-blake). Writes 32-byte digest to out_ptr. Returns 0.
+    #[cfg(feature = "hash-blake")]
+    fn blake3_256(input_ptr: u32, out_ptr: u32) -> u32;
+
+    /// Poseidon-Pallas (feature hash-poseidon). Returns 0 ok, 1 invalid input.
+    #[cfg(feature = "hash-poseidon")]
+    fn poseidon_hash_pallas(inputs_ptr: u32, out_ptr: u32) -> u32;
+
+    /// Poseidon-Vesta (feature hash-poseidon). Returns 0 ok, 1 invalid input.
+    #[cfg(feature = "hash-poseidon")]
+    fn poseidon_hash_vesta(inputs_ptr: u32, out_ptr: u32) -> u32;
+
+    /// Poseidon377 (feature hash-poseidon). Returns 0 ok, 1 invalid input.
+    #[cfg(feature = "hash-poseidon")]
+    fn poseidon377_hash(domain_ptr: u32, inputs_ptr: u32, out_ptr: u32) -> u32;
+
+    /// RedPallas SpendAuth (feature redpallas). 0 valid, 1 invalid, >1 format.
+    #[cfg(feature = "redpallas")]
+    fn redpallas_spendauth_verify(message_ptr: u32, signature_ptr: u32, public_key_ptr: u32) -> u32;
+
+    /// RedPallas Binding (feature redpallas).
+    #[cfg(feature = "redpallas")]
+    fn redpallas_binding_verify(message_ptr: u32, signature_ptr: u32, public_key_ptr: u32) -> u32;
+
+    /// RedJubjub SpendAuth (feature redpallas).
+    #[cfg(feature = "redpallas")]
+    fn redjubjub_spendauth_verify(message_ptr: u32, signature_ptr: u32, public_key_ptr: u32)
+        -> u32;
+
+    /// RedJubjub Binding (feature redpallas).
+    #[cfg(feature = "redpallas")]
+    fn redjubjub_binding_verify(message_ptr: u32, signature_ptr: u32, public_key_ptr: u32) -> u32;
+
+    /// BN254 ECADD (feature bn254). Returns 0 ok, >0 error code.
+    #[cfg(feature = "bn254")]
+    fn bn254_add(input_ptr: u32, out_ptr: u32) -> u32;
+
+    /// BN254 ECMUL (feature bn254).
+    #[cfg(feature = "bn254")]
+    fn bn254_scalar_mul(input_ptr: u32, out_ptr: u32) -> u32;
+
+    /// BN254 pairing equality (feature bn254). 0 true, 1 false, >1 error.
+    #[cfg(feature = "bn254")]
+    fn bn254_pairing_equality(input_ptr: u32) -> u32;
+
     /// Writes a debug message (UTF-8 encoded) to the host for debugging purposes.
     /// The host is free to log or process this in any way it considers appropriate.
     /// In production environments it is expected that those messages are discarded.
@@ -768,11 +822,211 @@ impl Api for ExternalApi {
         }
     }
 
+    #[cfg(feature = "zk")]
+    fn proof_instance_batch_verify(
+        &self,
+        zkids: &[u64],
+        proofs: &[&[u8]],
+        instances: &[&[u8]],
+    ) -> Result<bool, VerificationError> {
+        // Section-encode like ed25519_batch_verify. Canonical zkid section: 8-byte LE u64.
+        if zkids.len() != proofs.len() || proofs.len() != instances.len() {
+            return Err(VerificationError::unknown_err(66));
+        }
+
+        let zkid_bufs: Vec<[u8; 8]> = zkids.iter().map(|z| z.to_le_bytes()).collect();
+        let zkid_refs: Vec<&[u8]> = zkid_bufs.iter().map(|b| b.as_slice()).collect();
+        let zkids_encoded = encode_sections(&zkid_refs);
+        let zkids_send = Region::from_vec(zkids_encoded);
+        let zkids_send_ptr = zkids_send.as_ptr() as u32;
+
+        let proofs_encoded = encode_sections(proofs);
+        let proofs_send = Region::from_vec(proofs_encoded);
+        let proofs_send_ptr = proofs_send.as_ptr() as u32;
+
+        let instances_encoded = encode_sections(instances);
+        let instances_send = Region::from_vec(instances_encoded);
+        let instances_send_ptr = instances_send.as_ptr() as u32;
+
+        let result = unsafe {
+            proof_instance_batch_verify(zkids_send_ptr, proofs_send_ptr, instances_send_ptr)
+        };
+        match result {
+            0 => Ok(true),
+            1 => Ok(false),
+            error_code => Err(VerificationError::unknown_err(error_code)),
+        }
+    }
+
+    #[cfg(feature = "hash-blake")]
+    fn blake2b_256(&self, input: &[u8]) -> [u8; 32] {
+        // Same pattern as bls12_381_aggregate_g1: stack buffer + Region::from_slice.
+        // Host write_region mutates the guest memory behind the Region.
+        let digest = [0u8; 32];
+        let send = Region::from_slice(input);
+        let out = Region::from_slice(&digest);
+        let code = unsafe { blake2b_256(send.as_ptr() as u32, out.as_ptr() as u32) };
+        debug_assert_eq!(code, 0);
+        digest
+    }
+
+    #[cfg(feature = "hash-blake")]
+    fn blake3_256(&self, input: &[u8]) -> [u8; 32] {
+        let digest = [0u8; 32];
+        let send = Region::from_slice(input);
+        let out = Region::from_slice(&digest);
+        let code = unsafe { blake3_256(send.as_ptr() as u32, out.as_ptr() as u32) };
+        debug_assert_eq!(code, 0);
+        digest
+    }
+
+    #[cfg(feature = "hash-poseidon")]
+    fn poseidon_hash_pallas(&self, inputs: &[u8]) -> Result<[u8; 32], VerificationError> {
+        let out = [0u8; 32];
+        let send = Region::from_slice(inputs);
+        let out_reg = Region::from_slice(&out);
+        let code = unsafe { poseidon_hash_pallas(send.as_ptr() as u32, out_reg.as_ptr() as u32) };
+        match code {
+            0 => Ok(out),
+            1 => Err(VerificationError::GenericErr),
+            e => Err(VerificationError::unknown_err(e)),
+        }
+    }
+
+    #[cfg(feature = "hash-poseidon")]
+    fn poseidon_hash_vesta(&self, inputs: &[u8]) -> Result<[u8; 32], VerificationError> {
+        let out = [0u8; 32];
+        let send = Region::from_slice(inputs);
+        let out_reg = Region::from_slice(&out);
+        let code = unsafe { poseidon_hash_vesta(send.as_ptr() as u32, out_reg.as_ptr() as u32) };
+        match code {
+            0 => Ok(out),
+            1 => Err(VerificationError::GenericErr),
+            e => Err(VerificationError::unknown_err(e)),
+        }
+    }
+
+    #[cfg(feature = "hash-poseidon")]
+    fn poseidon377_hash(
+        &self,
+        domain: &[u8],
+        message: &[u8],
+    ) -> Result<[u8; 32], VerificationError> {
+        let out = [0u8; 32];
+        let d = Region::from_slice(domain);
+        let m = Region::from_slice(message);
+        let o = Region::from_slice(&out);
+        let code = unsafe {
+            poseidon377_hash(d.as_ptr() as u32, m.as_ptr() as u32, o.as_ptr() as u32)
+        };
+        match code {
+            0 => Ok(out),
+            1 => Err(VerificationError::GenericErr),
+            e => Err(VerificationError::unknown_err(e)),
+        }
+    }
+
+    #[cfg(feature = "redpallas")]
+    fn redpallas_spendauth_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        redpallas_style_verify(message, signature, public_key, redpallas_spendauth_verify)
+    }
+
+    #[cfg(feature = "redpallas")]
+    fn redpallas_binding_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        redpallas_style_verify(message, signature, public_key, redpallas_binding_verify)
+    }
+
+    #[cfg(feature = "redpallas")]
+    fn redjubjub_spendauth_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        redpallas_style_verify(message, signature, public_key, redjubjub_spendauth_verify)
+    }
+
+    #[cfg(feature = "redpallas")]
+    fn redjubjub_binding_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        redpallas_style_verify(message, signature, public_key, redjubjub_binding_verify)
+    }
+
+    #[cfg(feature = "bn254")]
+    fn bn254_add(&self, input: &[u8]) -> Result<[u8; 64], VerificationError> {
+        let out = [0u8; 64];
+        let send = Region::from_slice(input);
+        let out_reg = Region::from_slice(&out);
+        let code = unsafe { bn254_add(send.as_ptr() as u32, out_reg.as_ptr() as u32) };
+        match code {
+            0 => Ok(out),
+            e => Err(VerificationError::unknown_err(e)),
+        }
+    }
+
+    #[cfg(feature = "bn254")]
+    fn bn254_scalar_mul(&self, input: &[u8]) -> Result<[u8; 64], VerificationError> {
+        let out = [0u8; 64];
+        let send = Region::from_slice(input);
+        let out_reg = Region::from_slice(&out);
+        let code = unsafe { bn254_scalar_mul(send.as_ptr() as u32, out_reg.as_ptr() as u32) };
+        match code {
+            0 => Ok(out),
+            e => Err(VerificationError::unknown_err(e)),
+        }
+    }
+
+    #[cfg(feature = "bn254")]
+    fn bn254_pairing_equality(&self, input: &[u8]) -> Result<bool, VerificationError> {
+        let send = Region::from_slice(input);
+        let code = unsafe { bn254_pairing_equality(send.as_ptr() as u32) };
+        match code {
+            0 => Ok(true),
+            1 => Ok(false),
+            e => Err(VerificationError::unknown_err(e)),
+        }
+    }
+
     fn debug(&self, message: &str) {
         // keep the boxes in scope, so we free it at the end (don't cast to pointers same line as Region::from_slice)
         let region = Region::from_slice(message.as_bytes());
         let region_ptr = region.as_ptr() as u32;
         unsafe { debug(region_ptr) };
+    }
+}
+
+#[cfg(feature = "redpallas")]
+fn redpallas_style_verify(
+    message: &[u8],
+    signature: &[u8],
+    public_key: &[u8],
+    f: unsafe extern "C" fn(u32, u32, u32) -> u32,
+) -> Result<bool, VerificationError> {
+    let msg = Region::from_slice(message);
+    let sig = Region::from_slice(signature);
+    let pk = Region::from_slice(public_key);
+    let result = unsafe { f(msg.as_ptr() as u32, sig.as_ptr() as u32, pk.as_ptr() as u32) };
+    match result {
+        0 => Ok(true),
+        1 => Ok(false),
+        4 => Err(VerificationError::InvalidSignatureFormat),
+        5 => Err(VerificationError::InvalidPubkeyFormat),
+        10 => Err(VerificationError::GenericErr),
+        e => Err(VerificationError::unknown_err(e)),
     }
 }
 

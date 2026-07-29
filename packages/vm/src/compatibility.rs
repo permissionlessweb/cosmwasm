@@ -26,6 +26,30 @@ const SUPPORTED_IMPORTS: &[&str] = &[
     "env.bls12_381_pairing_equality",
     "env.bls12_381_hash_to_g1",
     "env.bls12_381_hash_to_g2",
+    #[cfg(feature = "bn254")]
+    "env.bn254_add",
+    #[cfg(feature = "bn254")]
+    "env.bn254_scalar_mul",
+    #[cfg(feature = "bn254")]
+    "env.bn254_pairing_equality",
+    #[cfg(feature = "hash-blake")]
+    "env.blake2b_256",
+    #[cfg(feature = "hash-blake")]
+    "env.blake3_256",
+    #[cfg(feature = "hash-poseidon")]
+    "env.poseidon_hash_pallas",
+    #[cfg(feature = "hash-poseidon")]
+    "env.poseidon_hash_vesta",
+    #[cfg(feature = "hash-poseidon")]
+    "env.poseidon377_hash",
+    #[cfg(feature = "redpallas")]
+    "env.redpallas_spendauth_verify",
+    #[cfg(feature = "redpallas")]
+    "env.redpallas_binding_verify",
+    #[cfg(feature = "redpallas")]
+    "env.redjubjub_spendauth_verify",
+    #[cfg(feature = "redpallas")]
+    "env.redjubjub_binding_verify",
     "env.secp256k1_verify",
     "env.secp256k1_recover_pubkey",
     "env.secp256r1_verify",
@@ -33,6 +57,7 @@ const SUPPORTED_IMPORTS: &[&str] = &[
     "env.ed25519_verify",
     "env.ed25519_batch_verify",
     "env.proof_instance_verify",
+    "env.proof_instance_batch_verify",
     "env.debug",
     "env.query_chain",
     #[cfg(feature = "iterator")]

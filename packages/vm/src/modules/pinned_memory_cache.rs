@@ -1,5 +1,5 @@
 use cosmwasm_std::Checksum;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use super::cached_module::CachedModule;
 #[cfg(feature = "zk")]
@@ -32,6 +32,13 @@ pub struct InstrumentedParam {
     pub param: CachedParam,
 }
 
+/// Default maximum number of pinned ZK circuits before LRU eviction.
+#[cfg(feature = "zk")]
+const DEFAULT_MAX_PINNED_CIRCUITS: usize = 100;
+/// Default maximum total bytes for pinned ZK circuits before LRU eviction.
+#[cfg(feature = "zk")]
+const DEFAULT_MAX_PINNED_CIRCUIT_SIZE_BYTES: usize = 100 * 1024 * 1024;
+
 /// An pinned in memory module cache
 pub struct PinnedMemoryCache {
     modules: HashMap<Checksum, InstrumentedModule>,
@@ -39,6 +46,12 @@ pub struct PinnedMemoryCache {
     circuits: HashMap<[u8; 72], InstrumentedCircuit>,
     #[cfg(feature = "zk")]
     params: HashMap<[u8; 36], InstrumentedParam>,
+    #[cfg(feature = "zk")]
+    max_circuit_count: Option<usize>,
+    #[cfg(feature = "zk")]
+    max_circuit_size_bytes: Option<usize>,
+    #[cfg(feature = "zk")]
+    circuit_pin_order: VecDeque<[u8; 72]>,
 }
 
 impl PinnedMemoryCache {
@@ -50,6 +63,12 @@ impl PinnedMemoryCache {
             circuits: HashMap::new(),
             #[cfg(feature = "zk")]
             params: HashMap::new(),
+            #[cfg(feature = "zk")]
+            max_circuit_count: Some(DEFAULT_MAX_PINNED_CIRCUITS),
+            #[cfg(feature = "zk")]
+            max_circuit_size_bytes: Some(DEFAULT_MAX_PINNED_CIRCUIT_SIZE_BYTES),
+            #[cfg(feature = "zk")]
+            circuit_pin_order: VecDeque::new(),
         }
     }
 
@@ -145,6 +164,14 @@ impl PinnedMemoryCache {
         cached_circuit: CachedCircuit,
     ) -> VmResult<()> {
         println!("storing to pinned_memory_cache;");
+        let is_update = self.circuits.contains_key(circuit_checksum_key);
+        if !is_update {
+            self.evict_circuits_for_insert(cached_circuit.size_estimate)?;
+        } else {
+            self.circuit_pin_order
+                .retain(|k| k != circuit_checksum_key);
+        }
+        self.circuit_pin_order.push_back(*circuit_checksum_key);
         self.circuits.insert(
             *circuit_checksum_key,
             InstrumentedCircuit {
@@ -152,6 +179,29 @@ impl PinnedMemoryCache {
                 circuit: cached_circuit,
             },
         );
+        Ok(())
+    }
+
+    fn evict_circuits_for_insert(&mut self, incoming_size: usize) -> VmResult<()> {
+        loop {
+            let over_count = self
+                .max_circuit_count
+                .is_some_and(|max| self.circuits.len() >= max);
+            let current_size: usize = self
+                .iter_circuits()
+                .map(|(_, c)| c.circuit.size_estimate)
+                .sum();
+            let over_size = self.max_circuit_size_bytes.is_some_and(|max| {
+                !self.circuits.is_empty() && current_size.saturating_add(incoming_size) > max
+            });
+            if !over_count && !over_size {
+                break;
+            }
+            let Some(oldest) = self.circuit_pin_order.pop_front() else {
+                break;
+            };
+            self.circuits.remove(&oldest);
+        }
         Ok(())
     }
     pub fn store_param(
@@ -172,6 +222,7 @@ impl PinnedMemoryCache {
 
     pub fn remove_circuit(&mut self, checksum: &[u8; 72]) -> VmResult<()> {
         self.circuits.remove(checksum);
+        self.circuit_pin_order.retain(|k| k != checksum);
         Ok(())
     }
 

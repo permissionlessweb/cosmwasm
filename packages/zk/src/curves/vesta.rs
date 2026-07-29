@@ -55,23 +55,34 @@ impl VestaInstance {
         }
     }
 
+    /// Decode host public inputs as concatenated **32-byte** field limbs
+    /// (`PrimeField::Repr` / little-endian pasta encoding).
+    ///
+    /// **C-01:** Do **not** use `Scalar::CAPACITY` (bit capacity, 254) as a
+    /// byte limb width — that rejects honest `32×n` encodings and panics on
+    /// 254-aligned lengths when copying into `[u8; 32]`.
     pub fn new_from_vm(i: &Vec<u8>) -> crate::ZkResult<Self> {
-        const SCALAR_SIZE: usize = vesta::Scalar::CAPACITY as usize;
+        const SCALAR_SIZE: usize = 32;
         if i.len() % SCALAR_SIZE != 0 {
-            return Err(ZkError::new_err(format!(
-                "bytes length must be multiple of {SCALAR_SIZE}"
+            return Err(ZkError::format_err(format!(
+                "vesta public-input bytes length {} is not a multiple of {SCALAR_SIZE}",
+                i.len()
             )));
         }
-        let i = i
-            .chunks_exact(SCALAR_SIZE)
-            .map(|chunk| {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(chunk);
-                vesta::Scalar::from_repr(arr).expect("invalid scalar bytes")
-            })
-            .collect::<Vec<_>>();
-        let size = i.len();
-        Ok(Self { i, size })
+        let mut out = Vec::with_capacity(i.len() / SCALAR_SIZE);
+        for chunk in i.chunks_exact(SCALAR_SIZE) {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(chunk);
+            // from_repr returns Choice; reject non-canonical / out-of-range limbs.
+            let ct = vesta::Scalar::from_repr(arr);
+            if bool::from(ct.is_some()) {
+                out.push(ct.unwrap());
+            } else {
+                return Err(ZkError::InvalidScalar);
+            }
+        }
+        let size = out.len();
+        Ok(Self { i: out, size })
     }
 
     pub fn get_size(&self) -> usize {
@@ -84,6 +95,33 @@ impl TryFrom<&[u8]> for VestaInstance {
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         VestaInstance::new_from_vm(&value.to_vec())
+    }
+}
+
+#[cfg(test)]
+mod instance_tests {
+    use super::*;
+    use group::ff::Field;
+
+    #[test]
+    fn vesta_public_inputs_32_byte_limbs() {
+        let s = VestaScalar::ONE;
+        let mut bytes = s.to_repr().as_ref().to_vec();
+        assert_eq!(bytes.len(), 32);
+        let inst = VestaInstance::new_from_vm(&bytes).expect("32-byte limb");
+        assert_eq!(inst.get_size(), 1);
+
+        bytes.extend_from_slice(s.to_repr().as_ref());
+        let inst2 = VestaInstance::new_from_vm(&bytes).expect("64-byte two limbs");
+        assert_eq!(inst2.get_size(), 2);
+    }
+
+    #[test]
+    fn vesta_public_inputs_reject_wrong_len() {
+        // Not multiple of 32
+        assert!(VestaInstance::new_from_vm(&vec![0u8; 31]).is_err());
+        // CAPACITY-bit fallacy would have accepted multiples of 254 — ensure 254 still errors
+        assert!(VestaInstance::new_from_vm(&vec![0u8; 254]).is_err());
     }
 }
 

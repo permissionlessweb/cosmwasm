@@ -59,6 +59,16 @@ cosmwasm_2_2 = ["cosmwasm_2_1"]
 # It adds `WasmQuery::RawRange`.
 cosmwasm_3_0 = ["cosmwasm_2_2"]
 zk = ["cosmwasm_3_0"]
+# Multi-curve / algebraic host Api surface (guest imports + MockApi).
+# Default OFF — does not change default guest builds. Host must advertise
+# matching capabilities (see docs/research/residual-hosts-orch/CAPABILITY-ADVERTISEMENT.md).
+# Forwards features to cosmwasm-crypto on native (MockApi). On wasm32, crypto is not
+# a dependency; feature still enables guest import stubs only.
+bn254 = ["cosmwasm-crypto/bn254"]
+hash-blake = ["cosmwasm-crypto/hash-blake"]
+hash-poseidon = ["cosmwasm-crypto/hash-poseidon"]
+redpallas = ["cosmwasm-crypto/redpallas"]
+multi-curve = ["bn254", "hash-blake", "hash-poseidon", "redpallas"]
 
 [dependencies]
 base64 = "0.22.0"

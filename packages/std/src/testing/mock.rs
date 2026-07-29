@@ -65,23 +65,22 @@ thread_local! {
     static ZK_CIRCUIT_REGISTRY: std::cell::RefCell<std::collections::HashMap<u64, (String, CircuitVerifier)>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-/// Register a circuit verifier for halo2 proof verification in tests.
-/// The verifier closure handles deserializing the VK bytes and performing proof verification.
+/// Register a circuit verifier for host `proof_instance_verify` in native tests.
 ///
-/// # Example - in a test:
+/// Available to dependents (suite, contract unit tests) under feature `zk` —
+/// not gated on `cfg(test)` of cosmwasm-std itself.
+///
+/// # Example
 /// ```ignore
-/// let verifier = Box::new(|proof_bytes: &[u8], instances_bytes: &[u8]| {
-///     // The closure has access to vm types via dev-dependencies
-///     let loaded_vk = LoadedVk::from_bytes(&vk_bytes)?;
-///     let instance = Instance::new_from_vm(instances_bytes)?;
-///     Proof::new(proof_bytes.to_vec())
-///         .verify(loaded_vk.vk(), &[instance])
-///         .map(|_| true)
-///         .map_err(|e| VerificationError::generic_err(format!("{}", e)))
-/// });
-/// register_test_circuit(1, "NoRick", verifier);
+/// use cosmwasm_std::testing::{register_test_circuit, clear_test_circuits};
+/// register_test_circuit(42, "bn254-square", Box::new(|proof, instances| {
+///     // return Ok(true) if valid
+///     Ok(true)
+/// }));
+/// // ... run Authenticate ...
+/// clear_test_circuits();
 /// ```
-#[cfg(test)]
+#[cfg(feature = "zk")]
 pub fn register_test_circuit(zkid: u64, circuit_name: &str, verifier: CircuitVerifier) {
     ZK_CIRCUIT_REGISTRY.with(|registry| {
         registry
@@ -91,7 +90,7 @@ pub fn register_test_circuit(zkid: u64, circuit_name: &str, verifier: CircuitVer
 }
 
 /// Clear all registered test circuits. Useful for test isolation.
-#[cfg(test)]
+#[cfg(feature = "zk")]
 pub fn clear_test_circuits() {
     ZK_CIRCUIT_REGISTRY.with(|registry| {
         registry.borrow_mut().clear();
@@ -204,12 +203,7 @@ impl Api for MockApi {
         proof: &[u8],
         instances: &[u8],
     ) -> Result<bool, VerificationError> {
-        // // Validate input sizes
-        // if proof.is_empty() ||instances.is_empty() || instances.len() % 32 != 0{
-        //     return Err(VerificationError::unknown_err(66));
-        // }
         // Get verifier from registry and invoke it
-        // Retrieve and invoke the verifier closure from registry
         // IMPORTANT: Call the verifier INSIDE the with block, not after
         ZK_CIRCUIT_REGISTRY.with(|registry| {
             let borrow = registry.borrow();
@@ -218,27 +212,25 @@ impl Api for MockApi {
                 None => Err(VerificationError::unknown_err(66)),
             }
         })
+    }
 
-        // // Deserialize the verifying key from bytes
-        // // This mirrors the VM's do_proof_instance_verify implementation
-        // let loaded_vk =
-        //     cosmwasm_vm::zk::LoadedVk::from_bytes(&vk_bytes).map_err(|e| {
-        //         return Err(VerificationError::unknown_err(66));
-        //     })?;
-
-        // // Deserialize instances from bytes (Fp scalars)
-        // let instance = cosmwasm_vm::zk::Instance::new_from_vm(instances).map_err(|e| {
-        //     return Err(VerificationError::unknown_err(66));
-        // })?;
-
-        // // Verify the proof
-        // cosmwasm_vm::zk::Proof::new(proof.to_vec())
-        //     .verify(loaded_vk.vk(), &[instance])
-        //     .map(|_| true)
-        //     .map_err(|e| {
-        //         return Err(VerificationError::unknown_err(66));
-        //     })
-        // Ok(false)
+    #[cfg(feature = "zk")]
+    fn proof_instance_batch_verify(
+        &self,
+        zkids: &[u64],
+        proofs: &[&[u8]],
+        instances: &[&[u8]],
+    ) -> Result<bool, VerificationError> {
+        // Sequential registry verifies (MockApi has no GPU / host backend).
+        if zkids.len() != proofs.len() || proofs.len() != instances.len() {
+            return Err(VerificationError::unknown_err(66));
+        }
+        for i in 0..zkids.len() {
+            if !self.proof_instance_verify(zkids[i], proofs[i], instances[i])? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn bls12_381_pairing_equality(
@@ -348,6 +340,101 @@ impl Api for MockApi {
             signatures,
             public_keys,
         )?)
+    }
+
+    #[cfg(feature = "hash-blake")]
+    fn blake2b_256(&self, input: &[u8]) -> [u8; 32] {
+        cosmwasm_crypto::blake2b_256(input)
+    }
+
+    #[cfg(feature = "hash-blake")]
+    fn blake3_256(&self, input: &[u8]) -> [u8; 32] {
+        cosmwasm_crypto::blake3_256(input)
+    }
+
+    #[cfg(feature = "hash-poseidon")]
+    fn poseidon_hash_pallas(&self, inputs: &[u8]) -> Result<[u8; 32], VerificationError> {
+        cosmwasm_crypto::poseidon_hash_pallas_bytes(inputs)
+            .map_err(|_| VerificationError::GenericErr)
+    }
+
+    #[cfg(feature = "hash-poseidon")]
+    fn poseidon_hash_vesta(&self, inputs: &[u8]) -> Result<[u8; 32], VerificationError> {
+        cosmwasm_crypto::poseidon_hash_vesta_bytes(inputs)
+            .map_err(|_| VerificationError::GenericErr)
+    }
+
+    #[cfg(feature = "hash-poseidon")]
+    fn poseidon377_hash(
+        &self,
+        domain: &[u8],
+        message: &[u8],
+    ) -> Result<[u8; 32], VerificationError> {
+        cosmwasm_crypto::poseidon377_hash_bytes(domain, message)
+            .map_err(|_| VerificationError::GenericErr)
+    }
+
+    #[cfg(feature = "redpallas")]
+    fn redpallas_spendauth_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        Ok(cosmwasm_crypto::redpallas_spendauth_verify(
+            message, signature, public_key,
+        )?)
+    }
+
+    #[cfg(feature = "redpallas")]
+    fn redpallas_binding_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        Ok(cosmwasm_crypto::redpallas_binding_verify(
+            message, signature, public_key,
+        )?)
+    }
+
+    #[cfg(feature = "redpallas")]
+    fn redjubjub_spendauth_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        Ok(cosmwasm_crypto::redjubjub_spendauth_verify(
+            message, signature, public_key,
+        )?)
+    }
+
+    #[cfg(feature = "redpallas")]
+    fn redjubjub_binding_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        Ok(cosmwasm_crypto::redjubjub_binding_verify(
+            message, signature, public_key,
+        )?)
+    }
+
+    #[cfg(feature = "bn254")]
+    fn bn254_add(&self, input: &[u8]) -> Result<[u8; 64], VerificationError> {
+        cosmwasm_crypto::bn254_add(input).map_err(|_| VerificationError::GenericErr)
+    }
+
+    #[cfg(feature = "bn254")]
+    fn bn254_scalar_mul(&self, input: &[u8]) -> Result<[u8; 64], VerificationError> {
+        cosmwasm_crypto::bn254_scalar_mul(input).map_err(|_| VerificationError::GenericErr)
+    }
+
+    #[cfg(feature = "bn254")]
+    fn bn254_pairing_equality(&self, input: &[u8]) -> Result<bool, VerificationError> {
+        cosmwasm_crypto::bn254_pairing_equality(input).map_err(|_| VerificationError::GenericErr)
     }
 
     fn debug(&self, #[allow(unused)] message: &str) {

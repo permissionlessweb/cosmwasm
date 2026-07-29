@@ -535,20 +535,30 @@ where
                 .join(ZK_CIRCUIT_DIR)
                 .join(hex::encode(circuit_key))
                 .with_extension("bin");
-            if !param_path.exists() || !vk_path.exists() {
+            if !vk_path.exists() || !circuit_path.exists() {
                 return Ok(None);
             }
-            let param_bytes = fs::read(&param_path)
-                .map_err(|e| VmError::cache_err(format!("read param for verify: {e}")))?;
+            let full = fs::read(&circuit_path)
+                .map_err(|e| VmError::cache_err(format!("read circuit for verify: {e}")))?;
+            let footer = check_circuit(&full).map_err(VmError::zk_err)?;
+            // Empty-param (param_len=0): allow missing or empty param file;
+            // do not require a Halo2 k header.
+            let param_bytes = if footer.param_len == 0 {
+                if param_path.exists() {
+                    fs::read(&param_path)
+                        .map_err(|e| VmError::cache_err(format!("read param for verify: {e}")))?
+                } else {
+                    Vec::new()
+                }
+            } else {
+                if !param_path.exists() {
+                    return Ok(None);
+                }
+                fs::read(&param_path)
+                    .map_err(|e| VmError::cache_err(format!("read param for verify: {e}")))?
+            };
             let vk_body = fs::read(&vk_path)
                 .map_err(|e| VmError::cache_err(format!("read vk for verify: {e}")))?;
-            let footer = if circuit_path.exists() {
-                let full = fs::read(&circuit_path)
-                    .map_err(|e| VmError::cache_err(format!("read circuit for verify: {e}")))?;
-                check_circuit(&full).map_err(|e| VmError::generic_err(format!("ZK load: {e}")))?
-            } else {
-                return Ok(None);
-            };
             let vk = zk_cosmwasm::AnyVerifyingKey::from_split_bytes(
                 &param_bytes,
                 &vk_body,
@@ -693,20 +703,44 @@ where
 
     /// Store param bytes independently, without a circuit.
     ///
-    /// Reads `k` from the first 4 bytes of the halo2 params (u32 LE),
-    /// computes the 36-byte param_key `[appstate_key_le][SHA256(params)]`,
-    /// writes to `zk_param/{param_key}.bin`, and caches in pinned memory.
+    /// # Halo2 (non-empty)
+    /// Reads `k` from the first 4 bytes of the halo2 params (u32 LE) and uses
+    /// `appstate_key = BE([prover_id=0, curve_id=0, k, 0])`.
     ///
-    /// Returns the 36-byte param_key.
+    /// # Empty-param path (Groth16 / BN254)
+    /// When `p` is empty, skips the k-header parse entirely and stores an empty
+    /// file under `zk_param/{param_key}.bin` with
+    /// `appstate_key = BE([0, 0, 0, 0])` and `param_checksum = SHA256([])`.
+    /// Prefer [`Self::store_param_with_meta`] (or `store_circuit` with a full
+    /// footer) when the real prover/curve/k prefix is known.
+    ///
+    /// Returns the 36-byte param_key = `[appstate_key_le][SHA256(params)]`.
     pub fn store_param(&self, p: &[u8]) -> VmResult<[u8; 36]> {
+        if p.is_empty() {
+            // Empty-param convention: no Halo2 k header.
+            return self.store_param_with_meta(p, 0, 0, 0);
+        }
         // Extract k from the halo2 params header (first 4 bytes, u32 LE)
         if p.len() < 4 {
             return Err(VmError::cache_err("param bytes too short for k header"));
         }
         let k_bytes: [u8; 4] = p[..4].try_into().expect("4-byte k");
         let k = u32::from_le_bytes(k_bytes) as u8;
+        self.store_param_with_meta(p, 0, 0, k)
+    }
 
-        let appstate_key = u32::from_be_bytes([0, 0, k, 0]);
+    /// Store param bytes using explicit footer-derived key metadata.
+    ///
+    /// `appstate_key = BE([prover_id, curve_id, k, 0])`. Empty `p` is allowed
+    /// (writes a zero-length `zk_param` file; checksum is `SHA256([])`).
+    pub fn store_param_with_meta(
+        &self,
+        p: &[u8],
+        prover_id: u8,
+        curve_id: u8,
+        k: u8,
+    ) -> VmResult<[u8; 36]> {
+        let appstate_key = u32::from_be_bytes([prover_id, curve_id, k, 0]);
         let param_checksum = Checksum::generate(p);
 
         let mut param_key = [0u8; 36];
@@ -714,7 +748,10 @@ where
         param_key[4..].copy_from_slice(param_checksum.as_slice());
 
         let mut cache = self.inner.lock().unwrap();
-        let param_path = cache.param_path().join(hex::encode(param_key)).with_extension("bin");
+        let param_path = cache
+            .param_path()
+            .join(hex::encode(param_key))
+            .with_extension("bin");
         if let Some(parent) = param_path.parent() {
             mkdir_p(parent).map_err(|_e| VmError::cache_err("Error creating param dir"))?;
         }
@@ -732,7 +769,10 @@ where
             &param_key,
             crate::modules::CachedParam::from_bytes(p.to_vec()),
         )?;
-        cache.memory_cache.store_param(&param_key, &crate::modules::CachedParam::from_bytes(p.to_vec()))?;
+        cache.memory_cache.store_param(
+            &param_key,
+            &crate::modules::CachedParam::from_bytes(p.to_vec()),
+        )?;
 
         Ok(param_key)
     }
@@ -789,24 +829,43 @@ where
     S: Storage + 'static,    // 'static is needed by `impl<…> Instance`
     Q: Querier + 'static,    // 'static is needed by `impl<…> Instance`
 {
-    /// stores a circuit to both disk and pinned to memory. deconstructs params for isolated storage as well
+    /// Store a circuit blob.
+    ///
+    /// * `persist=true` — write split/monolithic files + pin (DeliverTx path).
+    /// * `persist=false` — **memory-only** warm (H-03 / KD-sem intended model):
+    ///   deserialize VK into the in-memory LRU, **no** disk, **no** pin.
+    ///   Used by `SimulateStoreCircuit`. Still runs full `check_circuit`.
     pub fn store_circuit(&self, zk: &[u8], persist: bool) -> VmResult<[u8; 72]> {
         let foot = check_circuit(zk)?;
+        let circuit_key = foot.to_circuit_key();
 
-        println!("check_circuit checkpoint");
         if persist {
-            println!("save_circuit_to_disk");
             let (filename, circuitname): ([[u8; 36]; 2], [u8; 72]) =
-                self.save_circuit_to_disk(zk)?;
-
-            assert_eq!(filename[0], foot.to_param_key());
-            assert_eq!(filename[1], foot.to_vk_key());
+                self.save_circuit_to_disk(zk, &foot)?;
+            if filename[0] != foot.to_param_key() || filename[1] != foot.to_vk_key() {
+                return Err(VmError::cache_err("circuit key mismatch after save"));
+            }
+            if circuitname != circuit_key {
+                return Err(VmError::cache_err("circuitname != footer.to_circuit_key()"));
+            }
             self.pin_circuit(&circuitname)?;
-            assert_eq!(circuitname, foot.to_circuit_key());
             Ok(circuitname)
         } else {
-            println!("not persisting");
-            Ok(foot.to_circuit_key())
+            // H-03: memory-only — deserialise + LRU, no disk/pin.
+            let vk = zk_cosmwasm::AnyVerifyingKey::try_from(zk).map_err(VmError::zk_err)?;
+            // H-06 partial: identity of deserialized VK must match footer key.
+            if vk.circuit_key() != circuit_key {
+                return Err(VmError::cache_err(
+                    "deserialized circuit_key does not match footer.to_circuit_key()",
+                ));
+            }
+            let size_estimate = zk.len();
+            let cached = crate::modules::CachedCircuit { vk, size_estimate };
+            let mut cache = self.inner.lock().unwrap();
+            cache
+                .memory_cache
+                .store_circuit(&circuit_key, &cached)?;
+            Ok(circuit_key)
         }
     }
 
@@ -819,15 +878,18 @@ where
     // }
 
     /// Saves params, cs+vk, and the full circuit under their respective dirs.
-    fn save_circuit_to_disk(&self, c: &[u8]) -> VmResult<([[u8; 36]; 2], [u8; 72])> {
+    fn save_circuit_to_disk(
+        &self,
+        c: &[u8],
+        cf: &CircuitFooter,
+    ) -> VmResult<([[u8; 36]; 2], [u8; 72])> {
         let cache = self.inner.lock().unwrap();
-        let cf = CircuitFooter::from_bytes(&c[c.len() - COSMWASM_FOOTER_LENGTH..])?;
         save_circuit_parts(
             &cache.param_path(),
             &cache.vk_path(),
             &cache.circuit_path(),
             c,
-            cf,
+            *cf,
         )
     }
 
@@ -839,15 +901,29 @@ where
     /// has to keep track of which entries we have here.
     pub fn remove_circuit(&self, circuit_file_key: &[u8; 72]) -> VmResult<()> {
         let mut cache = self.inner.lock().unwrap();
-        // Remove compiled module & vk from disk.
-        // Remove compiled moduled from disk (if it exists).
-        // Here we could also delete from memory caches but this is not really
-        // necessary as they are pushed out from the LRU over time or disappear
-        // when the node process restarts.
+        let param_key: [u8; 36] = circuit_file_key[..36]
+            .try_into()
+            .map_err(|_| VmError::cache_err("invalid circuit key (param half)"))?;
+        let vk_key: [u8; 36] = circuit_file_key[36..]
+            .try_into()
+            .map_err(|_| VmError::cache_err("invalid circuit key (vk half)"))?;
+
         cache.fs_cache.remove_circuit(circuit_file_key)?;
         cache.pinned_memory_cache.remove_circuit(circuit_file_key)?;
         tracing::debug!("remove_circuit_from_disk ");
         self.remove_circuit_from_disk(&cache.circuit_path(), circuit_file_key)?;
+
+        let param_path = cache
+            .param_path()
+            .join(hex::encode(param_key))
+            .with_extension("bin");
+        let vk_path = cache
+            .vk_path()
+            .join(hex::encode(vk_key))
+            .with_extension("bin");
+        let _ = std::fs::remove_file(&param_path);
+        let _ = std::fs::remove_file(&vk_path);
+
         Ok(())
     }
 
@@ -922,10 +998,13 @@ where
             .store_circuit(circuit_file_key, verifying_key)
     }
 
+    /// Unpin a circuit: drop **pin residency only** (H-04 / Wasm-like intent).
+    /// Disk artifacts and fs_cache module bytes remain for later pin/load.
+    /// Full deletion remains [`Self::remove_circuit`].
     pub fn unpin_circuit(&self, circuit_file_key: &[u8; 72]) -> VmResult<()> {
         let mut cache = self.inner.lock().unwrap();
         cache.pinned_memory_cache.remove_circuit(circuit_file_key)?;
-        return cache.fs_cache.remove_circuit(circuit_file_key);
+        Ok(())
     }
 
     /// Load a verifying key from disk
@@ -1060,63 +1139,81 @@ where
             .with_extension("bin");
 
         // Prefer split reconstruction so param files are the source of truth.
-        if param_path.exists() && vk_path.exists() {
-            let param_bytes = fs::read(&param_path)
-                .map_err(|e| VmError::cache_err(format!("Error reading param file: {e}")))?;
-            let vk_body_bytes = fs::read(&vk_path)
-                .map_err(|e| VmError::cache_err(format!("Error reading vk file: {e}")))?;
+        // Empty-param circuits (param_len=0) may omit the param file entirely.
+        if vk_path.exists() && circuit_path.exists() {
+            let full = fs::read(&circuit_path)
+                .map_err(|e| VmError::cache_err(format!("Error reading circuit file: {e}")))?;
+            let footer = check_circuit(&full).map_err(VmError::zk_err)?;
+            // H-06: re-bind path key to footer-derived identity.
+            let derived = footer.to_circuit_key();
+            if derived != circuit_key {
+                return Err(VmError::cache_err(format!(
+                    "circuit file key {} does not match footer.to_circuit_key() {}",
+                    hex::encode(circuit_key),
+                    hex::encode(derived)
+                )));
+            }
 
-            // Footer lives on the monolithic circuit blob (and was checked at store).
-            // If the circuit file is missing, try to recover footer from a
-            // combined body only when the monolithic path is available.
-            let footer = if circuit_path.exists() {
-                let full = fs::read(&circuit_path)
-                    .map_err(|e| VmError::cache_err(format!("Error reading circuit file: {e}")))?;
-                check_circuit(&full).map_err(|e| VmError::generic_err(format!("ZK load: {e}")))?
+            let param_bytes = if footer.param_len == 0 {
+                if param_path.exists() {
+                    fs::read(&param_path)
+                        .map_err(|e| VmError::cache_err(format!("Error reading param file: {e}")))?
+                } else {
+                    Vec::new()
+                }
+            } else if param_path.exists() {
+                fs::read(&param_path)
+                    .map_err(|e| VmError::cache_err(format!("Error reading param file: {e}")))?
             } else {
-                return Err(VmError::cache_err(
-                    "circuit footer unavailable: missing monolithic circuit file for split load",
-                ));
+                // Non-empty params required but missing — fall through to monolithic.
+                Vec::new()
             };
 
-            if param_bytes.len() as u32 != footer.param_len {
-                return Err(VmError::cache_err(format!(
-                    "param file length {} != footer.param_len {}",
-                    param_bytes.len(),
-                    footer.param_len
-                )));
-            }
-            let expected_vk_body = (footer.cs_len as usize).saturating_add(footer.vk_len as usize);
-            if vk_body_bytes.len() != expected_vk_body {
-                return Err(VmError::cache_err(format!(
-                    "vk file length {} != cs_len+vk_len {}",
-                    vk_body_bytes.len(),
-                    expected_vk_body
-                )));
-            }
-            if Checksum::generate(&param_bytes).as_slice() != footer.param_checksum {
-                return Err(VmError::cache_err(
-                    "calculated param hash doesn't match stored hash",
-                ));
-            }
-            if Checksum::generate(&vk_body_bytes).as_slice() != footer.vk_checksum {
-                return Err(VmError::cache_err(
-                    "calculated vk hash doesn't match stored hash",
-                ));
-            }
+            let use_split = footer.param_len == 0 || param_path.exists();
+            if use_split {
+                let vk_body_bytes = fs::read(&vk_path)
+                    .map_err(|e| VmError::cache_err(format!("Error reading vk file: {e}")))?;
 
-            // Ensure the split material actually deserializes before caching.
-            let _vk = zk_cosmwasm::AnyVerifyingKey::from_split_bytes(
-                &param_bytes,
-                &vk_body_bytes,
-                &footer,
-            )
-            .map_err(|e| VmError::zk_err(e))?;
+                if param_bytes.len() as u32 != footer.param_len {
+                    return Err(VmError::cache_err(format!(
+                        "param file length {} != footer.param_len {}",
+                        param_bytes.len(),
+                        footer.param_len
+                    )));
+                }
+                let expected_vk_body =
+                    (footer.cs_len as usize).saturating_add(footer.vk_len as usize);
+                if vk_body_bytes.len() != expected_vk_body {
+                    return Err(VmError::cache_err(format!(
+                        "vk file length {} != cs_len+vk_len {}",
+                        vk_body_bytes.len(),
+                        expected_vk_body
+                    )));
+                }
+                if Checksum::generate(&param_bytes).as_slice() != footer.param_checksum {
+                    return Err(VmError::cache_err(
+                        "calculated param hash doesn't match stored hash",
+                    ));
+                }
+                if Checksum::generate(&vk_body_bytes).as_slice() != footer.vk_checksum {
+                    return Err(VmError::cache_err(
+                        "calculated vk hash doesn't match stored hash",
+                    ));
+                }
 
-            let mut body = Vec::with_capacity(param_bytes.len() + vk_body_bytes.len());
-            body.extend_from_slice(&param_bytes);
-            body.extend_from_slice(&vk_body_bytes);
-            return Ok(SerializedCircuitData::new(&body, &footer.to_bytes()));
+                // Ensure the split material actually deserializes before caching.
+                let _vk = zk_cosmwasm::AnyVerifyingKey::from_split_bytes(
+                    &param_bytes,
+                    &vk_body_bytes,
+                    &footer,
+                )
+                .map_err(VmError::zk_err)?;
+
+                let mut body = Vec::with_capacity(param_bytes.len() + vk_body_bytes.len());
+                body.extend_from_slice(&param_bytes);
+                body.extend_from_slice(&vk_body_bytes);
+                return Ok(SerializedCircuitData::new(&body, &footer.to_bytes()));
+            }
         }
 
         // Monolithic fallback
@@ -1141,7 +1238,7 @@ where
         println!("length on disk:{};", bytes.len());
         let body = &bytes[0..bytes.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH];
         let footer = crate::check_circuit(&bytes)
-            .map_err(|e| VmError::generic_err(format!("ZK load: {}", e)))?
+            .map_err(VmError::zk_err)?
             .to_bytes();
         Ok(Some(SerializedCircuitData::new(body, &footer)))
     }
@@ -1760,7 +1857,7 @@ mod tests {
             instance_memory_limit_bytes: TESTING_MEMORY_LIMIT,
         };
         let cache: Cache<MockApi, MockStorage, MockQuerier> =
-            unsafe { Cache::new(options).unwrap() };
+            unsafe { Cache::new(options.clone()).unwrap() };
         let checksum = cache.store_circuit(NORICK_CIRCUIT, true).unwrap();
 
         // Corrupt the split + monolithic circuit files on disk
@@ -1805,13 +1902,31 @@ mod tests {
             ),
         };
 
-        // unpin circuit, so that we must load from disk, invoking verification, and throwing error
+        // H-04: unpin is pin-only — circuit remains in fs_cache / memory and still loads.
         cache.unpin_circuit(&checksum).unwrap();
+        let still = cache
+            .load_circuit(&checksum)
+            .expect("load after unpin must not err");
+        assert!(
+            still.is_some(),
+            "H-04: after unpin, fs_cache/memory still serves the circuit"
+        );
+
+        // Force cold path through corrupted split files: drop process caches by
+        // reconstructing Cache over the same base_dir (empty pin/memory LRU),
+        // and wipe modules/ so load falls through to state/wasm disk.
+        drop(cache);
+        let modules_root = tmp_dir.path().join(CACHE_DIR).join(MODULES_DIR);
+        if modules_root.exists() {
+            let _ = std::fs::remove_dir_all(&modules_root);
+        }
+        let cache: Cache<MockApi, MockStorage, MockQuerier> =
+            unsafe { Cache::new(options).unwrap() };
         let res = cache.load_circuit(&checksum);
         match res {
             Ok(r) => {
                 println!("{:#?}", r);
-                panic!("This must not succeed")
+                panic!("This must not succeed — cold path should see corrupted disk")
             }
             Err(e) => {
                 println!("{:#?}", e);
@@ -1823,7 +1938,11 @@ mod tests {
                         || msg.contains("bad circuit")
                         || msg.contains("param file length")
                         || msg.contains("vk file length")
-                        || msg.contains("Failed to parse"),
+                        || msg.contains("Failed to parse")
+                        || msg.contains("too short")
+                        || msg.contains("deserializ")
+                        || msg.contains("circuit file key")
+                        || msg.contains("no circuit found"),
                     "unexpected error: {msg}"
                 );
             }
@@ -1862,12 +1981,32 @@ mod tests {
 
     #[test]
     fn remove_circuit_works() {
-        let (testing_opts, _temp_dir) = make_testing_options();
+        let (testing_opts, temp_dir) = make_testing_options();
         let cache: Cache<MockApi, MockStorage, MockQuerier> =
             unsafe { Cache::new(testing_opts).unwrap() };
 
         // Store
         let checksum = cache.store_circuit(NORICK_CIRCUIT, true).unwrap();
+        let param_key: [u8; 36] = checksum[..36].try_into().unwrap();
+        let vk_key: [u8; 36] = checksum[36..].try_into().unwrap();
+        let param_path = temp_dir
+            .path()
+            .join("state/wasm/zk_param")
+            .join(hex::encode(param_key))
+            .with_extension("bin");
+        let vk_path = temp_dir
+            .path()
+            .join("state/wasm/zk_vk")
+            .join(hex::encode(vk_key))
+            .with_extension("bin");
+        let circuit_path = temp_dir
+            .path()
+            .join("state/wasm/zk_circuit")
+            .join(hex::encode(checksum))
+            .with_extension("bin");
+        assert!(param_path.exists());
+        assert!(vk_path.exists());
+        assert!(circuit_path.exists());
 
         // Exists
         println!("loading circuit");
@@ -1876,6 +2015,9 @@ mod tests {
         // Remove
         println!("removing circuit");
         cache.remove_circuit(&checksum).unwrap();
+        assert!(!param_path.exists());
+        assert!(!vk_path.exists());
+        assert!(!circuit_path.exists());
 
         // Does not exist anymore
         println!("ensuring gracful noop on loading non-existent circuit");
@@ -2895,5 +3037,176 @@ mod tests {
             unsafe { Cache::new_with_config(config).unwrap() };
         let err = cache.store_code(HACKATOM, true, true).unwrap_err();
         assert!(matches!(err, VmError::StaticValidationErr { .. }));
+    }
+
+    // ── BN254 / empty-param Path A (feature "bn254") ──────────────────────
+
+    /// Build a synthetic BN254 Groth16 circuit blob:
+    /// `[vk_body | 80-byte footer]` with `param_len=0`, `cs_len=0`.
+    #[cfg(all(feature = "zk", feature = "bn254"))]
+    fn synthetic_bn254_circuit(vk_body: &[u8], i: u8) -> (Vec<u8>, CircuitFooter) {
+        use sha2::{Digest, Sha256};
+        use zk_cosmwasm::{CircuitType, curves::CurveType};
+
+        let param_checksum: [u8; 32] = Sha256::digest([]).into();
+        let vk_checksum: [u8; 32] = Sha256::digest(vk_body).into();
+        let footer = CircuitFooter::new(
+            CircuitType::Groth16,
+            CurveType::Bn254,
+            0, // k unused
+            i,
+            0, // param_len
+            0, // cs_len
+            vk_body.len() as u32,
+            param_checksum,
+            vk_checksum,
+        );
+        let mut blob = Vec::with_capacity(vk_body.len() + COSMWASM_FOOTER_LENGTH);
+        blob.extend_from_slice(vk_body);
+        blob.extend_from_slice(&footer.to_bytes());
+        (blob, footer)
+    }
+
+    #[test]
+    #[cfg(all(feature = "zk", feature = "bn254"))]
+    fn bn254_empty_param_store_and_load_roundtrip() {
+        let vk_body = b"synthetic-bn254-vk-body-for-cache-phase-a";
+        let (blob, footer) = synthetic_bn254_circuit(vk_body, 2);
+        assert_eq!(footer.param_len, 0);
+        assert_eq!(footer.prover_id, zk_cosmwasm::CircuitType::Groth16 as u8);
+        assert_eq!(footer.curve_id, 4);
+
+        let (testing_opts, _temp_dir) = make_testing_options();
+        let cache: Cache<MockApi, MockStorage, MockQuerier> =
+            unsafe { Cache::new(testing_opts).unwrap() };
+
+        let key = cache.store_circuit(&blob, true).unwrap();
+        assert_eq!(key, footer.to_circuit_key());
+
+        let loaded = cache.load_circuit(&key).unwrap().unwrap();
+        assert!(
+            matches!(loaded.vk, zk_cosmwasm::AnyVerifyingKey::Bn254(_)),
+            "expected AnyVerifyingKey::Bn254, got {:?}",
+            loaded.vk
+        );
+        assert_eq!(
+            zk_cosmwasm::CircuitType::try_from(loaded.vk.clone()).unwrap(),
+            zk_cosmwasm::CircuitType::Groth16
+        );
+        // Monolithic round-trip: body is vk only (empty params) + footer.
+        let restored = loaded.vk.to_bytes_with_params().unwrap();
+        assert_eq!(restored.as_slice(), blob.as_slice());
+
+        // Synthetic body is not a real ark VK — verify is a format error (not stub).
+        let proof = zk_cosmwasm::Proof::new(vec![0u8; 8]);
+        // Instance routing uses curve_id (4), not zkid (D7).
+        let inst = zk_cosmwasm::AnyInstance::try_from_bytes(loaded.vk.curve_id() as u32, &[]).unwrap();
+        let err = loaded.vk.verify(&proof, &[inst]).unwrap_err();
+        assert!(
+            err.is_format_err() || err.to_string().contains("format") || err.to_string().contains("invalid"),
+            "unexpected verify error: {err}"
+        );
+    }
+
+    /// Real Groth16 golden through Path A cache store/load/verify.
+    #[test]
+    #[cfg(all(feature = "zk", feature = "bn254"))]
+    fn bn254_golden_store_load_verify() {
+        static BLOB: &[u8] = include_bytes!("../../zk/testdata/square_vk.bin");
+        static PROOF: &[u8] = include_bytes!("../../zk/testdata/square_proof.bin");
+        static PUBLIC: &[u8] = include_bytes!("../../zk/testdata/square_public.bin");
+
+        let (testing_opts, _temp_dir) = make_testing_options();
+        let cache: Cache<MockApi, MockStorage, MockQuerier> =
+            unsafe { Cache::new(testing_opts).unwrap() };
+        let key = cache.store_circuit(BLOB, true).unwrap();
+        let loaded = cache.load_circuit(&key).unwrap().unwrap();
+        assert_eq!(loaded.vk.curve_id(), 4);
+        assert_eq!(loaded.vk.prover_id(), 1);
+        let inst = zk_cosmwasm::AnyInstance::try_from_bytes(loaded.vk.curve_id() as u32, PUBLIC)
+            .unwrap();
+        loaded
+            .vk
+            .verify(&zk_cosmwasm::Proof::new(PROOF.to_vec()), &[inst])
+            .expect("golden must verify");
+    }
+
+    #[test]
+    #[cfg(all(feature = "zk", feature = "bn254"))]
+    fn bn254_circuit_loader_hits_pinned_then_memory() {
+        let vk_body = b"bn254-loader-warm-path-vk";
+        let (blob, footer) = synthetic_bn254_circuit(vk_body, 1);
+        let key = footer.to_circuit_key();
+
+        let (testing_opts, _temp_dir) = make_testing_options();
+        let cache: Cache<MockApi, MockStorage, MockQuerier> =
+            unsafe { Cache::new(testing_opts).unwrap() };
+
+        let stored = cache.store_circuit(&blob, true).unwrap();
+        assert_eq!(stored, key);
+
+        // store_circuit(persist=true) pins; first loader call is pinned hit.
+        let loader = cache.circuit_loader();
+        let vk1 = loader(key).unwrap().expect("pinned load");
+        assert!(matches!(vk1, zk_cosmwasm::AnyVerifyingKey::Bn254(_)));
+        assert_eq!(cache.stats().hits_pinned_memory_cache, 1);
+
+        // Unpin also clears fs_cache; split files remain under wasm_path.
+        // Next load reconstructs from split files and warms memory LRU.
+        cache.unpin_circuit(&key).unwrap();
+        let vk2 = loader(key).unwrap().expect("cold split reconstruct");
+        assert!(matches!(vk2, zk_cosmwasm::AnyVerifyingKey::Bn254(_)));
+
+        // Second load should hit warm memory cache.
+        let hits_mem_before = cache.stats().hits_memory_cache;
+        let vk3 = loader(key).unwrap().expect("warm memory load");
+        assert!(matches!(vk3, zk_cosmwasm::AnyVerifyingKey::Bn254(_)));
+        assert!(
+            cache.stats().hits_memory_cache > hits_mem_before,
+            "second load after reconstruct should hit memory cache"
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "zk", feature = "bn254"))]
+    fn bn254_store_param_empty_skips_k_header() {
+        let (testing_opts, _temp_dir) = make_testing_options();
+        let cache: Cache<MockApi, MockStorage, MockQuerier> =
+            unsafe { Cache::new(testing_opts).unwrap() };
+
+        // Empty params: must not require Halo2 k header.
+        let key = cache.store_param(&[]).unwrap();
+        assert_eq!(&key[..4], &0u32.to_le_bytes());
+        // SHA256([]) is a fixed digest.
+        let empty_hash = Checksum::generate(&[]);
+        assert_eq!(&key[4..], empty_hash.as_slice());
+
+        // Footer-derived meta for Groth16+BN254.
+        let key2 = cache
+            .store_param_with_meta(&[], 1, 4, 0)
+            .unwrap();
+        let appstate = u32::from_be_bytes([1, 4, 0, 0]);
+        assert_eq!(&key2[..4], &appstate.to_le_bytes());
+        assert_eq!(&key2[4..], empty_hash.as_slice());
+    }
+
+    #[test]
+    #[cfg(feature = "zk")]
+    fn halo2_store_circuit_still_uses_nonempty_params() {
+        // Regression: no_rick Halo2 path still stores with non-empty params.
+        let footer = check_circuit(NORICK_CIRCUIT).unwrap();
+        assert!(footer.param_len > 0, "no_rick must have reusable params");
+        assert_eq!(footer.prover_id, 0);
+        assert_eq!(footer.curve_id, 0);
+
+        let (testing_opts, _temp_dir) = make_testing_options();
+        let cache: Cache<MockApi, MockStorage, MockQuerier> =
+            unsafe { Cache::new(testing_opts).unwrap() };
+        let key = cache.store_circuit(NORICK_CIRCUIT, true).unwrap();
+        let loaded = cache.load_circuit(&key).unwrap().unwrap();
+        assert!(matches!(
+            loaded.vk,
+            zk_cosmwasm::AnyVerifyingKey::Vesta(_)
+        ));
     }
 }

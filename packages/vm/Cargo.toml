@@ -41,10 +41,24 @@ dhat-heap = ["dep:dhat"]
 # ibc2 enables ibc2-dependent messages, entrypoints and queries
 ibc2 = ["cosmwasm-std/ibc2"]
 zk = ["cosmwasm-std/zk", "dep:zk-cosmwasm"]
+# BN254 (alt_bn128) curve host functions — EIP-196/197/1108
+# Also enables zk-cosmwasm BN254 / Groth16 AnyVerifyingKey dispatch when `zk` is on.
+bn254 = ["cosmwasm-crypto/bn254", "zk-cosmwasm?/bn254"]
+# Native deterministic BLAKE2b-256 / BLAKE3-256 host digests (CPU only).
+hash-blake = ["cosmwasm-crypto/hash-blake"]
+# Algebraic Poseidon hosts (Zcash Pasta + Penumbra poseidon377).
+hash-poseidon = ["cosmwasm-crypto/hash-poseidon"]
+# RedPallas (Orchard) + RedJubjub (Sapling) signature verify hosts.
+redpallas = ["cosmwasm-crypto/redpallas"]
+# Optional host GPU backend for eligible ZK verify ops (CPU-golden, scheduled gas).
+# Default OFF — zero new deps when disabled. Does NOT enable GPU for blake.
+# See docs/research/gpu-accel/DESIGN-G1-verifier-backend.md
+gpu = ["zk-cosmwasm?/gpu"]
 
 [dependencies]
 bech32 = "0.11.0"
 blake2 = "0.10.6"
+blake3 = "1.5"
 clru = "0.6.1"
 # Uses the path when built locally; uses the given version from crates.io when published
 cosmwasm-core = { workspace = true }
@@ -84,6 +98,8 @@ glob = "0.3.1"
 hex-literal = "0.4.1"
 leb128 = "0.2"
 rand = "0.8"
+# Signing only for redpallas host round-trip tests (feature-gated usage).
+reddsa = { version = "0.5", features = ["std"] }
 target-lexicon = "0.12"
 tempfile = "3.1.0"
 time = { version = "0.3.35", features = ["formatting"] }
@@ -93,6 +109,11 @@ wat = "1.0"
 [[bench]]
 name = "main"
 harness = false
+
+[[bench]]
+name = "zk_circuit"
+harness = false
+required-features = ["zk"]
 
 [[example]]
 name = "heap_profiling"

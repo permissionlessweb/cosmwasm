@@ -1,4 +1,5 @@
 //! Zk-CosmWasm: zk-struct specific for interacting with zk-circuit binaries
+pub mod backend;
 pub mod circuits;
 pub mod curves;
 pub mod footer;
@@ -7,9 +8,22 @@ pub mod errors;
 pub use errors::{ZkError, ZkResult};
 
 pub use {
-    circuits::{AnyInstance, CosmwasmCircuit, AnyVerifyingKey, CircuitType, Proof, SerializedCircuitData},
+    backend::{select_backend, CpuBackend, SelectedBackend, VerifierBackend, VerifyItem},
+    circuits::{AnyInstance, AnyVerifyingKey, CircuitType, CosmwasmCircuit, Proof, SerializedCircuitData},
     curves::ZkCurve,
     footer::CircuitFooter,
+};
+
+#[cfg(feature = "gpu")]
+pub use backend::{probe_gpu, GpuBackend, GpuProbeReport, GpuProbeStatus};
+
+#[cfg(feature = "bn254")]
+pub use curves::snarkjs;
+#[cfg(feature = "bn254")]
+pub use curves::{
+    build_bn254_circuit_blob, convert_snarkjs_proof_json, convert_snarkjs_public_json,
+    convert_snarkjs_vkey_json, encode_public_inputs_be, serialize_ark_proof, serialize_ark_vk,
+    verify_snarkjs_fixtures, Bn254Instance, Bn254Scalar, Bn254VerifyingKey,
 };
 
 pub(crate) use circuits::{

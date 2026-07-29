@@ -63,9 +63,31 @@ pub fn check_circuit(bytes: &[u8]) -> ZkResult<CircuitFooter> {
     let param_len = footer.param_len as usize;
     let vk_body_end = total_len - COSMWASM_FOOTER_LENGTH;
 
-    // Split body into param bytes and vk+cs bytes
+    // C-05: total integrity — never panic on untrusted param_len.
+    if param_len > vk_body_end {
+        return Err(ZkError::format_err(format!(
+            "param_len {} exceeds circuit body length {}",
+            param_len, vk_body_end
+        )));
+    }
+
+    // Split body into param bytes and vk+cs bytes (cs+vk combined for checksum).
     let param_bytes = &bytes[..param_len];
     let vk_body_bytes = &bytes[param_len..vk_body_end];
+
+    // H-05: bind layout metadata — cs_len + vk_len must describe the vk_body.
+    // (Still not in circuit_key; enforced at integrity time so bad metadata fails closed.)
+    let declared_vk_body = (footer.cs_len as usize).saturating_add(footer.vk_len as usize);
+    if declared_vk_body != vk_body_bytes.len() {
+        // Allow legacy zero layout fields only when both are zero (unknown layout).
+        if footer.cs_len != 0 || footer.vk_len != 0 {
+            return Err(ZkError::format_err(format!(
+                "cs_len+vk_len {} != vk_body length {}",
+                declared_vk_body,
+                vk_body_bytes.len()
+            )));
+        }
+    }
 
     let computed_param = Checksum::generate(param_bytes);
     let computed_vk = Checksum::generate(vk_body_bytes);
@@ -112,7 +134,10 @@ mod tests {
     #[test]
     fn circuit_type_conversion() {
         assert_eq!(CircuitType::try_from(0).unwrap(), CircuitType::Plonkish);
-        assert_eq!(CircuitType::try_from(255).unwrap(), CircuitType::Plonkish);
+        assert_eq!(CircuitType::try_from(1).unwrap(), CircuitType::Groth16);
+        assert!(CircuitType::try_from(255).is_err());
+        assert_eq!(CircuitType::from_u8(1), Some(CircuitType::Groth16));
+        assert_eq!(CircuitType::from_u8(99), None);
     }
 
     #[test]
@@ -122,6 +147,22 @@ mod tests {
         assert!(result.is_err());
         // New 32-byte footer format requires at least 32 bytes
         assert!(result.unwrap_err().to_string().contains("bad circuit size"));
+    }
+
+    /// C-05: oversized param_len must error, not panic.
+    #[test]
+    fn check_circuit_param_len_oob_is_err() {
+        let mut blob = vec![0u8; COSMWASM_FOOTER_LENGTH + 8];
+        // param_len = 0xffff_ffff LE at footer offset 4
+        let footer_start = 8;
+        blob[footer_start + 4..footer_start + 8].copy_from_slice(&u32::MAX.to_le_bytes());
+        // minimal non-panic footer parse: rest zeros
+        let err = check_circuit(&blob).unwrap_err();
+        let s = err.to_string();
+        assert!(
+            s.contains("param_len") || s.contains("Integrity") || s.contains("format"),
+            "unexpected err: {s}"
+        );
     }
 
     /// Helper to create a minimal valid WASM module with a custom section
