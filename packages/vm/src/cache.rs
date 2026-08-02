@@ -461,6 +461,65 @@ where
             .remove(checksum)
     }
 
+    /// Synchronizes the set of pinned **Wasm modules** with the provided `checksums`.
+    ///
+    /// Upstream CosmWasm v3.0.x API used by wasmd `pinCode` / `InitializePinnedCodes`
+    /// (via wasmvm `SyncPinnedCodes`). Pins missing modules and unpins extras.
+    pub fn sync_pinned_codes(&self, checksums: &[Checksum]) -> VmResult<()> {
+        let mut add: Vec<Checksum> = vec![];
+        let mut del: Vec<Checksum> = vec![];
+        {
+            let cache = self.inner.lock().unwrap();
+            for (checksum, _) in cache.pinned_memory_cache.iter() {
+                if !checksums.contains(checksum) {
+                    del.push(*checksum);
+                }
+            }
+            for checksum in checksums {
+                if !cache.pinned_memory_cache.has(checksum) {
+                    add.push(*checksum);
+                }
+            }
+        }
+        for checksum in &add {
+            self.pin(checksum)?;
+        }
+        for checksum in &del {
+            self.unpin(checksum)?;
+        }
+        Ok(())
+    }
+
+    /// Synchronizes the set of pinned **circuits** (72-byte keys) with `circuit_keys`.
+    ///
+    /// Circuit analogue of [`Self::sync_pinned_codes`] — for wasmd bulk pin/unpin and
+    /// node restart re-pin without N individual `pin_circuit` races.
+    #[cfg(feature = "zk")]
+    pub fn sync_pinned_circuits(&self, circuit_keys: &[[u8; 72]]) -> VmResult<()> {
+        let mut add: Vec<[u8; 72]> = vec![];
+        let mut del: Vec<[u8; 72]> = vec![];
+        {
+            let cache = self.inner.lock().unwrap();
+            for (key, _) in cache.pinned_memory_cache.iter_circuits() {
+                if !circuit_keys.iter().any(|k| k == key) {
+                    del.push(*key);
+                }
+            }
+            for key in circuit_keys {
+                if !cache.pinned_memory_cache.has_circuit(key) {
+                    add.push(*key);
+                }
+            }
+        }
+        for key in &add {
+            self.pin_circuit(key)?;
+        }
+        for key in &del {
+            self.unpin_circuit(key)?;
+        }
+        Ok(())
+    }
+
     /// Returns an Instance tied to a previously saved Wasm.
     ///
     /// It takes a module from cache or Wasm code and instantiates it.
