@@ -34,7 +34,7 @@ const MEDIUM_GAS_LIMIT: u64 = 1_000_000_000_000; // ~1s
 // Cache
 const MEMORY_CACHE_SIZE: Size = Size::mebi(200);
 
-// Multi-threaded get_instance benchmark
+// Multithreaded get_instance benchmark
 const INSTANTIATION_THREADS: usize = 128;
 const CONTRACTS: u64 = 10;
 
@@ -92,7 +92,7 @@ fn bench_instance(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("execute execute (release)", |b| {
+    group.bench_function("execute (release)", |b| {
         let backend = mock_backend(&[]);
         let much_gas: InstanceOptions = InstanceOptions {
             gas_limit: HIGH_GAS_LIMIT,
@@ -118,7 +118,7 @@ fn bench_instance(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("execute execute (argon2)", |b| {
+    group.bench_function("execute (argon2)", |b| {
         let backend = mock_backend(&[]);
         let much_gas: InstanceOptions = InstanceOptions {
             gas_limit: HIGH_GAS_LIMIT,
@@ -144,7 +144,7 @@ fn bench_instance(c: &mut Criterion) {
         println!("Gas used: {gas_used}");
     });
 
-    group.bench_function("execute execute (infinite loop)", |b| {
+    group.bench_function("execute (infinite loop)", |b| {
         let backend = mock_backend(&[]);
         let medium_gas: InstanceOptions = InstanceOptions {
             gas_limit: MEDIUM_GAS_LIMIT,
@@ -340,7 +340,7 @@ fn bench_cache(c: &mut Criterion) {
 
 fn bench_instance_threads(c: &mut Criterion) {
     let temp_dir = TempDir::new().unwrap();
-    c.bench_function("multi-threaded get_instance", |b| {
+    c.bench_function("multithreaded get_instance", |b| {
         let options = CacheOptions::new(
             temp_dir.path(),
             capabilities_from_csv(DEFAULT_CAPABILITIES),

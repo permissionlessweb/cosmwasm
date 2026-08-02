@@ -24,7 +24,7 @@ use super::CachedModule;
 /// This is a value you can manually modify to the cache.
 /// You normally _do not_ need to change this value yourself.
 ///
-/// Cases where you might need to update it yourself, is things like when the memory layout of some types in Rust [std] changes.
+/// Cases where you might need to update it yourself include changes in the memory layout of some types in Rust [std].
 ///
 /// ---
 ///
@@ -67,7 +67,9 @@ use super::CachedModule;
 /// - **v20**:<br>
 ///   New version because of Wasmer 4.3.3 -> 4.3.7 upgrade.
 ///   Module compatibility between Wasmer versions is not guaranteed.
-const MODULE_SERIALIZATION_VERSION: &str = "v20";
+/// - **v21**:<br>
+///   New version because of additional gas charging for function locals.
+const MODULE_SERIALIZATION_VERSION: &str = "v21";
 
 /// Function that actually does the heavy lifting of creating the module version discriminator.
 ///
@@ -390,7 +392,7 @@ fn modules_path(base_path: &Path, wasmer_module_version: u32, target: &Target) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wasm_backend::{compile, make_compiling_engine};
+    use crate::wasm_backend::compile_module;
     use tempfile::TempDir;
     use wasmer::{imports, Instance as WasmerInstance, Store};
     use wasmer_middlewares::metering::set_remaining_points;
@@ -421,8 +423,7 @@ mod tests {
         assert!(cached.is_none());
 
         // Store module
-        let compiling_engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
-        let module = compile(&compiling_engine, &wasm).unwrap();
+        let (module, _) = compile_module(&wasm, TESTING_MEMORY_LIMIT).unwrap();
         cache.store(&checksum, &module).unwrap();
 
         // Load module
@@ -470,8 +471,7 @@ mod tests {
         let checksum = Checksum::generate(&wasm);
 
         // Store module
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
-        let module = compile(&engine, &wasm).unwrap();
+        let (module, _) = compile_module(&wasm, TESTING_MEMORY_LIMIT).unwrap();
         cache.store(&checksum, &module).unwrap();
 
         let discriminator = raw_module_version_discriminator();
@@ -496,8 +496,7 @@ mod tests {
         let checksum = Checksum::generate(&wasm);
 
         // Store module
-        let compiling_engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
-        let module = compile(&compiling_engine, &wasm).unwrap();
+        let (module, _) = compile_module(&wasm, TESTING_MEMORY_LIMIT).unwrap();
         cache.store(&checksum, &module).unwrap();
 
         // It's there
@@ -538,7 +537,7 @@ mod tests {
         let id = target_id(&target);
         assert_eq!(id, "x86_64-nintendo-fuchsia-gnu-coff-E3770FA3");
 
-        // Works for durrect target (hashing is deterministic);
+        // Works for direct target (hashing is deterministic);
         let target = Target::default();
         let id1 = target_id(&target);
         let id2 = target_id(&target);
@@ -589,6 +588,6 @@ mod tests {
     #[test]
     fn module_version_static() {
         let version = raw_module_version_discriminator();
-        assert_eq!(version, "6c36aacf76");
+        assert_eq!(version, "db9eb9f9ba");
     }
 }

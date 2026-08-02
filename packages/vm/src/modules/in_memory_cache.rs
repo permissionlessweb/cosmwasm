@@ -256,7 +256,7 @@ mod tests {
         assert!(cache_entry.is_none());
 
         // Compile module
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let original = compile(&engine, &wasm).unwrap();
 
         // Ensure original module can be executed
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(cache.len(), 0);
 
         // Add 1
-        let engine1 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine1 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine1, &wasm1).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -316,7 +316,7 @@ mod tests {
         assert_eq!(cache.len(), 1);
 
         // Add 2
-        let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine2, &wasm2).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(cache.len(), 2);
 
         // Add 3 (pushes out the previous two)
-        let engine3 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine3 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine3, &wasm3).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(cache.size(), 0);
 
         // Add 1
-        let engine1 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine1 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine1, &wasm1).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -361,7 +361,7 @@ mod tests {
         assert_eq!(cache.size(), 900_000 + std::mem::size_of::<CacheKey>());
 
         // Add 2
-        let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine2, &wasm2).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -374,7 +374,7 @@ mod tests {
         );
 
         // Add 3 (pushes out the previous two)
-        let engine3 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine3 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine3, &wasm3).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -403,7 +403,7 @@ mod tests {
         assert_eq!(cache.size(), 0);
 
         // Compile module
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let original = compile(&engine, &wasm).unwrap();
 
         // Store module
