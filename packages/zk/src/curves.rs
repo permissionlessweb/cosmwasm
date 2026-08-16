@@ -18,6 +18,8 @@ pub use snarkjs::{
 };
 
 mod vote;
+mod stwo;
+pub use stwo::{StwoInstance, StwoVerifyingKey, verify_stwo_proof, STWO_CURVE_ID, STWO_PROVER_ID};
 pub use vote::{VoteVerifyingKey, VoteInstance, VoteCircuitId};
 
 use crate::{ZkError, ZkResult};
@@ -103,6 +105,8 @@ pub enum CurveType {
     /// BN254 curve (alt_bn128), Groth16.
     #[cfg(feature = "bn254")]
     Bn254 = 4,
+    /// M31 / Circle STARK (Stwo).
+    M31 = 5,
 }
 
 impl TryFrom<u8> for CurveType {
@@ -116,6 +120,7 @@ impl TryFrom<u8> for CurveType {
             3 => Ok(CurveType::ShareReveal),
             #[cfg(feature = "bn254")]
             4 => Ok(CurveType::Bn254),
+            5 => Ok(CurveType::M31),
             _ => Err(ZkError::new_err("bad CurveType")),
         }
     }
@@ -129,6 +134,7 @@ impl Into<u8> for CurveType {
             CurveType::ShareReveal => 3,
             #[cfg(feature = "bn254")]
             CurveType::Bn254 => 4,
+            CurveType::M31 => 5,
         }
     }
 }
