@@ -253,6 +253,21 @@ You can find past recordings of hackathon/conference workshops and presentations
 on our [YouTube channel](https://www.youtube.com/@CosmWasm), or
 [join our Telegram community](https://t.me/+SGT2p3VszzSgUViP) to ask for help.
 
+
+
+## Contract toolchain (not the same as crate MSRV)
+
+This VM accepts rustc **1.87+** contract wasm because it meters `memory.copy` /
+`memory.fill` / `memory.init` **before** the opcode (`bulk_memory` capability).
+Table bulk ops (`table.copy` / `table.init`) stay rejected.
+
+- Workspace `rust-version` is **1.87.0** (the rustc that starts emitting those ops).
+- Optimizer images must use rustc ≥ 1.87 **only** against a node that advertises
+  `bulk_memory`. A stock wasmd 0.61 / CosmWasm 3.0.x node will still reject
+  those artifacts. Until that upgrade, keep building with rustc 1.86 / optimizer
+  images pinned to 1.86.
+
+
 ## Minimum Supported Rust Version (MSRV)
 
 See [Minimum Supported Rust Version (MSRV)] on Wiki.
@@ -548,7 +563,7 @@ but the quickstart guide is:
 docker run --rm -v "$(pwd)":/code \
   --mount type=volume,source="$(basename "$(pwd)")_cache",target=/target \
   --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
-  cosmwasm/optimizer:0.15.0
+  cosmwasm/optimizer:0.17.0
 ```
 
 It will output a highly size-optimized build as `contract.wasm` in `$CODE`. With

@@ -75,7 +75,21 @@ pub struct ParsedWasm<'a> {
     pub func_validator: FunctionValidator<'a>,
     /// Contract migrate version as defined in a custom section
     pub contract_migrate_version: Option<u64>,
+    /// True if any function body contains memory.copy / fill / init / data.drop.
+    /// Those contracts require host capability [`crate::capabilities::CAP_BULK_MEMORY`].
+    pub uses_metered_bulk_memory: bool,
 }
+
+pub fn is_metered_bulk_memory_op(op: &wasmer::wasmparser::Operator<'_>) -> bool {
+    matches!(
+        op,
+        wasmer::wasmparser::Operator::MemoryCopy { .. }
+            | wasmer::wasmparser::Operator::MemoryFill { .. }
+            | wasmer::wasmparser::Operator::MemoryInit { .. }
+            | wasmer::wasmparser::Operator::DataDrop { .. }
+    )
+}
+
 
 impl<'a> ParsedWasm<'a> {
     pub fn parse(wasm: &'a [u8]) -> VmResult<Self> {
@@ -84,7 +98,8 @@ impl<'a> ParsedWasm<'a> {
             | WasmFeatures::SIGN_EXTENSION
             | WasmFeatures::MULTI_VALUE
             | WasmFeatures::FLOATS
-            | WasmFeatures::REFERENCE_TYPES;
+            | WasmFeatures::REFERENCE_TYPES
+            | WasmFeatures::BULK_MEMORY;
 
         let mut validator = Validator::new_with_features(features);
 
@@ -105,6 +120,7 @@ impl<'a> ParsedWasm<'a> {
             total_func_locals: 0,
             func_validator: FunctionValidator::Pending(OpaqueDebug::default()),
             contract_migrate_version: None,
+            uses_metered_bulk_memory: false,
         };
 
         for p in Parser::new(0).parse_all(wasm) {
@@ -121,6 +137,13 @@ impl<'a> ParsedWasm<'a> {
                 this.func_locals.push(locals_count);
                 this.max_func_locals = locals_count.max(this.max_func_locals);
                 this.total_func_locals += locals_count;
+
+                let ops = body.get_operators_reader()?;
+                for op in ops {
+                    if is_metered_bulk_memory_op(&op?) {
+                        this.uses_metered_bulk_memory = true;
+                    }
+                }
 
                 // also validate function bodies
                 this.func_validator.push((fv, body));

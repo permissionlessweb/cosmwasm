@@ -1,4 +1,9 @@
-//! # Metering infrastructure.
+//! # Metering middleware
+//!
+//! Tracks operator cost and, for bulk-memory ops whose length lives on the
+//! Wasm stack, charges `ceil(len / unit_size) * unit_cost` **before** the
+//! opcode runs. If remaining gas is insufficient the instance sets the
+//! exhausted flag and traps (`unreachable`) without performing the copy/fill.
 
 use crate::parsed_wasm::ParsedWasm;
 use std::sync::{Arc, Mutex};
@@ -15,22 +20,66 @@ const CHARGED_LOCALS_THRESHOLD: usize = 30;
 
 /// Indexes of Wasm global variables for tracking metering data.
 #[derive(Debug, Clone)]
-struct MeteringGlobalIndexes(GlobalIndex, GlobalIndex);
+struct MeteringGlobalIndexes(
+    /// Remaining gas points.
+    GlobalIndex,
+    /// Points exhausted flag.
+    GlobalIndex,
+    /// Data length of bulk-memory operation (saved off the stack, then restored).
+    GlobalIndex,
+    /// Dynamic cost of bulk-memory operation.
+    GlobalIndex,
+);
 
 impl MeteringGlobalIndexes {
-    /// The global index in the current module for tracking remaining gas points.
     fn remaining_points(&self) -> GlobalIndex {
         self.0
     }
 
-    /// The global index in the current module for a boolean indicating
-    /// whether points are exhausted or not.
-    ///
-    /// This boolean is represented as `i32` global variable:
-    ///   * 0: there are remaining gas points,
-    ///   * 1: gas points have been exhausted.
+    /// `i32` global: 0 remaining, 1 exhausted.
     fn points_exhausted(&self) -> GlobalIndex {
         self.1
+    }
+
+    fn data_length(&self) -> GlobalIndex {
+        self.2
+    }
+
+    fn dynamic_cost(&self) -> GlobalIndex {
+        self.3
+    }
+}
+
+/// Cost of one operator. Linear bulk ops (`memory.copy` / `fill` / `init` /
+/// `memory.grow`) set `unit_cost` and `unit_size` so the middleware can charge
+/// `ceil(len / unit_size) * unit_cost` from the i32 on the stack **before**
+/// the opcode runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MeteringCoefficients {
+    pub base: u64,
+    pub unit_cost: u64,
+    pub unit_size: u64,
+}
+
+impl MeteringCoefficients {
+    pub const fn flat(base: u64) -> Self {
+        Self {
+            base,
+            unit_cost: 0,
+            unit_size: 0,
+        }
+    }
+
+    pub const fn linear(base: u64, unit_cost: u64, unit_size: u64) -> Self {
+        Self {
+            base,
+            unit_cost,
+            unit_size,
+        }
+    }
+
+    pub const fn is_linear_bulk(self) -> bool {
+        self.unit_cost > 0 && self.unit_size > 0
     }
 }
 
@@ -40,21 +89,15 @@ impl MeteringGlobalIndexes {
 ///
 /// An instance of `Metering` should _not_ be shared among different
 /// modules, since it tracks module-specific information like the
-/// global index to store metering state. Attempts to use a `Metering`
-/// instance from multiple modules will result in a panic.
-///
-pub struct Metering<F: Fn(&Operator) -> u64 + Send + Sync> {
-    /// Initial limit of gas points.
+/// global index to store metering state.
+pub struct Metering<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync> {
     initial_limit: u64,
-    /// Function that maps each operator to a cost in gas points.
     cost_function: Arc<F>,
-    /// The global indexes for metering gas points.
     global_indexes: Mutex<Option<MeteringGlobalIndexes>>,
-    /// Number of locals in all functions defined in the module.
     function_locals: Vec<usize>,
 }
 
-impl<F: Fn(&Operator) -> u64 + Send + Sync> std::fmt::Debug for Metering<F> {
+impl<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync> std::fmt::Debug for Metering<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Metering")
             .field("initial_limit", &self.initial_limit)
@@ -65,12 +108,7 @@ impl<F: Fn(&Operator) -> u64 + Send + Sync> std::fmt::Debug for Metering<F> {
     }
 }
 
-impl<F: Fn(&Operator) -> u64 + Send + Sync> Metering<F> {
-    /// Creates a `Metering` middleware.
-    ///
-    /// When providing a cost function, you should consider that branching operations do
-    /// additional work to track the metering points and probably need to have a higher cost.
-    /// To find out which operations are affected by this, you can call [`is_accounting`].
+impl<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync> Metering<F> {
     pub fn new(initial_limit: u64, cost_function: F, parsed_wasm: Option<ParsedWasm>) -> Self {
         Self {
             initial_limit,
@@ -81,8 +119,9 @@ impl<F: Fn(&Operator) -> u64 + Send + Sync> Metering<F> {
     }
 }
 
-impl<F: Fn(&Operator) -> u64 + Send + Sync + 'static> ModuleMiddleware for Metering<F> {
-    /// Generates a function middleware for a given function identified by provided index.
+impl<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync + 'static> ModuleMiddleware
+    for Metering<F>
+{
     fn generate_function_middleware(&self, idx: LocalFunctionIndex) -> Box<dyn FunctionMiddleware> {
         let locals_count = self
             .function_locals
@@ -98,7 +137,6 @@ impl<F: Fn(&Operator) -> u64 + Send + Sync + 'static> ModuleMiddleware for Meter
         })
     }
 
-    /// Transforms a `ModuleInfo` struct in-place. This is called before application on functions begins.
     fn transform_module_info(&self, module_info: &mut ModuleInfo) -> Result<(), MiddlewareError> {
         let mut global_indexes = self.global_indexes.lock().unwrap();
 
@@ -106,58 +144,64 @@ impl<F: Fn(&Operator) -> u64 + Send + Sync + 'static> ModuleMiddleware for Meter
             panic!("Metering::transform_module_info: Attempting to use a `Metering` middleware from multiple modules.");
         }
 
-        // Append a global for remaining points and initialize it.
         let remaining_points_global_index = module_info
             .globals
             .push(GlobalType::new(Type::I64, Mutability::Var));
-
         module_info
             .global_initializers
             .push(GlobalInit::I64Const(self.initial_limit as i64));
-
         module_info.exports.insert(
             "wasmer_metering_remaining_points".to_string(),
             ExportIndex::Global(remaining_points_global_index),
         );
 
-        // Append a global for the exhausted points boolean and initialize it.
         let points_exhausted_global_index = module_info
             .globals
             .push(GlobalType::new(Type::I32, Mutability::Var));
-
         module_info
             .global_initializers
             .push(GlobalInit::I32Const(0));
-
         module_info.exports.insert(
             "wasmer_metering_points_exhausted".to_string(),
             ExportIndex::Global(points_exhausted_global_index),
         );
 
+        let data_length_global_index = module_info
+            .globals
+            .push(GlobalType::new(Type::I32, Mutability::Var));
+        module_info
+            .global_initializers
+            .push(GlobalInit::I32Const(0));
+        // Scratch slots stay off the export map (host ABI is remaining + exhausted only).
+        let dynamic_cost_global_index = module_info
+            .globals
+            .push(GlobalType::new(Type::I64, Mutability::Var));
+        module_info
+            .global_initializers
+            .push(GlobalInit::I64Const(0));
+
         *global_indexes = Some(MeteringGlobalIndexes(
             remaining_points_global_index,
             points_exhausted_global_index,
+            data_length_global_index,
+            dynamic_cost_global_index,
         ));
 
         Ok(())
     }
 }
 
-/// The function-level metering middleware.
-pub struct FunctionMetering<F: Fn(&Operator) -> u64 + Send + Sync> {
-    /// Flag indicating if the first operator in function was encountered.
+pub struct FunctionMetering<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync> {
     is_first_operator: bool,
-    /// Function that maps each operator to a cost in gas points.
     cost_function: Arc<F>,
-    /// The global indexes for metering gas points.
     global_indexes: MeteringGlobalIndexes,
-    /// Accumulated cost of the current basic block.
     accumulated_cost: u64,
-    /// Number of local variables in function charged with additional gas points.
     charged_locals_count: u64,
 }
 
-impl<F: Fn(&Operator) -> u64 + Send + Sync> std::fmt::Debug for FunctionMetering<F> {
+impl<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync> std::fmt::Debug
+    for FunctionMetering<F>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FunctionMetering")
             .field("is_first_operator", &self.is_first_operator)
@@ -169,92 +213,87 @@ impl<F: Fn(&Operator) -> u64 + Send + Sync> std::fmt::Debug for FunctionMetering
     }
 }
 
-impl<F: Fn(&Operator) -> u64 + Send + Sync> FunctionMiddleware for FunctionMetering<F> {
+impl<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync> FunctionMiddleware
+    for FunctionMetering<F>
+{
     fn feed<'a>(
         &mut self,
         operator: Operator<'a>,
         state: &mut MiddlewareReaderState<'a>,
     ) -> Result<(), MiddlewareError> {
-        // If the first operator is encountered in a function
-        // having a large number of locals, then charge additional gas.
         if self.is_first_operator && self.charged_locals_count > 0 {
-            // Calculate the total gas cost for all charged locals in function.
-            let locals_cost =
-                (self.cost_function)(&Operator::Nop).saturating_mul(self.charged_locals_count);
-            if is_accounting(&operator) {
-                // If the first operator is an accounting operator, then gas charging code
-                // will be injected anyway, so it is enough to increase the accumulated cost.
+            let nop = (self.cost_function)(&Operator::Nop);
+            let locals_cost = nop.base.saturating_mul(self.charged_locals_count);
+            if is_branching_operator(&operator) {
                 self.accumulated_cost += locals_cost;
             } else {
-                // Otherwise, inject code for charging gas at the beginning of the function body.
-                state.extend(gas_check_wasm_code(&self.global_indexes, locals_cost));
+                state.extend(gas_check_branching_wasm_code(
+                    &self.global_indexes,
+                    locals_cost,
+                ));
             }
         }
 
-        // Get the cost of the current operator, and add it to the accumulator.
-        // This needs to be done before the metering logic, to prevent operators like `Call`
-        // from escaping metering in some corner cases.
-        self.accumulated_cost += (self.cost_function)(&operator);
+        let coeffs = (self.cost_function)(&operator);
+        self.accumulated_cost = self.accumulated_cost.saturating_add(coeffs.base);
 
-        // Finalize the cost of the previous basic block and perform necessary checks.
-        if is_accounting(&operator) && self.accumulated_cost > 0 {
-            // Inject code for charging gas before the accounting operator.
-            state.extend(gas_check_wasm_code(
+        if is_branching_operator(&operator) && self.accumulated_cost > 0 {
+            state.extend(gas_check_branching_wasm_code(
                 &self.global_indexes,
                 self.accumulated_cost,
             ));
             self.accumulated_cost = 0;
         }
 
-        // Push current operator.
-        state.push_operator(operator);
+        // Charge bulk-memory by runtime length *before* the opcode.
+        if coeffs.is_linear_bulk() {
+            state.extend(gas_check_linear_bulk_memory_wasm_code(
+                &self.global_indexes,
+                coeffs.unit_cost,
+                coeffs.unit_size,
+                self.accumulated_cost,
+            ));
+            self.accumulated_cost = 0;
+        }
 
-        // Clear first operator flag.
+        state.push_operator(operator);
         self.is_first_operator = false;
         Ok(())
     }
 }
 
-/// Returns `true` if and only if the given operator is an accounting operator.
-/// Accounting operators do additional work to track the metering points.
-pub fn is_accounting(operator: &Operator) -> bool {
-    // Possible sources and targets of a branch.
+pub fn is_branching_operator(operator: &Operator) -> bool {
     matches!(
         operator,
-        Operator::Loop { .. } // loop headers are branch targets
-            | Operator::End // block ends are branch targets
-            | Operator::If { .. } // branch source, "if" can branch to else branch
-            | Operator::Else // "else" is the "end" of an if branch
-            | Operator::Br { .. } // branch source
-            | Operator::BrTable { .. } // branch source
-            | Operator::BrIf { .. } // branch source
-            | Operator::Call { .. } // function call - branch source
-            | Operator::CallIndirect { .. } // function call - branch source
-            | Operator::Return // end of function - branch source
-            // exceptions proposal
-            | Operator::Throw { .. } // branch source
-            | Operator::ThrowRef // branch source
-            | Operator::Rethrow { .. } // branch source
-            | Operator::Delegate { .. } // branch source
-            | Operator::Catch { .. } // branch target
-            // tail_call proposal
-            | Operator::ReturnCall { .. } // branch source
-            | Operator::ReturnCallIndirect { .. } // branch source
-            // gc proposal
-            | Operator::BrOnCast { .. } // branch source
-            | Operator::BrOnCastFail { .. } // branch source
-            // function_references proposal
-            | Operator::CallRef { .. } // branch source
-            | Operator::ReturnCallRef { .. } // branch source
-            | Operator::BrOnNull { .. } // branch source
-            | Operator::BrOnNonNull { .. } // branch source
+        Operator::Loop { .. }
+            | Operator::End
+            | Operator::If { .. }
+            | Operator::Else
+            | Operator::Br { .. }
+            | Operator::BrTable { .. }
+            | Operator::BrIf { .. }
+            | Operator::Call { .. }
+            | Operator::CallIndirect { .. }
+            | Operator::Return
+            | Operator::Throw { .. }
+            | Operator::ThrowRef
+            | Operator::Rethrow { .. }
+            | Operator::Delegate { .. }
+            | Operator::Catch { .. }
+            | Operator::ReturnCall { .. }
+            | Operator::ReturnCallIndirect { .. }
+            | Operator::BrOnCast { .. }
+            | Operator::BrOnCastFail { .. }
+            | Operator::CallRef { .. }
+            | Operator::ReturnCallRef { .. }
+            | Operator::BrOnNull { .. }
+            | Operator::BrOnNonNull { .. }
     )
 }
 
-/// Returns Wasm code for charging and checking remaining gas points.
-fn gas_check_wasm_code<'a>(
+fn gas_check_branching_wasm_code<'a>(
     global_indexes: &MeteringGlobalIndexes,
-    cost: u64,
+    accumulated_cost: u64,
 ) -> [Operator<'a>; 12] {
     let idx_remaining_points = global_indexes.remaining_points().as_u32();
     let idx_points_exhausted = global_indexes.points_exhausted().as_u32();
@@ -262,7 +301,9 @@ fn gas_check_wasm_code<'a>(
         Operator::GlobalGet {
             global_index: idx_remaining_points,
         },
-        Operator::I64Const { value: cost as i64 },
+        Operator::I64Const {
+            value: accumulated_cost as i64,
+        },
         Operator::I64LtU,
         Operator::If {
             blockty: BlockType::Empty,
@@ -276,7 +317,9 @@ fn gas_check_wasm_code<'a>(
         Operator::GlobalGet {
             global_index: idx_remaining_points,
         },
-        Operator::I64Const { value: cost as i64 },
+        Operator::I64Const {
+            value: accumulated_cost as i64,
+        },
         Operator::I64Sub,
         Operator::GlobalSet {
             global_index: idx_remaining_points,
@@ -284,18 +327,101 @@ fn gas_check_wasm_code<'a>(
     ]
 }
 
+/// Charge linear bulk-memory cost from the i32 length on top of the stack.
+/// Restores that length so `memory.copy` / `fill` / `init` still see it.
+///
+/// `dynamic = ceil(len / unit_size) * unit_cost + accumulated`
+/// then if `remaining < dynamic` set exhausted and trap, else subtract.
+fn gas_check_linear_bulk_memory_wasm_code<'a>(
+    global_indexes: &MeteringGlobalIndexes,
+    unit_cost_x: u64,
+    unit_size_x: u64,
+    accumulated_cost: u64,
+) -> [Operator<'a>; 25] {
+    let idx_remaining_points = global_indexes.remaining_points().as_u32();
+    let idx_points_exhausted = global_indexes.points_exhausted().as_u32();
+    let idx_data_length = global_indexes.data_length().as_u32();
+    let idx_dynamic_cost = global_indexes.dynamic_cost().as_u32();
+    let decremented_unit_size_x = unit_size_x.saturating_sub(1);
+    [
+        Operator::GlobalSet {
+            global_index: idx_data_length,
+        },
+        Operator::GlobalGet {
+            global_index: idx_data_length,
+        },
+        Operator::I64ExtendI32U,
+        Operator::I64Const {
+            value: decremented_unit_size_x as i64,
+        },
+        Operator::I64Add,
+        Operator::I64Const {
+            value: unit_size_x as i64,
+        },
+        Operator::I64DivU,
+        Operator::I64Const {
+            value: unit_cost_x as i64,
+        },
+        Operator::I64Mul,
+        Operator::I64Const {
+            value: accumulated_cost as i64,
+        },
+        Operator::I64Add,
+        Operator::GlobalSet {
+            global_index: idx_dynamic_cost,
+        },
+        Operator::GlobalGet {
+            global_index: idx_remaining_points,
+        },
+        Operator::GlobalGet {
+            global_index: idx_dynamic_cost,
+        },
+        Operator::I64LtU,
+        Operator::If {
+            blockty: BlockType::Empty,
+        },
+        Operator::I32Const { value: 1 },
+        Operator::GlobalSet {
+            global_index: idx_points_exhausted,
+        },
+        Operator::Unreachable,
+        Operator::End,
+        Operator::GlobalGet {
+            global_index: idx_remaining_points,
+        },
+        Operator::GlobalGet {
+            global_index: idx_dynamic_cost,
+        },
+        Operator::I64Sub,
+        Operator::GlobalSet {
+            global_index: idx_remaining_points,
+        },
+        Operator::GlobalGet {
+            global_index: idx_data_length,
+        },
+    ]
+}
+
+/// Pure helper used by tests: same ceil-div as the injected Wasm (`(len + unit-1) / unit`).
+pub fn linear_bulk_cost(coeffs: MeteringCoefficients, len: u32) -> u64 {
+    assert!(coeffs.unit_size > 0);
+    let units = (len as u64).saturating_add(coeffs.unit_size - 1) / coeffs.unit_size;
+    coeffs
+        .base
+        .saturating_add(units.saturating_mul(coeffs.unit_cost))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Dummy cost function to be used in the following tests.
-    fn cost(_: &Operator) -> u64 {
-        1
+    fn cost(_: &Operator) -> MeteringCoefficients {
+        MeteringCoefficients::flat(1)
     }
 
     #[test]
     fn debug_for_metering_works() {
-        assert_eq!(1, cost(&Operator::Nop));
+        assert_eq!(MeteringCoefficients::flat(1), cost(&Operator::Nop));
         assert_eq!(
             "Metering { initial_limit: 0, cost_function: \"<cost_function>\", global_indexes: Mutex { data: None, poisoned: false, .. }, function_locals: [] }",
             format!("{:?}", Metering::new(0, cost, None))
@@ -304,13 +430,12 @@ mod tests {
 
     #[test]
     fn debug_for_function_metering_works() {
-        assert_eq!(1, cost(&Operator::Nop));
         let metering = Metering::new(0, cost, None);
         metering
             .transform_module_info(&mut ModuleInfo::new())
             .unwrap();
         assert_eq!(
-            "FunctionMetering { is_first_operator: true, cost_function: \"<cost_function>\", global_indexes: MeteringGlobalIndexes(GlobalIndex(0), GlobalIndex(1)), accumulated_cost: 0, charged_locals_count: 0 }",
+            "FunctionMetering { is_first_operator: true, cost_function: \"<cost_function>\", global_indexes: MeteringGlobalIndexes(GlobalIndex(0), GlobalIndex(1), GlobalIndex(2), GlobalIndex(3)), accumulated_cost: 0, charged_locals_count: 0 }",
             format!("{:?}", metering.generate_function_middleware(LocalFunctionIndex::from_u32(0)))
         );
     }
@@ -320,11 +445,32 @@ mod tests {
         expected = "Metering::transform_module_info: Attempting to use a `Metering` middleware from multiple modules."
     )]
     fn using_metering_multiple_times_should_panic() {
-        assert_eq!(1, cost(&Operator::Nop));
         let metering = Metering::new(0, cost, None);
         let mut module_1 = ModuleInfo::new();
         let mut module_2 = ModuleInfo::new();
         metering.transform_module_info(&mut module_1).unwrap();
         metering.transform_module_info(&mut module_2).unwrap();
+    }
+
+    #[test]
+    fn linear_bulk_cost_is_monotone_and_fits_i64() {
+        // Matches engine.rs MemoryCopy coefficients.
+        let copy = MeteringCoefficients::linear(4_500_000, 50_176, 64);
+        assert_eq!(linear_bulk_cost(copy, 0), 4_500_000);
+        assert!(linear_bulk_cost(copy, 1) > linear_bulk_cost(copy, 0));
+        assert!(linear_bulk_cost(copy, 64) < linear_bulk_cost(copy, 65));
+        let max = linear_bulk_cost(copy, u32::MAX);
+        assert!(max < i64::MAX as u64, "dynamic cost must fit i64 for Wasm i64.mul");
+        // Huge copy must be far more expensive than a single opcode.
+        assert!(max > 1_000_000_000_000);
+    }
+
+    #[test]
+    fn branching_ops_are_detected() {
+        assert!(is_branching_operator(&Operator::Return));
+        assert!(is_branching_operator(&Operator::Call {
+            function_index: 0
+        }));
+        assert!(!is_branching_operator(&Operator::I32Const { value: 1 }));
     }
 }
