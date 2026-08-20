@@ -1656,6 +1656,7 @@ fn instance_public_input_count(i: &zk_cosmwasm::AnyInstance) -> usize {
         zk_cosmwasm::AnyInstance::Vote(v) => v.public_inputs.len(),
         #[cfg(feature = "bn254")]
         zk_cosmwasm::AnyInstance::Bn254(v) => v.i.len(),
+        zk_cosmwasm::AnyInstance::Stwo(v) => v.public_input_count(),
     }
 }
 

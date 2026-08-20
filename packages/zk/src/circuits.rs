@@ -1,5 +1,5 @@
 use crate::{
-    curves::{VestaInstance, VestaVerifyingKey, VoteInstance, VoteVerifyingKey, ZkCurve},
+    curves::{StwoInstance, StwoVerifyingKey, VestaInstance, VestaVerifyingKey, VoteInstance, VoteVerifyingKey, ZkCurve},
     CircuitFooter, ZkError, ZkResult,
 };
 #[cfg(feature = "bn254")]
@@ -82,6 +82,7 @@ pub enum AnyVerifyingKey {
     Vote(VoteVerifyingKey),
     #[cfg(feature = "bn254")]
     Bn254(Bn254VerifyingKey),
+    Stwo(StwoVerifyingKey),
 }
 
 impl TryFrom<&[u8]> for AnyVerifyingKey {
@@ -106,6 +107,7 @@ impl TryFrom<&[u8]> for AnyVerifyingKey {
             1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(VoteVerifyingKey::try_from(bytes)?)),
             #[cfg(feature = "bn254")]
             4 => Ok(AnyVerifyingKey::Bn254(Bn254VerifyingKey::try_from(bytes)?)),
+            5 => Ok(AnyVerifyingKey::Stwo(StwoVerifyingKey::try_from(bytes)?)),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
@@ -117,6 +119,7 @@ impl AnyVerifyingKey {
         match self {
             AnyVerifyingKey::Vesta(vk) => vk.footer.curve_id,
             AnyVerifyingKey::Vote(vk) => vk.footer.curve_id,
+            AnyVerifyingKey::Stwo(vk) => vk.footer.curve_id,
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => vk.footer.curve_id,
         }
@@ -127,6 +130,7 @@ impl AnyVerifyingKey {
         match self {
             AnyVerifyingKey::Vesta(vk) => vk.footer.prover_id,
             AnyVerifyingKey::Vote(vk) => vk.footer.prover_id,
+            AnyVerifyingKey::Stwo(vk) => vk.footer.prover_id,
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => vk.footer.prover_id,
         }
@@ -137,6 +141,7 @@ impl AnyVerifyingKey {
         match self {
             AnyVerifyingKey::Vesta(vk) => vk.footer.i,
             AnyVerifyingKey::Vote(vk) => vk.footer.i,
+            AnyVerifyingKey::Stwo(vk) => vk.footer.i,
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => vk.footer.i,
         }
@@ -148,6 +153,7 @@ impl AnyVerifyingKey {
         match self {
             AnyVerifyingKey::Vesta(vk) => vk.footer.to_circuit_key(),
             AnyVerifyingKey::Vote(vk) => vk.footer.to_circuit_key(),
+            AnyVerifyingKey::Stwo(vk) => vk.footer.to_circuit_key(),
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => vk.footer.to_circuit_key(),
         }
@@ -158,6 +164,7 @@ impl AnyVerifyingKey {
         match self {
             AnyVerifyingKey::Vesta(vk) => &vk.footer,
             AnyVerifyingKey::Vote(vk) => &vk.footer,
+            AnyVerifyingKey::Stwo(vk) => &vk.footer,
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => &vk.footer,
         }
@@ -172,6 +179,7 @@ impl AnyVerifyingKey {
                 bytes.extend_from_slice(&vk.footer.to_bytes());
                 Ok(bytes)
             }
+            AnyVerifyingKey::Stwo(vk) => Ok(vk.to_blob()),
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => {
                 let mut bytes = vk.vk_bytes.clone();
@@ -231,6 +239,7 @@ impl AnyVerifyingKey {
             (AnyVerifyingKey::Bn254(vk), [AnyInstance::Bn254(i), ..]) => {
                 vk.verify(proof, std::slice::from_ref(i))
             }
+            (AnyVerifyingKey::Stwo(vk), [AnyInstance::Stwo(i), ..]) => vk.verify(proof, i),
             _ => Err(ZkError::CurveMismatch),
         }
     }
@@ -262,6 +271,11 @@ impl AnyVerifyingKey {
             4 => Ok(AnyVerifyingKey::Bn254(
                 Bn254VerifyingKey::from_split_bytes(param_bytes, vk_body_bytes, *footer)?,
             )),
+            5 => Ok(AnyVerifyingKey::Stwo(StwoVerifyingKey::from_split_bytes(
+                param_bytes,
+                vk_body_bytes,
+                *footer,
+            )?)),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
@@ -273,6 +287,7 @@ pub enum AnyInstance {
     Vote(VoteInstance),
     #[cfg(feature = "bn254")]
     Bn254(crate::curves::Bn254Instance),
+    Stwo(StwoInstance),
 }
 
 /// Circuit proving-system identifier for footer `prover_id`.
@@ -288,6 +303,8 @@ pub enum CircuitType {
     Plonkish = 0,
     /// Non-Plonkish proving system (Groth16 / BN254).
     Groth16 = 1,
+    /// StarkWare S-two / Circle STARK (M31). Never generic Stark.
+    Stwo = 2,
 }
 
 impl CircuitType {
@@ -296,6 +313,7 @@ impl CircuitType {
         match value {
             0 => Some(Self::Plonkish),
             1 => Some(Self::Groth16),
+            2 => Some(Self::Stwo),
             _ => None,
         }
     }
@@ -310,6 +328,7 @@ impl TryFrom<AnyVerifyingKey> for CircuitType {
             AnyVerifyingKey::Vote(_) => Ok(CircuitType::Plonkish),
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(_) => Ok(CircuitType::Groth16),
+            AnyVerifyingKey::Stwo(_) => Ok(CircuitType::Stwo),
         }
     }
 }
@@ -327,6 +346,7 @@ impl Into<u8> for CircuitType {
         match self {
             CircuitType::Plonkish => 0,
             CircuitType::Groth16 => 1,
+            CircuitType::Stwo => 2,
         }
     }
 }
@@ -342,6 +362,9 @@ impl AnyInstance {
             1u32 | 2u32 | 3u32 => Ok(AnyInstance::Vote(VoteInstance::from_bytes(bytes)?)),
             #[cfg(feature = "bn254")]
             4u32 => Ok(AnyInstance::Bn254(Bn254Instance::from_bytes(bytes)?)),
+            5u32 => Ok(AnyInstance::Stwo(StwoInstance {
+                bytes: bytes.to_vec(),
+            })),
             _ => Err(ZkError::CurveMismatch),
         }
     }

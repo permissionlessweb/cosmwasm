@@ -1598,6 +1598,7 @@ mod tests {
             "iterator".to_string(),
             "staking".to_string(),
             "stargate".to_string(),
+            crate::capabilities::CAP_BULK_MEMORY.to_string(),
         ])
     }
 

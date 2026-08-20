@@ -63,7 +63,7 @@ pub use crate::calls::{
 };
 
 pub use crate::capabilities::{
-    capabilities_from_csv, feature_gated_host_capabilities, multi_curve_caps,
+    capabilities_from_csv, feature_gated_host_capabilities, multi_curve_caps, CAP_BULK_MEMORY,
 };
 pub use crate::config::{CacheOptions, Config, WasmLimits};
 pub use crate::errors::{

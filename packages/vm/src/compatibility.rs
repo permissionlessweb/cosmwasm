@@ -291,7 +291,7 @@ fn check_wasm_capabilities(
     available_capabilities: &HashSet<String>,
     logs: Logger,
 ) -> VmResult<()> {
-    let required_capabilities = required_capabilities_from_module(module);
+    let required_capabilities = crate::capabilities::required_capabilities_including_opcodes(module);
     logs.add(|| {
         format!(
             "Required capabilities: {}",
@@ -394,6 +394,7 @@ mod tests {
             "iterator".to_string(),
             "staking".to_string(),
             "stargate".to_string(),
+            crate::capabilities::CAP_BULK_MEMORY.to_string(),
         ])
     }
 
