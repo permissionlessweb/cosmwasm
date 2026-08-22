@@ -5,12 +5,17 @@
 //! `c = 3a+5b+7` over M31. Same statement Lean LNPR already uses.
 //! Not `CircuitType::Stark`.
 
+use std::sync::OnceLock;
+
 use halo2_proofs::COSMWASM_FOOTER_LENGTH;
 use sha2::{Digest, Sha256};
 
 use crate::{CircuitFooter, CircuitType, Proof, ZkError, ZkResult};
 
 use super::CurveType;
+
+/// zk-wasmvm installs real S-two verify here. Dummy DSTW is rejected by that host.
+pub static STWO_HOST_VERIFY: OnceLock<fn(&[u8], &[u8]) -> ZkResult<()>> = OnceLock::new();
 
 /// Footer `prover_id` for this arm.
 pub const STWO_PROVER_ID: u8 = CircuitType::Stwo as u8;
@@ -132,6 +137,9 @@ fn seeds_bound(period: u64, subject: &[u8], weight: i64) -> (u32, u32) {
 pub fn verify_stwo_proof(proof: &[u8], instances: &[u8]) -> ZkResult<()> {
     if proof.len() > 2 * 1024 * 1024 {
         return Err(ZkError::new_err("stwo: proof too large"));
+    }
+    if let Some(host) = STWO_HOST_VERIFY.get() {
+        return host(proof, instances);
     }
     if proof.len() < DUMMY_LEN {
         return Err(ZkError::new_err("stwo: truncated"));

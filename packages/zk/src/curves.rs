@@ -19,7 +19,7 @@ pub use snarkjs::{
 
 mod vote;
 mod stwo;
-pub use stwo::{StwoInstance, StwoVerifyingKey, verify_stwo_proof, STWO_CURVE_ID, STWO_PROVER_ID};
+pub use stwo::{StwoInstance, StwoVerifyingKey, verify_stwo_proof, STWO_CURVE_ID, STWO_HOST_VERIFY, STWO_PROVER_ID};
 pub use vote::{VoteVerifyingKey, VoteInstance, VoteCircuitId};
 
 use crate::{ZkError, ZkResult};
