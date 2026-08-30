@@ -1,9 +1,11 @@
 use crate::{
-    curves::{StwoInstance, StwoVerifyingKey, VestaInstance, VestaVerifyingKey, VoteInstance, VoteVerifyingKey, ZkCurve},
+    curves::{FlockInstance, FlockVerifyingKey, StwoInstance, StwoVerifyingKey, VestaInstance, VestaVerifyingKey, VoteInstance, VoteVerifyingKey, ZkCurve},
     CircuitFooter, ZkError, ZkResult,
 };
 #[cfg(feature = "bn254")]
 use crate::curves::{Bn254Instance, Bn254VerifyingKey};
+#[cfg(feature = "halo2-kzg")]
+use crate::curves::{Halo2KzgInstance, Halo2KzgVerifyingKey};
 use halo2_proofs::{
     circuit::Layouter,
     plonk::{self, Circuit, ConstraintSystem},
@@ -76,13 +78,19 @@ pub struct CwConstraintSystem<C: ZkCurve> {
 ///   2 = Vote commitment (ZKP #2)
 ///   3 = Share reveal (ZKP #3)
 ///   4 = BN254 (Groth16)
+///
+/// Fat Halo2 / Groth16 VKs are **boxed** so pin/LRU `CachedCircuit` slots are
+/// not sized to the largest variant (STWO/Flock footers stay inline).
 #[derive(Debug, Clone)]
 pub enum AnyVerifyingKey {
-    Vesta(VestaVerifyingKey),
-    Vote(VoteVerifyingKey),
+    Vesta(Box<VestaVerifyingKey>),
+    Vote(Box<VoteVerifyingKey>),
     #[cfg(feature = "bn254")]
-    Bn254(Bn254VerifyingKey),
+    Bn254(Box<Bn254VerifyingKey>),
     Stwo(StwoVerifyingKey),
+    Flock(FlockVerifyingKey),
+    #[cfg(feature = "halo2-kzg")]
+    Halo2Kzg(Box<Halo2KzgVerifyingKey>),
 }
 
 impl TryFrom<&[u8]> for AnyVerifyingKey {
@@ -103,11 +111,14 @@ impl TryFrom<&[u8]> for AnyVerifyingKey {
         // Dispatch on curve_id as the sole routing key.
         // curve_id is self-describing — each distinct circuit/curve has its own ID.
         match footer.curve_id {
-            0 => Ok(AnyVerifyingKey::Vesta(VestaVerifyingKey::try_from(bytes)?)),
-            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(VoteVerifyingKey::try_from(bytes)?)),
+            0 => Ok(AnyVerifyingKey::Vesta(Box::new(VestaVerifyingKey::try_from(bytes)?))),
+            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(Box::new(VoteVerifyingKey::try_from(bytes)?))),
             #[cfg(feature = "bn254")]
-            4 => Ok(AnyVerifyingKey::Bn254(Bn254VerifyingKey::try_from(bytes)?)),
+            4 => Ok(AnyVerifyingKey::Bn254(Box::new(Bn254VerifyingKey::try_from(bytes)?))),
             5 => Ok(AnyVerifyingKey::Stwo(StwoVerifyingKey::try_from(bytes)?)),
+            7 => Ok(AnyVerifyingKey::Flock(FlockVerifyingKey::try_from(bytes)?)),
+            #[cfg(feature = "halo2-kzg")]
+            6 => Ok(AnyVerifyingKey::Halo2Kzg(Box::new(Halo2KzgVerifyingKey::try_from(bytes)?))),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
@@ -120,6 +131,9 @@ impl AnyVerifyingKey {
             AnyVerifyingKey::Vesta(vk) => vk.footer.curve_id,
             AnyVerifyingKey::Vote(vk) => vk.footer.curve_id,
             AnyVerifyingKey::Stwo(vk) => vk.footer.curve_id,
+            AnyVerifyingKey::Flock(vk) => vk.footer.curve_id,
+            #[cfg(feature = "halo2-kzg")]
+            AnyVerifyingKey::Halo2Kzg(vk) => vk.footer.curve_id,
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => vk.footer.curve_id,
         }
@@ -131,6 +145,9 @@ impl AnyVerifyingKey {
             AnyVerifyingKey::Vesta(vk) => vk.footer.prover_id,
             AnyVerifyingKey::Vote(vk) => vk.footer.prover_id,
             AnyVerifyingKey::Stwo(vk) => vk.footer.prover_id,
+            AnyVerifyingKey::Flock(vk) => vk.footer.prover_id,
+            #[cfg(feature = "halo2-kzg")]
+            AnyVerifyingKey::Halo2Kzg(vk) => vk.footer.prover_id,
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => vk.footer.prover_id,
         }
@@ -142,6 +159,9 @@ impl AnyVerifyingKey {
             AnyVerifyingKey::Vesta(vk) => vk.footer.i,
             AnyVerifyingKey::Vote(vk) => vk.footer.i,
             AnyVerifyingKey::Stwo(vk) => vk.footer.i,
+            AnyVerifyingKey::Flock(vk) => vk.footer.i,
+            #[cfg(feature = "halo2-kzg")]
+            AnyVerifyingKey::Halo2Kzg(vk) => vk.footer.i,
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => vk.footer.i,
         }
@@ -154,6 +174,9 @@ impl AnyVerifyingKey {
             AnyVerifyingKey::Vesta(vk) => vk.footer.to_circuit_key(),
             AnyVerifyingKey::Vote(vk) => vk.footer.to_circuit_key(),
             AnyVerifyingKey::Stwo(vk) => vk.footer.to_circuit_key(),
+            AnyVerifyingKey::Flock(vk) => vk.footer.to_circuit_key(),
+            #[cfg(feature = "halo2-kzg")]
+            AnyVerifyingKey::Halo2Kzg(vk) => vk.footer.to_circuit_key(),
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => vk.footer.to_circuit_key(),
         }
@@ -165,6 +188,9 @@ impl AnyVerifyingKey {
             AnyVerifyingKey::Vesta(vk) => &vk.footer,
             AnyVerifyingKey::Vote(vk) => &vk.footer,
             AnyVerifyingKey::Stwo(vk) => &vk.footer,
+            AnyVerifyingKey::Flock(vk) => &vk.footer,
+            #[cfg(feature = "halo2-kzg")]
+            AnyVerifyingKey::Halo2Kzg(vk) => &vk.footer,
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => &vk.footer,
         }
@@ -180,6 +206,9 @@ impl AnyVerifyingKey {
                 Ok(bytes)
             }
             AnyVerifyingKey::Stwo(vk) => Ok(vk.to_blob()),
+            AnyVerifyingKey::Flock(vk) => Ok(vk.to_blob()),
+            #[cfg(feature = "halo2-kzg")]
+            AnyVerifyingKey::Halo2Kzg(vk) => Ok(vk.to_bytes_with_params()?),
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(vk) => {
                 let mut bytes = vk.vk_bytes.clone();
@@ -192,16 +221,22 @@ impl AnyVerifyingKey {
         let footer =
             crate::CircuitFooter::from_bytes(&bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..])?;
         match footer.curve_id {
-            0 => Ok(AnyVerifyingKey::Vesta(
+            0 => Ok(AnyVerifyingKey::Vesta(Box::new(
                 VestaVerifyingKey::from_bytes_with_params(bytes)?,
-            )),
-            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(
+            ))),
+            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(Box::new(
                 VoteVerifyingKey::try_from(bytes)?,
-            )),
+            ))),
             #[cfg(feature = "bn254")]
-            4 => Ok(AnyVerifyingKey::Bn254(
+            4 => Ok(AnyVerifyingKey::Bn254(Box::new(
                 Bn254VerifyingKey::try_from(bytes)?,
-            )),
+            ))),
+            5 => Ok(AnyVerifyingKey::Stwo(StwoVerifyingKey::try_from(bytes)?)),
+            7 => Ok(AnyVerifyingKey::Flock(FlockVerifyingKey::try_from(bytes)?)),
+            #[cfg(feature = "halo2-kzg")]
+            6 => Ok(AnyVerifyingKey::Halo2Kzg(Box::new(
+                Halo2KzgVerifyingKey::try_from(bytes)?,
+            ))),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
@@ -240,6 +275,9 @@ impl AnyVerifyingKey {
                 vk.verify(proof, std::slice::from_ref(i))
             }
             (AnyVerifyingKey::Stwo(vk), [AnyInstance::Stwo(i), ..]) => vk.verify(proof, i),
+            (AnyVerifyingKey::Flock(vk), [AnyInstance::Flock(i), ..]) => vk.verify(proof, i),
+            #[cfg(feature = "halo2-kzg")]
+            (AnyVerifyingKey::Halo2Kzg(vk), [AnyInstance::Halo2Kzg(i), ..]) => vk.verify(proof, i),
             _ => Err(ZkError::CurveMismatch),
         }
     }
@@ -253,29 +291,40 @@ impl AnyVerifyingKey {
         footer: &CircuitFooter,
     ) -> crate::ZkResult<Self> {
         match footer.curve_id {
-            0 => Ok(AnyVerifyingKey::Vesta(
+            0 => Ok(AnyVerifyingKey::Vesta(Box::new(
                 crate::curves::VestaVerifyingKey::from_split_bytes(
                     param_bytes,
                     vk_body_bytes,
                     *footer,
                 )?,
-            )),
+            ))),
             1 | 2 | 3 => {
                 let mut serialized = Vec::new();
                 serialized.extend_from_slice(param_bytes);
                 serialized.extend_from_slice(vk_body_bytes);
                 serialized.extend_from_slice(&footer.to_bytes());
-                Ok(AnyVerifyingKey::Vote(VoteVerifyingKey::try_from(serialized.as_slice())?))
+                Ok(AnyVerifyingKey::Vote(Box::new(VoteVerifyingKey::try_from(
+                    serialized.as_slice(),
+                )?)))
             }
             #[cfg(feature = "bn254")]
-            4 => Ok(AnyVerifyingKey::Bn254(
+            4 => Ok(AnyVerifyingKey::Bn254(Box::new(
                 Bn254VerifyingKey::from_split_bytes(param_bytes, vk_body_bytes, *footer)?,
-            )),
+            ))),
             5 => Ok(AnyVerifyingKey::Stwo(StwoVerifyingKey::from_split_bytes(
                 param_bytes,
                 vk_body_bytes,
                 *footer,
             )?)),
+            7 => Ok(AnyVerifyingKey::Flock(FlockVerifyingKey::from_split_bytes(
+                param_bytes,
+                vk_body_bytes,
+                *footer,
+            )?)),
+            #[cfg(feature = "halo2-kzg")]
+            6 => Ok(AnyVerifyingKey::Halo2Kzg(Box::new(
+                Halo2KzgVerifyingKey::from_split_bytes(param_bytes, vk_body_bytes, *footer)?,
+            ))),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
@@ -288,6 +337,9 @@ pub enum AnyInstance {
     #[cfg(feature = "bn254")]
     Bn254(crate::curves::Bn254Instance),
     Stwo(StwoInstance),
+    Flock(FlockInstance),
+    #[cfg(feature = "halo2-kzg")]
+    Halo2Kzg(Halo2KzgInstance),
 }
 
 /// Circuit proving-system identifier for footer `prover_id`.
@@ -305,6 +357,8 @@ pub enum CircuitType {
     Groth16 = 1,
     /// StarkWare S-two / Circle STARK (M31). Never generic Stark.
     Stwo = 2,
+    /// Flock hash-based SNARK (BLAKE3 batches).
+    Flock = 3,
 }
 
 impl CircuitType {
@@ -314,6 +368,7 @@ impl CircuitType {
             0 => Some(Self::Plonkish),
             1 => Some(Self::Groth16),
             2 => Some(Self::Stwo),
+            3 => Some(Self::Flock),
             _ => None,
         }
     }
@@ -329,6 +384,9 @@ impl TryFrom<AnyVerifyingKey> for CircuitType {
             #[cfg(feature = "bn254")]
             AnyVerifyingKey::Bn254(_) => Ok(CircuitType::Groth16),
             AnyVerifyingKey::Stwo(_) => Ok(CircuitType::Stwo),
+            AnyVerifyingKey::Flock(_) => Ok(CircuitType::Flock),
+            #[cfg(feature = "halo2-kzg")]
+            AnyVerifyingKey::Halo2Kzg(_) => Ok(CircuitType::Plonkish),
         }
     }
 }
@@ -347,6 +405,7 @@ impl Into<u8> for CircuitType {
             CircuitType::Plonkish => 0,
             CircuitType::Groth16 => 1,
             CircuitType::Stwo => 2,
+            CircuitType::Flock => 3,
         }
     }
 }
@@ -365,6 +424,11 @@ impl AnyInstance {
             5u32 => Ok(AnyInstance::Stwo(StwoInstance {
                 bytes: bytes.to_vec(),
             })),
+            7u32 => Ok(AnyInstance::Flock(FlockInstance {
+                bytes: bytes.to_vec(),
+            })),
+            #[cfg(feature = "halo2-kzg")]
+            6u32 => Ok(AnyInstance::Halo2Kzg(Halo2KzgInstance::from_bytes(bytes)?)),
             _ => Err(ZkError::CurveMismatch),
         }
     }

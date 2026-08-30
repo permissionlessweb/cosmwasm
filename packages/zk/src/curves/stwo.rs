@@ -5,12 +5,19 @@
 //! `c = 3a+5b+7` over M31. Same statement Lean LNPR already uses.
 //! Not `CircuitType::Stark`.
 
+use std::sync::OnceLock;
+
 use halo2_proofs::COSMWASM_FOOTER_LENGTH;
 use sha2::{Digest, Sha256};
 
 use crate::{CircuitFooter, CircuitType, Proof, ZkError, ZkResult};
 
 use super::CurveType;
+
+/// zk-wasmvm installs real S-two verify here (FOLD/SSLE). Dummy DSTW is
+/// rejected by that host. Kept as a hook so this crate does not depend on
+/// `stwo` (CosmWasm workspace digest clash with vote-sdk).
+pub static STWO_HOST_VERIFY: OnceLock<fn(&[u8], &[u8]) -> ZkResult<()>> = OnceLock::new();
 
 /// Footer `prover_id` for this arm.
 pub const STWO_PROVER_ID: u8 = CircuitType::Stwo as u8;
@@ -107,12 +114,12 @@ fn le_u32(b: &[u8]) -> u32 {
     u32::from_le_bytes([b[0], b[1], b[2], b[3]])
 }
 
-fn be_u64(b: &[u8]) -> u64 {
-    u64::from_be_bytes(b.try_into().unwrap())
+fn be_u64(b: &[u8]) -> Option<u64> {
+    <[u8; 8]>::try_from(b).ok().map(u64::from_be_bytes)
 }
 
-fn be_i64(b: &[u8]) -> i64 {
-    i64::from_be_bytes(b.try_into().unwrap())
+fn be_i64(b: &[u8]) -> Option<i64> {
+    <[u8; 8]>::try_from(b).ok().map(i64::from_be_bytes)
 }
 
 fn seeds_bound(period: u64, subject: &[u8], weight: i64) -> (u32, u32) {
@@ -129,22 +136,27 @@ fn seeds_bound(period: u64, subject: &[u8], weight: i64) -> (u32, u32) {
 }
 
 /// Host-side Stwo statement (DSTW or STWO 18-byte dummy AIR).
+/// When [`STWO_HOST_VERIFY`] is set (zk-wasmvm), Dummy DSTW is rejected and
+/// FOLD/SSLE Circle STARKs are verified by pinned S-two.
 pub fn verify_stwo_proof(proof: &[u8], instances: &[u8]) -> ZkResult<()> {
     if proof.len() > 2 * 1024 * 1024 {
         return Err(ZkError::new_err("stwo: proof too large"));
     }
+    if let Some(host) = STWO_HOST_VERIFY.get() {
+        return host(proof, instances);
+    }
     if proof.len() < DUMMY_LEN {
-        return Err(ZkError::new_err("stwo: truncated"));
+        return Err(ZkError::format_err("stwo: truncated"));
     }
     let mag = &proof[0..4];
     if mag != DSTW && mag != STWO {
         return Err(ZkError::VerifyFailed);
     }
     if proof[4] != STWO_PROVER_ID {
-        return Err(ZkError::new_err("stwo: bad prover_id"));
+        return Err(ZkError::format_err("stwo: bad prover_id"));
     }
     if proof[5] != STWO_CURVE_ID {
-        return Err(ZkError::new_err("stwo: bad curve_id"));
+        return Err(ZkError::format_err("stwo: bad curve_id"));
     }
     let a = le_u32(&proof[6..10]);
     let b = le_u32(&proof[10..14]);
@@ -156,8 +168,12 @@ pub fn verify_stwo_proof(proof: &[u8], instances: &[u8]) -> ZkResult<()> {
         return Err(ZkError::VerifyFailed);
     }
     if instances.len() >= 16 {
-        let period = be_u64(&instances[0..8]);
-        let weight = be_i64(&instances[8..16]);
+        let Some(period) = be_u64(&instances[0..8]) else {
+            return Err(ZkError::format_err("stwo: short period"));
+        };
+        let Some(weight) = be_i64(&instances[8..16]) else {
+            return Err(ZkError::format_err("stwo: short weight"));
+        };
         let subj = &instances[16..];
         let (ea, eb) = seeds_bound(period, subj, weight);
         if a != ea || b != eb {

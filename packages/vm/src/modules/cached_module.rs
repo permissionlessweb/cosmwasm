@@ -46,12 +46,14 @@ pub struct CachedCircuit {
 #[derive(Debug, Clone)]
 pub struct CachedParam {
     /// Raw commitment-parameter bytes (not a verifying key).
-    pub params: Vec<u8>,
+    /// Boxed slice: immutable after insert (no Vec capacity waste).
+    pub params: Box<[u8]>,
     pub size_estimate: usize,
 }
 
 impl CachedParam {
-    pub fn from_bytes(params: Vec<u8>) -> Self {
+    pub fn from_bytes(params: impl Into<Box<[u8]>>) -> Self {
+        let params = params.into();
         let size_estimate = params.len();
         Self {
             params,

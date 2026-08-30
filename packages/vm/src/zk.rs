@@ -48,6 +48,11 @@ pub fn deserialize_circuit_data(data: &[u8]) -> ZkResult<SerializedCircuitData> 
     ))
 }
 
+/// Integrity-check a store blob.
+///
+/// Last 80 bytes are always CosmWasm `CircuitFooter`. `curve_id` routes later
+/// (`0` Pasta IPA, `4` Groth16 BN254, `6` Halo2-axiom KZG BN256). This function
+/// does not deserialize params — it only checks lengths + SHA-256 checksums.
 pub fn check_circuit(bytes: &[u8]) -> ZkResult<CircuitFooter> {
     let total_len = bytes.len();
     if total_len < COSMWASM_FOOTER_LENGTH {
@@ -163,6 +168,32 @@ mod tests {
             s.contains("param_len") || s.contains("Integrity") || s.contains("format"),
             "unexpected err: {s}"
         );
+    }
+
+    #[test]
+    fn check_circuit_accepts_kzg_style_footer() {
+        use sha2::{Digest, Sha256};
+        let params = vec![7u8; 64];
+        let vk_body = vec![9u8; 32];
+        let mut footer = [0u8; COSMWASM_FOOTER_LENGTH];
+        footer[0] = 0; // Plonkish
+        footer[1] = 6; // Bn256Kzg
+        footer[2] = 17;
+        footer[3] = 4;
+        footer[4..8].copy_from_slice(&(params.len() as u32).to_le_bytes());
+        footer[8..12].copy_from_slice(&0u32.to_le_bytes());
+        footer[12..16].copy_from_slice(&(vk_body.len() as u32).to_le_bytes());
+        let ph = Sha256::digest(&params);
+        let vh = Sha256::digest(&vk_body);
+        footer[16..48].copy_from_slice(&ph);
+        footer[48..80].copy_from_slice(&vh);
+        let mut blob = params;
+        blob.extend_from_slice(&vk_body);
+        blob.extend_from_slice(&footer);
+        let f = check_circuit(&blob).expect("kzg footer");
+        assert_eq!(f.curve_id, 6);
+        assert_eq!(f.k, 17);
+        assert_eq!(f.i, 4);
     }
 
     /// Helper to create a minimal valid WASM module with a custom section

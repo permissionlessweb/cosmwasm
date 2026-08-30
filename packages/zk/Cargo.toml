@@ -63,6 +63,7 @@ thiserror = "1.0.26"
 halo2_gadgets = { path = "../../../zcash/halo2/halo2_gadgets", default-features = false }
 halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs", default-features = false, features = ["batch"] }
 sha2 = "0.10"
+blake3 = "1"
 
 # Host-only: wasmer is for local circuit VM tooling, not for CosmWasm guest builds.
 # Target-gate so `cw-headstash` can compile to wasm32 (BridgeMintNote / ict_local_funded).

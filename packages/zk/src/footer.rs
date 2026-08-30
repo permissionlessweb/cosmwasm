@@ -53,10 +53,12 @@ impl CircuitFooter {
     }
     // appstate_key + checksum of vk
     pub fn to_circuit_key(&self) -> [u8; 72] {
-        let mut key = Vec::with_capacity(72);
-        key.extend_from_slice(&self.to_param_key());
-        key.extend_from_slice(&self.to_vk_key());
-        key.try_into().expect("to_circuit_key")
+        let mut key = [0u8; 72];
+        let param = self.to_param_key();
+        let vk = self.to_vk_key();
+        key[..36].copy_from_slice(&param);
+        key[36..].copy_from_slice(&vk);
+        key
     }
     // appstate_key + checksum of vk
     pub fn to_vk_key(&self) -> [u8; 36] {
@@ -77,11 +79,10 @@ impl CircuitFooter {
 
     // prefixes checksum with circuit identifiers
     fn to_file_key(&self, checksum: &[u8; 32]) -> [u8; 36] {
-        let mut key = Vec::with_capacity(36);
-        key.extend_from_slice(self.appstate_key().to_le_bytes().as_slice());
-        key.extend_from_slice(checksum.as_slice());
-        // append  appstate_key bytes to identifier
-        key.as_slice().try_into().expect("footer vk")
+        let mut key = [0u8; 36];
+        key[..4].copy_from_slice(&self.appstate_key().to_le_bytes());
+        key[4..].copy_from_slice(checksum);
+        key
     }
 }
 
@@ -176,5 +177,34 @@ impl CircuitFooter {
             param_checksum: bytes[16..48].try_into()?,
             vk_checksum: bytes[48..80].try_into()?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::circuits::CircuitType;
+    use crate::curves::CurveType;
+
+    #[test]
+    fn file_and_circuit_keys_are_fixed_width_stack_arrays() {
+        let f = CircuitFooter::new(
+            CircuitType::Stwo,
+            CurveType::M31,
+            0,
+            1,
+            0,
+            0,
+            0,
+            [0x11; 32],
+            [0x22; 32],
+        );
+        let pk = f.to_param_key();
+        let vk = f.to_vk_key();
+        let ck = f.to_circuit_key();
+        assert_eq!(&ck[..36], &pk);
+        assert_eq!(&ck[36..], &vk);
+        let again = f.to_circuit_key();
+        assert_eq!(ck, again);
     }
 }

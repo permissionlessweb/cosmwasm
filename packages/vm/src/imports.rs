@@ -1657,6 +1657,7 @@ fn instance_public_input_count(i: &zk_cosmwasm::AnyInstance) -> usize {
         #[cfg(feature = "bn254")]
         zk_cosmwasm::AnyInstance::Bn254(v) => v.i.len(),
         zk_cosmwasm::AnyInstance::Stwo(v) => v.public_input_count(),
+        zk_cosmwasm::AnyInstance::Flock(v) => v.public_input_count(),
     }
 }
 
@@ -4174,6 +4175,169 @@ mod tests {
         )
         .expect("loader path");
         assert_eq!(code, 0);
+    }
+
+    /// Missing CircuitInfo/Circuit for zkid → host Err (not process panic, not Ok(0)).
+    #[test]
+    #[cfg(feature = "zk")]
+    fn proof_instance_verify_missing_circuit_is_err_not_panic() {
+        use cosmwasm_std::{ContractResult, SystemResult, WasmQuery};
+
+        let api = MockApi::default();
+        let (fe, mut store, _instance) =
+            make_instance_with_gas_limit(api, TESTING_ZK_VERIFY_GAS_LIMIT);
+        let mut fe_mut = fe.into_mut(&mut store);
+
+        let mut storage = MockStorage::new();
+        storage.set(KEY1, VALUE1).0.expect("set");
+        let mut querier: MockQuerier<Empty> =
+            MockQuerier::new(&[(INIT_ADDR, &coins(INIT_AMOUNT, INIT_DENOM))]);
+        querier.update_wasm(move |wq| match wq {
+            WasmQuery::CircuitInfo { zk_id } | WasmQuery::Circuit { zk_id } => {
+                SystemResult::Err(SystemError::NoSuchCircuit { zk_id: *zk_id })
+            }
+            _ => SystemResult::Err(SystemError::UnsupportedRequest {
+                kind: "query".into(),
+            }),
+        });
+        {
+            let (env, _store) = fe_mut.data_and_store_mut();
+            env.move_in(storage, querier);
+            env.set_circuit_loader(None);
+        }
+
+        let proof = [0u8; 8];
+        let inst = [0u8; 8];
+        let proof_ptr = write_data(&mut fe_mut, &proof);
+        let inst_ptr = write_data(&mut fe_mut, &inst);
+
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            do_proof_instance_verify(
+                fe_mut.as_mut(),
+                99,
+                proof_ptr,
+                proof.len() as u32,
+                inst_ptr,
+                inst.len() as u32,
+            )
+        }));
+        let inner = res.expect("VM must not panic on missing circuit");
+        assert!(inner.is_err(), "missing circuit must be host Err, not Ok(0)");
+    }
+
+    /// Circle STWO through the same Path A `proof_instance_verify` as other circuits.
+    /// Dummy DSTW (no STWO_HOST_VERIFY in this crate) + bitflip / missing zkid.
+    #[test]
+    #[cfg(feature = "zk")]
+    fn proof_instance_verify_stwo_ok_bad_proof_missing_not_panic() {
+        use cosmwasm_std::{
+            to_json_binary, Addr, CircuitInfoResponse, CircuitResponse, ContractResult, SystemResult,
+            WasmQuery,
+        };
+
+        let vk = zk_cosmwasm::StwoVerifyingKey::lean_default();
+        let blob = vk.to_blob();
+        let circuit_key = vk.footer.to_circuit_key();
+
+        // DSTW dummy: c = 3a+5b+7 over M31
+        let a: u32 = 3;
+        let b: u32 = 5;
+        let c = ((3u64 * u64::from(a) + 5u64 * u64::from(b) + 7) % ((1u64 << 31) - 1)) as u32;
+        let mut dstw = vec![0u8; 18];
+        dstw[0..4].copy_from_slice(b"DSTW");
+        dstw[4] = 2;
+        dstw[5] = 5;
+        dstw[6..10].copy_from_slice(&a.to_le_bytes());
+        dstw[10..14].copy_from_slice(&b.to_le_bytes());
+        dstw[14..18].copy_from_slice(&c.to_le_bytes());
+
+        let api = MockApi::default();
+        let (fe, mut store, _instance) =
+            make_instance_with_gas_limit(api, TESTING_ZK_VERIFY_GAS_LIMIT);
+        let mut fe_mut = fe.into_mut(&mut store);
+
+        let mut storage = MockStorage::new();
+        storage.set(KEY1, VALUE1).0.expect("set");
+        let mut querier: MockQuerier<Empty> =
+            MockQuerier::new(&[(INIT_ADDR, &coins(INIT_AMOUNT, INIT_DENOM))]);
+        let blob_c = blob.clone();
+        let key_bin = circuit_key.to_vec();
+        querier.update_wasm(move |wq| match wq {
+            WasmQuery::CircuitInfo { zk_id } if *zk_id == 7 => {
+                let response = CircuitInfoResponse::new(
+                    7,
+                    Addr::unchecked("creator"),
+                    cosmwasm_std::Binary::from(key_bin.clone()),
+                );
+                SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
+            }
+            WasmQuery::Circuit { zk_id } if *zk_id == 7 => {
+                let response =
+                    CircuitResponse::new(cosmwasm_std::Binary::from(blob_c.clone()));
+                SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
+            }
+            WasmQuery::CircuitInfo { zk_id } | WasmQuery::Circuit { zk_id } => {
+                SystemResult::Err(SystemError::NoSuchCircuit { zk_id: *zk_id })
+            }
+            _ => SystemResult::Err(SystemError::UnsupportedRequest {
+                kind: "query".into(),
+            }),
+        });
+        {
+            let (env, _store) = fe_mut.data_and_store_mut();
+            env.move_in(storage, querier);
+            env.set_circuit_loader(None);
+        }
+
+        let proof_ptr = write_data(&mut fe_mut, &dstw);
+        let inst_ptr = write_data(&mut fe_mut, &[]);
+
+        let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            do_proof_instance_verify(
+                fe_mut.as_mut(),
+                7,
+                proof_ptr,
+                dstw.len() as u32,
+                inst_ptr,
+                0,
+            )
+        }))
+        .expect("no panic on valid DSTW");
+        assert_eq!(ok.expect("format ok"), 0, "valid dummy STWO/DSTW must Ok(0)");
+
+        let mut bad = dstw.clone();
+        bad[14] ^= 1;
+        let bad_ptr = write_data(&mut fe_mut, &bad);
+        let bad_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            do_proof_instance_verify(
+                fe_mut.as_mut(),
+                7,
+                bad_ptr,
+                bad.len() as u32,
+                inst_ptr,
+                0,
+            )
+        }))
+        .expect("no panic on bad proof");
+        match bad_res {
+            Ok(1) => {}
+            Err(_) => {}
+            Ok(0) => panic!("bad STWO proof must not Ok(0)"),
+            Ok(other) => panic!("unexpected code {other}"),
+        }
+
+        let miss = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            do_proof_instance_verify(
+                fe_mut.as_mut(),
+                99,
+                proof_ptr,
+                dstw.len() as u32,
+                inst_ptr,
+                0,
+            )
+        }))
+        .expect("no panic on missing STWO circuit");
+        assert!(miss.is_err(), "missing STWO zkid must be host Err");
     }
 
     // ── Path A batch verify (proof_instance_batch_verify) ─────────────────

@@ -19,7 +19,16 @@ pub use snarkjs::{
 
 mod vote;
 mod stwo;
-pub use stwo::{StwoInstance, StwoVerifyingKey, verify_stwo_proof, STWO_CURVE_ID, STWO_PROVER_ID};
+mod flock;
+#[cfg(feature = "halo2-kzg")]
+mod halo2_kzg;
+#[cfg(feature = "halo2-kzg")]
+pub use halo2_kzg::{Halo2KzgInstance, Halo2KzgVerifyingKey, HALO2_KZG_CURVE_ID, kzg_footer};
+pub use stwo::{
+    verify_stwo_proof, StwoInstance, StwoVerifyingKey, STWO_CURVE_ID, STWO_HOST_VERIFY,
+    STWO_PROVER_ID,
+};
+pub use flock::{FlockInstance, FlockVerifyingKey, prove_flock, verify_flock_proof, FLOCK_CURVE_ID, FLOCK_PROVER_ID};
 pub use vote::{VoteVerifyingKey, VoteInstance, VoteCircuitId};
 
 use crate::{ZkError, ZkResult};
@@ -107,6 +116,11 @@ pub enum CurveType {
     Bn254 = 4,
     /// M31 / Circle STARK (Stwo).
     M31 = 5,
+    /// BN256 Halo2-axiom KZG / SHPLONK (zkjwt.passkey).
+    #[cfg(feature = "halo2-kzg")]
+    Bn256Kzg = 6,
+    /// Flock hash-based SNARK (BLAKE3 batches).
+    FlockBlake3 = 7,
 }
 
 impl TryFrom<u8> for CurveType {
@@ -121,6 +135,9 @@ impl TryFrom<u8> for CurveType {
             #[cfg(feature = "bn254")]
             4 => Ok(CurveType::Bn254),
             5 => Ok(CurveType::M31),
+            #[cfg(feature = "halo2-kzg")]
+            6 => Ok(CurveType::Bn256Kzg),
+            7 => Ok(CurveType::FlockBlake3),
             _ => Err(ZkError::new_err("bad CurveType")),
         }
     }
@@ -135,6 +152,9 @@ impl Into<u8> for CurveType {
             #[cfg(feature = "bn254")]
             CurveType::Bn254 => 4,
             CurveType::M31 => 5,
+            #[cfg(feature = "halo2-kzg")]
+            CurveType::Bn256Kzg => 6,
+            CurveType::FlockBlake3 => 7,
         }
     }
 }
