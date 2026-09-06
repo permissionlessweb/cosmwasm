@@ -618,12 +618,9 @@ where
             };
             let vk_body = fs::read(&vk_path)
                 .map_err(|e| VmError::cache_err(format!("read vk for verify: {e}")))?;
-            let vk = zk_cosmwasm::AnyVerifyingKey::from_split_bytes(
-                &param_bytes,
-                &vk_body,
-                &footer,
-            )
-            .map_err(VmError::zk_err)?;
+            let vk =
+                zk_cosmwasm::AnyVerifyingKey::from_split_bytes(&param_bytes, &vk_body, &footer)
+                    .map_err(VmError::zk_err)?;
             // Warm caches for next call
             let mut cache = inner.lock().unwrap();
             let size_estimate = param_bytes.len() + vk_body.len() + COSMWASM_FOOTER_LENGTH;
@@ -722,7 +719,10 @@ where
     // Helper to produce a dummy checksum (same as used for missing VK)
     fn store_wasm_to_disk(&self, dir: &PathBuf, wasm: Vec<u8>) -> VmResult<(Module, Checksum)> {
         // Compile and store WASM
-        Ok((compile_module(&wasm, None)?.0, save_wasm_to_disk(dir, &wasm)?))
+        Ok((
+            compile_module(&wasm, None)?.0,
+            save_wasm_to_disk(dir, &wasm)?,
+        ))
     }
 
     /// Retrieves a Wasm blob that was previously stored via [`Cache::store_code`].
@@ -921,9 +921,7 @@ where
             let size_estimate = zk.len();
             let cached = crate::modules::CachedCircuit { vk, size_estimate };
             let mut cache = self.inner.lock().unwrap();
-            cache
-                .memory_cache
-                .store_circuit(&circuit_key, &cached)?;
+            cache.memory_cache.store_circuit(&circuit_key, &cached)?;
             Ok(circuit_key)
         }
     }
@@ -1330,7 +1328,6 @@ where
     }
 }
 
-
 unsafe impl<A, S, Q> Sync for Cache<A, S, Q>
 where
     A: BackendApi + 'static,
@@ -1556,6 +1553,7 @@ fn save_vk_params_to_disk(dir: impl Into<PathBuf>, p: &[u8]) -> VmResult<Checksu
 mod tests {
     use super::*;
     use crate::calls::{call_execute, call_instantiate};
+    use crate::instance::GasReport;
     use crate::testing::{mock_backend, mock_env, mock_info, MockApi, MockQuerier, MockStorage};
     use cosmwasm_std::{coins, Empty};
     use sha2::{Digest, Sha256};
@@ -1643,6 +1641,31 @@ mod tests {
             },
             temp_dir,
         )
+    }
+
+    /// Instantiate HACKATOM and return the post-call gas report.
+    /// `get_instance` / compile must not consume metering points (`used_internally == 0` first).
+    fn instantiate_hackatom_gas_report(
+        cache: &Cache<MockApi, MockStorage, MockQuerier>,
+        checksum: &Checksum,
+    ) -> GasReport {
+        let mut instance = cache
+            .get_instance(checksum, mock_backend(&[]), TESTING_OPTIONS)
+            .unwrap();
+        let before = instance.create_gas_report();
+        assert_eq!(before.used_internally, 0);
+        assert_eq!(before.used_externally, 0);
+        assert_eq!(before.remaining, TESTING_GAS_LIMIT);
+
+        let info = mock_info(&instance.api().addr_make("creator"), &coins(1000, "earth"));
+        let verifier = instance.api().addr_make("verifies");
+        let beneficiary = instance.api().addr_make("benefits");
+        let msg = format!(r#"{{"verifier": "{verifier}", "beneficiary": "{beneficiary}"}}"#);
+        let res =
+            call_instantiate::<_, _, _, Empty>(&mut instance, &mock_env(), &info, msg.as_bytes())
+                .unwrap();
+        assert_eq!(res.unwrap().messages.len(), 0);
+        instance.create_gas_report()
     }
 
     /// Takes an instance and executes it
@@ -2322,6 +2345,63 @@ mod tests {
             let msgs = res.unwrap().messages;
             assert_eq!(msgs.len(), 0);
         }
+    }
+
+    #[test]
+    fn used_internally_is_cache_oblivious() {
+        let (options, _temp_dir) = make_testing_options();
+        let cache = unsafe { Cache::new(options.clone()).unwrap() };
+        let checksum = cache.store_code(HACKATOM, true, true).unwrap();
+
+        // file-system hit (store_code wrote the compiled module)
+        let fs_hit = instantiate_hackatom_gas_report(&cache, &checksum);
+        assert_eq!(cache.stats().hits_pinned_memory_cache, 0);
+        assert_eq!(cache.stats().hits_memory_cache, 0);
+        assert_eq!(cache.stats().hits_fs_cache, 1);
+        assert_eq!(cache.stats().misses, 0);
+
+        // in-memory LRU hit
+        let memory_hit = instantiate_hackatom_gas_report(&cache, &checksum);
+        assert_eq!(cache.stats().hits_pinned_memory_cache, 0);
+        assert_eq!(cache.stats().hits_memory_cache, 1);
+        assert_eq!(cache.stats().hits_fs_cache, 1);
+        assert_eq!(cache.stats().misses, 0);
+
+        // pin, then pinned-memory hit
+        cache.pin(&checksum).unwrap();
+        let pinned_hit = instantiate_hackatom_gas_report(&cache, &checksum);
+        assert_eq!(cache.stats().hits_pinned_memory_cache, 1);
+        assert_eq!(cache.stats().hits_memory_cache, 1);
+        assert_eq!(cache.stats().hits_fs_cache, 2);
+        assert_eq!(cache.stats().misses, 0);
+
+        // recompile miss: drop compiled modules, new cache (empty RAM caches)
+        remove_dir_all(options.base_dir.join(CACHE_DIR).join(MODULES_DIR)).unwrap();
+        let cache = unsafe { Cache::new(options).unwrap() };
+        let recompile_miss = instantiate_hackatom_gas_report(&cache, &checksum);
+        assert_eq!(cache.stats().hits_pinned_memory_cache, 0);
+        assert_eq!(cache.stats().hits_memory_cache, 0);
+        assert_eq!(cache.stats().hits_fs_cache, 0);
+        assert_eq!(cache.stats().misses, 1);
+
+        println!(
+            "used_internally fs_hit={} memory_hit={} pinned_hit={} recompile_miss={}",
+            fs_hit.used_internally,
+            memory_hit.used_internally,
+            pinned_hit.used_internally,
+            recompile_miss.used_internally
+        );
+        println!(
+            "used_externally fs_hit={} memory_hit={} pinned_hit={} recompile_miss={}",
+            fs_hit.used_externally,
+            memory_hit.used_externally,
+            pinned_hit.used_externally,
+            recompile_miss.used_externally
+        );
+
+        assert_eq!(fs_hit.used_internally, memory_hit.used_internally);
+        assert_eq!(fs_hit.used_internally, pinned_hit.used_internally);
+        assert_eq!(fs_hit.used_internally, recompile_miss.used_internally);
     }
 
     #[test]
@@ -3101,7 +3181,7 @@ mod tests {
     #[cfg(all(feature = "zk", feature = "bn254"))]
     fn synthetic_bn254_circuit(vk_body: &[u8], i: u8) -> (Vec<u8>, CircuitFooter) {
         use sha2::{Digest, Sha256};
-        use zk_cosmwasm::{CircuitType, curves::CurveType};
+        use zk_cosmwasm::{curves::CurveType, CircuitType};
 
         let param_checksum: [u8; 32] = Sha256::digest([]).into();
         let vk_checksum: [u8; 32] = Sha256::digest(vk_body).into();
@@ -3155,10 +3235,13 @@ mod tests {
         // Synthetic body is not a real ark VK — verify is a format error (not stub).
         let proof = zk_cosmwasm::Proof::new(vec![0u8; 8]);
         // Instance routing uses curve_id (4), not zkid (D7).
-        let inst = zk_cosmwasm::AnyInstance::try_from_bytes(loaded.vk.curve_id() as u32, &[]).unwrap();
+        let inst =
+            zk_cosmwasm::AnyInstance::try_from_bytes(loaded.vk.curve_id() as u32, &[]).unwrap();
         let err = loaded.vk.verify(&proof, &[inst]).unwrap_err();
         assert!(
-            err.is_format_err() || err.to_string().contains("format") || err.to_string().contains("invalid"),
+            err.is_format_err()
+                || err.to_string().contains("format")
+                || err.to_string().contains("invalid"),
             "unexpected verify error: {err}"
         );
     }
@@ -3178,8 +3261,8 @@ mod tests {
         let loaded = cache.load_circuit(&key).unwrap().unwrap();
         assert_eq!(loaded.vk.curve_id(), 4);
         assert_eq!(loaded.vk.prover_id(), 1);
-        let inst = zk_cosmwasm::AnyInstance::try_from_bytes(loaded.vk.curve_id() as u32, PUBLIC)
-            .unwrap();
+        let inst =
+            zk_cosmwasm::AnyInstance::try_from_bytes(loaded.vk.curve_id() as u32, PUBLIC).unwrap();
         loaded
             .vk
             .verify(&zk_cosmwasm::Proof::new(PROOF.to_vec()), &[inst])
@@ -3237,9 +3320,7 @@ mod tests {
         assert_eq!(&key[4..], empty_hash.as_slice());
 
         // Footer-derived meta for Groth16+BN254.
-        let key2 = cache
-            .store_param_with_meta(&[], 1, 4, 0)
-            .unwrap();
+        let key2 = cache.store_param_with_meta(&[], 1, 4, 0).unwrap();
         let appstate = u32::from_be_bytes([1, 4, 0, 0]);
         assert_eq!(&key2[..4], &appstate.to_le_bytes());
         assert_eq!(&key2[4..], empty_hash.as_slice());
@@ -3259,9 +3340,6 @@ mod tests {
             unsafe { Cache::new(testing_opts).unwrap() };
         let key = cache.store_circuit(NORICK_CIRCUIT, true).unwrap();
         let loaded = cache.load_circuit(&key).unwrap().unwrap();
-        assert!(matches!(
-            loaded.vk,
-            zk_cosmwasm::AnyVerifyingKey::Vesta(_)
-        ));
+        assert!(matches!(loaded.vk, zk_cosmwasm::AnyVerifyingKey::Vesta(_)));
     }
 }
