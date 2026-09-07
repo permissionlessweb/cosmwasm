@@ -33,14 +33,14 @@ pub mod zk;
 pub use zk_cosmwasm::{self};
 
 #[cfg(feature = "zk")]
-pub use crate::zk::{
-    check_circuit, CodeBundle, Proof, ProvingKey, SerializedPlonkishCircuitData, VerifyingKey,
-};
+pub use crate::zk::{check_circuit, AnyInstance, AnyVerifyingKey, Proof, SerializedCircuitData};
 
 pub use crate::backend::{
     Backend, BackendApi, BackendError, BackendResult, GasInfo, Querier, Storage,
 };
-pub use crate::cache::{AnalysisReport, Cache, Metrics, PerModuleMetrics, PinnedMetrics, Stats};
+pub use crate::cache::{AnalysisReport, CacheKey, Cache, Metrics, PerModuleMetrics, PinnedMetrics, Stats};
+#[cfg(feature = "zk")]
+pub use crate::modules::CachedCircuit;
 pub use crate::calls::{
     call_execute, call_execute_raw, call_ibc_destination_callback,
     call_ibc_destination_callback_raw, call_ibc_source_callback, call_ibc_source_callback_raw,
@@ -61,7 +61,10 @@ pub use crate::calls::{
     call_ibc_packet_ack, call_ibc_packet_ack_raw, call_ibc_packet_receive,
     call_ibc_packet_receive_raw, call_ibc_packet_timeout, call_ibc_packet_timeout_raw,
 };
-pub use crate::capabilities::capabilities_from_csv;
+
+pub use crate::capabilities::{
+    capabilities_from_csv, feature_gated_host_capabilities, multi_curve_caps, CAP_BULK_MEMORY,
+};
 pub use crate::config::{CacheOptions, Config, WasmLimits};
 pub use crate::errors::{
     CommunicationError, CommunicationResult, RegionValidationError, RegionValidationResult,
@@ -82,5 +85,7 @@ pub mod internals {
 
     pub use crate::compatibility::{check_wasm, LogOutput, Logger};
     pub use crate::instance::instance_from_module;
-    pub use crate::wasm_backend::{compile, make_compiling_engine, make_runtime_engine};
+    pub use crate::wasm_backend::{
+        compile, compile_module, make_compiling_engine, make_runtime_engine,
+    };
 }

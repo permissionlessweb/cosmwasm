@@ -1,9 +1,9 @@
 use cosmwasm_std::Checksum;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use super::cached_module::CachedModule;
 #[cfg(feature = "zk")]
-use crate::modules::CachedCircuit;
+use crate::modules::{cached_module::CachedParam, CachedCircuit};
 use crate::VmResult;
 
 /// Struct storing some additional metadata, which is only of interest for the pinned cache,
@@ -24,11 +24,34 @@ pub struct InstrumentedCircuit {
     pub circuit: CachedCircuit,
 }
 
+#[cfg(feature = "zk")]
+pub struct InstrumentedParam {
+    /// Number of loads from memory this module received
+    pub hits: u32,
+    /// The actual cached module
+    pub param: CachedParam,
+}
+
+/// Default maximum number of pinned ZK circuits before LRU eviction.
+#[cfg(feature = "zk")]
+const DEFAULT_MAX_PINNED_CIRCUITS: usize = 100;
+/// Default maximum total bytes for pinned ZK circuits before LRU eviction.
+#[cfg(feature = "zk")]
+const DEFAULT_MAX_PINNED_CIRCUIT_SIZE_BYTES: usize = 100 * 1024 * 1024;
+
 /// An pinned in memory module cache
 pub struct PinnedMemoryCache {
     modules: HashMap<Checksum, InstrumentedModule>,
     #[cfg(feature = "zk")]
-    circuits: HashMap<Checksum, InstrumentedCircuit>,
+    circuits: HashMap<[u8; 72], InstrumentedCircuit>,
+    #[cfg(feature = "zk")]
+    params: HashMap<[u8; 36], InstrumentedParam>,
+    #[cfg(feature = "zk")]
+    max_circuit_count: Option<usize>,
+    #[cfg(feature = "zk")]
+    max_circuit_size_bytes: Option<usize>,
+    #[cfg(feature = "zk")]
+    circuit_pin_order: VecDeque<[u8; 72]>,
 }
 
 impl PinnedMemoryCache {
@@ -38,14 +61,25 @@ impl PinnedMemoryCache {
             modules: HashMap::new(),
             #[cfg(feature = "zk")]
             circuits: HashMap::new(),
+            #[cfg(feature = "zk")]
+            params: HashMap::new(),
+            #[cfg(feature = "zk")]
+            max_circuit_count: Some(DEFAULT_MAX_PINNED_CIRCUITS),
+            #[cfg(feature = "zk")]
+            max_circuit_size_bytes: Some(DEFAULT_MAX_PINNED_CIRCUIT_SIZE_BYTES),
+            #[cfg(feature = "zk")]
+            circuit_pin_order: VecDeque::new(),
         }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&Checksum, &InstrumentedModule)> {
         self.modules.iter()
     }
-    pub fn iter_circuits(&self) -> impl Iterator<Item = (&Checksum, &InstrumentedCircuit)> {
+    pub fn iter_circuits(&self) -> impl Iterator<Item = (&[u8; 72], &InstrumentedCircuit)> {
         self.circuits.iter()
+    }
+    pub fn iter_params(&self) -> impl Iterator<Item = (&[u8; 36], &InstrumentedParam)> {
+        self.params.iter()
     }
 
     pub fn store(&mut self, checksum: &Checksum, cached_module: CachedModule) -> VmResult<()> {
@@ -60,39 +94,10 @@ impl PinnedMemoryCache {
         Ok(())
     }
 
-    #[cfg(feature = "zk")]
-    pub fn store_circuit(
-        &mut self,
-        checksum: &Checksum,
-        cached_circuit: CachedCircuit,
-    ) -> VmResult<()> {
-        println!("storing to pinned_memory_cache;");
-        self.circuits.insert(
-            *checksum,
-            InstrumentedCircuit {
-                hits: 0,
-                circuit: cached_circuit,
-            },
-        );
-        Ok(())
-    }
-
     /// Removes a module from the cache
     /// Not found modules are silently ignored. Potential integrity errors (wrong checksum) are not checked / enforced
-    pub fn remove(&mut self, checksum: &Checksum, zk: bool) -> VmResult<()> {
-        match zk {
-            true => {
-                #[cfg(feature = "zk")]
-                self.circuits.remove(checksum);
-                #[cfg(not(feature = "zk"))]
-                return Err(crate::VmError::generic_err(
-                    "zk faeture disabled. cannot remove circuit from cache",
-                ));
-            }
-            false => {
-                self.modules.remove(checksum);
-            }
-        };
+    pub fn remove(&mut self, checksum: &Checksum) -> VmResult<()> {
+        self.modules.remove(checksum);
         Ok(())
     }
 
@@ -106,29 +111,10 @@ impl PinnedMemoryCache {
             None => Ok(None),
         }
     }
-    /// Looks up a module in the cache and creates a new module
-    #[cfg(feature = "zk")]
-    pub fn load_circuit(&mut self, checksum: &Checksum) -> VmResult<Option<CachedCircuit>> {
-        match self.circuits.get_mut(checksum) {
-            Some(cached) => {
-                cached.hits = cached.hits.saturating_add(1);
-                Ok(Some(cached.circuit.clone()))
-            }
-            None => Ok(None),
-        }
-    }
 
     /// Returns true if and only if this cache has an entry identified by the given checksum
-    pub fn has(&self, checksum: &Checksum, zk: bool) -> bool {
-        match zk {
-            true => {
-                #[cfg(feature = "zk")]
-                return self.circuits.contains_key(checksum);
-                #[cfg(not(feature = "zk"))]
-                false
-            }
-            false => self.modules.contains_key(checksum),
-        }
+    pub fn has(&self, checksum: &Checksum) -> bool {
+        self.modules.contains_key(checksum)
     }
 
     /// Returns the number of elements in the cache.
@@ -163,6 +149,109 @@ impl PinnedMemoryCache {
         }
         #[cfg(not(feature = "zk"))]
         module_size
+    }
+}
+
+#[cfg(feature = "zk")]
+impl PinnedMemoryCache {
+    /// Returns true if and only if this cache has an entry identified by the given checksum
+    pub fn has_circuit(&self, circuit_file_key: &[u8; 72]) -> bool {
+        return self.circuits.contains_key(circuit_file_key);
+    }
+    pub fn store_circuit(
+        &mut self,
+        circuit_checksum_key: &[u8; 72],
+        cached_circuit: CachedCircuit,
+    ) -> VmResult<()> {
+        println!("storing to pinned_memory_cache;");
+        let is_update = self.circuits.contains_key(circuit_checksum_key);
+        if !is_update {
+            self.evict_circuits_for_insert(cached_circuit.size_estimate)?;
+        } else {
+            self.circuit_pin_order
+                .retain(|k| k != circuit_checksum_key);
+        }
+        self.circuit_pin_order.push_back(*circuit_checksum_key);
+        self.circuits.insert(
+            *circuit_checksum_key,
+            InstrumentedCircuit {
+                hits: 0,
+                circuit: cached_circuit,
+            },
+        );
+        Ok(())
+    }
+
+    fn evict_circuits_for_insert(&mut self, incoming_size: usize) -> VmResult<()> {
+        loop {
+            let over_count = self
+                .max_circuit_count
+                .is_some_and(|max| self.circuits.len() >= max);
+            let current_size: usize = self
+                .iter_circuits()
+                .map(|(_, c)| c.circuit.size_estimate)
+                .sum();
+            let over_size = self.max_circuit_size_bytes.is_some_and(|max| {
+                !self.circuits.is_empty() && current_size.saturating_add(incoming_size) > max
+            });
+            if !over_count && !over_size {
+                break;
+            }
+            let Some(oldest) = self.circuit_pin_order.pop_front() else {
+                break;
+            };
+            self.circuits.remove(&oldest);
+        }
+        Ok(())
+    }
+    pub fn store_param(
+        &mut self,
+        param_file_key: &[u8; 36],
+        cached_param: CachedParam,
+    ) -> VmResult<()> {
+        println!("storing param to pinned_memory_cache;");
+        self.params.insert(
+            *param_file_key,
+            InstrumentedParam {
+                hits: 0,
+                param: cached_param,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn remove_circuit(&mut self, checksum: &[u8; 72]) -> VmResult<()> {
+        self.circuits.remove(checksum);
+        self.circuit_pin_order.retain(|k| k != checksum);
+        Ok(())
+    }
+
+    pub fn remove_param(&mut self, param_file_key: &[u8; 36]) -> VmResult<()> {
+        self.params.remove(param_file_key);
+        Ok(())
+    }
+
+    /// Looks up a module in the cache and creates a new module.
+    /// IMPORTANT: pinned memory lookup is not checksum of vk file, but checksum of loaded vk with cs & params (since params and vk are different)
+    pub fn load_circuit(&mut self, circuit_file_key: &[u8; 72]) -> VmResult<Option<CachedCircuit>> {
+        match self.circuits.get_mut(circuit_file_key) {
+            Some(cached) => {
+                cached.hits = cached.hits.saturating_add(1);
+                Ok(Some(cached.circuit.clone()))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Load raw param bytes by 36-byte param file key.
+    pub fn load_param(&mut self, param_file_key: &[u8; 36]) -> VmResult<Option<CachedParam>> {
+        match self.params.get_mut(param_file_key) {
+            Some(cached) => {
+                cached.hits = cached.hits.saturating_add(1);
+                Ok(Some(cached.param.clone()))
+            }
+            None => Ok(None),
+        }
     }
 }
 
@@ -202,7 +291,7 @@ mod tests {
         assert!(cache_entry.is_none());
 
         // Compile module
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let original = compile(&engine, &wasm).unwrap();
 
         // Ensure original module can be executed
@@ -254,10 +343,10 @@ mod tests {
         .unwrap();
         let checksum = Checksum::generate(&wasm);
 
-        assert!(!cache.has(&checksum, false));
+        assert!(!cache.has(&checksum));
 
         // Add
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let original = compile(&engine, &wasm).unwrap();
         let module = CachedModule {
             module: original,
@@ -266,31 +355,36 @@ mod tests {
         };
         cache.store(&checksum, module).unwrap();
 
-        assert!(cache.has(&checksum, false));
+        assert!(cache.has(&checksum));
 
         // Remove
-        cache.remove(&checksum, false).unwrap();
+        cache.remove(&checksum).unwrap();
 
-        assert!(!cache.has(&checksum, false));
+        assert!(!cache.has(&checksum));
 
         #[cfg(feature = "zk")]
         {
-            use zk_cosmwasm::VerifyingKey;
+            use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+            use zk_cosmwasm::CircuitFooter;
 
             let zk = NORICK_CIRCUIT;
-            let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
-            let checksum = Checksum::from(*checksum_footer);
-            assert!(!cache.has(&checksum, true));
+
+            let footer =
+                CircuitFooter::from_bytes(&zk[zk.len() - COSMWASM_FOOTER_LENGTH..]).unwrap();
+
+            assert!(!cache.has_circuit(&footer.to_circuit_key()));
 
             let circuit = CachedCircuit {
-                vk: VerifyingKey::from_bytes(&zk).unwrap(),
+                vk: zk_cosmwasm::AnyVerifyingKey::try_from(zk).unwrap(),
                 size_estimate: zk.len(),
             };
-            cache.store_circuit(&checksum, circuit).unwrap();
-            assert!(cache.has(&checksum, true));
+            cache
+                .store_circuit(&footer.to_circuit_key(), circuit)
+                .unwrap();
+            assert!(cache.has_circuit(&footer.to_circuit_key()));
             // Remove
-            cache.remove(&checksum, true).unwrap();
-            assert!(!cache.has(&checksum, false));
+            cache.remove_circuit(&footer.to_circuit_key()).unwrap();
+            assert!(!cache.has(&checksum));
         }
     }
 
@@ -311,10 +405,10 @@ mod tests {
         .unwrap();
         let checksum = Checksum::generate(&wasm);
 
-        assert!(!cache.has(&checksum, false));
+        assert!(!cache.has(&checksum));
 
         // Add
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let original = compile(&engine, &wasm).unwrap();
         let module = CachedModule {
             module: original,
@@ -341,27 +435,31 @@ mod tests {
         #[cfg(feature = "zk")]
         {
             let zk = NORICK_CIRCUIT;
-            let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
-            let checksum = Checksum::from(*checksum_footer);
-            assert!(!cache.has(&checksum, true));
+            let footer = zk_cosmwasm::CircuitFooter::from_bytes(
+                &zk[zk.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+            )
+            .unwrap();
+            assert!(!cache.has_circuit(&footer.to_circuit_key()));
 
             let circuit = CachedCircuit {
-                vk: zk_cosmwasm::VerifyingKey::from_bytes(&zk).unwrap(),
+                vk: zk_cosmwasm::AnyVerifyingKey::try_from(zk).unwrap(),
                 size_estimate: zk.len(),
             };
-            cache.store_circuit(&checksum, circuit).unwrap();
+            cache
+                .store_circuit(&footer.to_circuit_key(), circuit)
+                .unwrap();
 
             let (_checksum, circuit) = cache
                 .iter_circuits()
-                .find(|(iter_checksum, _circuit)| **iter_checksum == checksum)
+                .find(|(iter_checksum, _circuit)| **iter_checksum == footer.to_circuit_key())
                 .unwrap();
 
             assert_eq!(circuit.hits, 0);
 
-            let _ = cache.load_circuit(&checksum).unwrap();
+            let _ = cache.load_circuit(&footer.to_circuit_key()).unwrap();
             let (_checksum, circuit) = cache
                 .iter_circuits()
-                .find(|(iter_checksum, _circuit)| **iter_checksum == checksum)
+                .find(|(iter_checksum, _circuit)| **iter_checksum == footer.to_circuit_key())
                 .unwrap();
 
             assert_eq!(circuit.hits, 1);
@@ -388,7 +486,7 @@ mod tests {
         assert_eq!(cache.len(), 0);
 
         // Add
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let original = compile(&engine, &wasm).unwrap();
         let module = CachedModule {
             module: original,
@@ -400,30 +498,34 @@ mod tests {
         assert_eq!(cache.len(), 1);
 
         // Remove
-        cache.remove(&checksum, false).unwrap();
+        cache.remove(&checksum).unwrap();
 
         assert_eq!(cache.len(), 0);
 
         #[cfg(feature = "zk")]
         {
-            use zk_cosmwasm::VerifyingKey;
-
             let zk = NORICK_CIRCUIT;
-            let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
-            let checksum = Checksum::from(*checksum_footer);
+
+            let footer = zk_cosmwasm::CircuitFooter::from_bytes(
+                &zk[zk.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+            )
+            .unwrap();
 
             assert_eq!(cache.len(), 0);
 
             let circuit = CachedCircuit {
-                vk: VerifyingKey::from_bytes(&zk).unwrap(),
+                vk: zk_cosmwasm::AnyVerifyingKey::try_from(zk).unwrap(),
                 size_estimate: zk.len(),
             };
-            cache.store_circuit(&checksum, circuit).unwrap();
+
+            cache
+                .store_circuit(&footer.to_circuit_key(), circuit)
+                .unwrap();
 
             assert_eq!(cache.len(), 1);
 
             // Remove
-            cache.remove(&checksum, true).unwrap();
+            cache.remove_circuit(&footer.to_circuit_key()).unwrap();
 
             assert_eq!(cache.len(), 0);
         }
@@ -460,7 +562,7 @@ mod tests {
         assert_eq!(cache.size(), 0);
 
         // Add 1
-        let engine1 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine1 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine1, &wasm1).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -470,7 +572,7 @@ mod tests {
         assert_eq!(cache.size(), 532);
 
         // Add 2
-        let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine2, &wasm2).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -480,40 +582,48 @@ mod tests {
         assert_eq!(cache.size(), 532 + 332);
 
         // Remove 1
-        cache.remove(&checksum1, false).unwrap();
+        cache.remove(&checksum1).unwrap();
         assert_eq!(cache.size(), 332);
 
         // Remove 2
-        cache.remove(&checksum2, false).unwrap();
+        cache.remove(&checksum2).unwrap();
         assert_eq!(cache.size(), 0);
 
         #[cfg(feature = "zk")]
         {
             let zk = NORICK_CIRCUIT;
-            let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
-            let checksum = Checksum::from(*checksum_footer);
+
+            let footer = zk_cosmwasm::CircuitFooter::from_bytes(
+                &zk[zk.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+            )
+            .unwrap();
 
             assert_eq!(cache.size(), 0);
             // Add 1: 66135
             let circuit = CachedCircuit {
-                vk: zk_cosmwasm::VerifyingKey::from_bytes(&zk).unwrap(),
+                vk: zk_cosmwasm::AnyVerifyingKey::try_from(zk).unwrap(),
                 size_estimate: zk.len(),
             };
-            assert_eq!(zk.len(), circuit.vk.to_bytes().unwrap().len());
+            assert_eq!(zk.len(), circuit.vk.to_bytes_with_params().unwrap().len());
 
-            cache.store_circuit(&checksum, circuit).unwrap();
-            assert_eq!(cache.size(), 66167);
+            cache
+                .store_circuit(&footer.to_circuit_key(), circuit)
+                .unwrap();
+            assert_eq!(cache.size(), zk.len() + std::mem::size_of::<[u8; 72]>());
 
             // Add 2
             cache.store(&checksum1, module).unwrap();
-            assert_eq!(cache.size(), 332 + 66167);
+            assert_eq!(
+                cache.size(),
+                332 + zk.len() + std::mem::size_of::<[u8; 72]>()
+            );
 
             // Remove 1
-            cache.remove(&checksum, true).unwrap();
+            cache.remove_circuit(&footer.to_circuit_key()).unwrap();
             assert_eq!(cache.size(), 332);
 
             // Remove 2
-            cache.remove(&checksum1, false).unwrap();
+            cache.remove(&checksum1).unwrap();
             assert_eq!(cache.size(), 0);
         }
     }

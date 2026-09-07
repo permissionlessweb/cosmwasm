@@ -155,7 +155,7 @@ pub trait CosmwasmCircuitFor<C: Circuit<vesta::Scalar>> {
     fn footer() -> CircuitFooter;
     fn to_bytes_with_cs() -> Result<Vec<u8>, Error>;
     fn from_bytes_with_cs(bytes: &[u8]) -> Result<VerifyingKey, Error>;
-    fn serialize_for_vm() -> SerializedPlonkishCircuitData;
+    fn serialize_for_vm() -> SerializedCircuitData;
 }
 ```
 
@@ -300,11 +300,11 @@ impl cosmwasm_vm::zk::CosmwasmCircuitFor<MyCircuit> {
         Ok([params_bytes, vk_bytes, cs_bytes, footer_bytes].concat())
     }
 
-    pub fn serialize_for_vm() -> cosmwasm_vm::zk::SerializedPlonkishCircuitData {
+    pub fn serialize_for_vm() -> cosmwasm_vm::zk::SerializedCircuitData {
         // Auto-generated FFI format
         let bytes = Self::to_bytes_with_cs().unwrap();
         let hash = /* compute SHA256 */;
-        cosmwasm_vm::zk::SerializedPlonkishCircuitData {
+        cosmwasm_vm::zk::SerializedCircuitData {
             bytes,
             hash,
             metadata: Self::footer().to_bytes(),
@@ -428,12 +428,12 @@ Deserializes a complete circuit and returns a verifying key ready for proof veri
 pub fn from_bytes_with_cs(bytes: &[u8]) -> Result<VerifyingKey, Error>;
 ```
 
-### serialize_for_vm() -> SerializedPlonkishCircuitData
+### serialize_for_vm() -> SerializedCircuitData
 
 Returns circuit data in FFI-ready format for WASM transmission.
 
 ```rust
-pub fn serialize_for_vm() -> SerializedPlonkishCircuitData;
+pub fn serialize_for_vm() -> SerializedCircuitData;
 ```
 
 ---

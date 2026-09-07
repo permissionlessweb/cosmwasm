@@ -132,7 +132,7 @@ pub trait Storage {
 /// for backwards compatibility in systems that don't have them all.
 pub trait Api: Any {
     /// Takes a human readable address and validates if it is valid.
-    /// If it the validation succeeds, a `Addr` containing the same data as the input is returned.
+    /// If the validation succeeds, an `Addr` containing the same data as the input is returned.
     ///
     /// This validation checks two things:
     /// 1. The address is valid in the sense that it can be converted to a canonical representation by the backend.
@@ -212,8 +212,8 @@ pub trait Api: Any {
     ///
     /// e(p_1, q_1) × e(p_2, q_2) × … × e(p_n, q_n) = e(s, q)
     ///
-    /// The argument `ps` contain the points p_1, ..., p_n ∈ G1 as a concatenation of 48 byte elements.
-    /// The argument `qs` contain the points q_1, ..., q_n ∈ G2 as a concatenation of 96 byte elements.
+    /// The argument `ps` contains the points p_1, ..., p_n ∈ G1 as a concatenation of 48 byte elements.
+    /// The argument `qs` contains the points q_1, ..., q_n ∈ G2 as a concatenation of 96 byte elements.
     ///
     /// ## Examples
     ///
@@ -336,12 +336,155 @@ pub trait Api: Any {
     /// Returns `Ok(true)` if the proof is valid, `Ok(false)` if invalid, or an error if verification fails.
     #[cfg(feature = "zk")]
     #[allow(unused_variables)]
-    fn halo2_proof_instance_verify(
+    fn proof_instance_verify(
         &self,
         zkid: u64,
         proof: &[u8],
         i: &[u8],
     ) -> Result<bool, VerificationError> {
+        unimplemented!()
+    }
+
+    /// Batch-verify Path A proofs (all-or-nothing).
+    ///
+    /// Parallel to [`Api::ed25519_batch_verify`]: `zkids`, `proofs`, and `instances`
+    /// must have equal length. Empty batch returns `Ok(true)`.
+    ///
+    /// Host gas is scheduled before backend work (never wall-time). Optional
+    /// feature `gpu` may select a CPU-golden GPU backend; accept/reject matches CPU.
+    #[cfg(feature = "zk")]
+    #[allow(unused_variables)]
+    fn proof_instance_batch_verify(
+        &self,
+        zkids: &[u64],
+        proofs: &[&[u8]],
+        instances: &[&[u8]],
+    ) -> Result<bool, VerificationError> {
+        // Default: sequential single verifies (contracts on older hosts / mocks).
+        if zkids.len() != proofs.len() || proofs.len() != instances.len() {
+            return Err(VerificationError::unknown_err(66));
+        }
+        for i in 0..zkids.len() {
+            if !self.proof_instance_verify(zkids[i], proofs[i], instances[i])? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    // ── Multi-curve host Api (feature-gated; default OFF) ─────────────────
+    // Mirrors Wasmer hosts in cosmwasm-vm. Never GPU for blake/poseidon.
+
+    /// BLAKE2b-256 digest (CPU only; never GPU on consensus path).
+    #[cfg(feature = "hash-blake")]
+    #[allow(unused_variables)]
+    fn blake2b_256(&self, input: &[u8]) -> [u8; 32] {
+        unimplemented!()
+    }
+
+    /// BLAKE3-256 digest (CPU only; never GPU on consensus path).
+    #[cfg(feature = "hash-blake")]
+    #[allow(unused_variables)]
+    fn blake3_256(&self, input: &[u8]) -> [u8; 32] {
+        unimplemented!()
+    }
+
+    /// Poseidon hash over Pallas base field (`P128Pow5T3`, ConstantLength).
+    ///
+    /// `inputs` must be a non-empty concatenation of 32-byte LE field elements
+    /// (`n` in 1..=16). Returns 32-byte LE field element.
+    #[cfg(feature = "hash-poseidon")]
+    #[allow(unused_variables)]
+    fn poseidon_hash_pallas(&self, inputs: &[u8]) -> Result<[u8; 32], VerificationError> {
+        unimplemented!()
+    }
+
+    /// Poseidon hash over Vesta base field (`P128Pow5T3`, ConstantLength).
+    #[cfg(feature = "hash-poseidon")]
+    #[allow(unused_variables)]
+    fn poseidon_hash_vesta(&self, inputs: &[u8]) -> Result<[u8; 32], VerificationError> {
+        unimplemented!()
+    }
+
+    /// Penumbra Poseidon377 over BLS12-377 scalar field.
+    ///
+    /// `domain` is a 32-byte domain separator; `message` is `n*32` LE elements (`n` in 1..=7).
+    #[cfg(feature = "hash-poseidon")]
+    #[allow(unused_variables)]
+    fn poseidon377_hash(
+        &self,
+        domain: &[u8],
+        message: &[u8],
+    ) -> Result<[u8; 32], VerificationError> {
+        unimplemented!()
+    }
+
+    /// RedPallas SpendAuth verify (Orchard / vote-sdk). Returns true if valid.
+    #[cfg(feature = "redpallas")]
+    #[allow(unused_variables)]
+    fn redpallas_spendauth_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        unimplemented!()
+    }
+
+    /// RedPallas Binding verify (Orchard).
+    #[cfg(feature = "redpallas")]
+    #[allow(unused_variables)]
+    fn redpallas_binding_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        unimplemented!()
+    }
+
+    /// RedJubjub SpendAuth verify (Sapling).
+    #[cfg(feature = "redpallas")]
+    #[allow(unused_variables)]
+    fn redjubjub_spendauth_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        unimplemented!()
+    }
+
+    /// RedJubjub Binding verify (Sapling).
+    #[cfg(feature = "redpallas")]
+    #[allow(unused_variables)]
+    fn redjubjub_binding_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, VerificationError> {
+        unimplemented!()
+    }
+
+    /// BN254 ECADD (EIP-196). `input` is 128 bytes (two G1 points); output 64-byte G1.
+    #[cfg(feature = "bn254")]
+    #[allow(unused_variables)]
+    fn bn254_add(&self, input: &[u8]) -> Result<[u8; 64], VerificationError> {
+        unimplemented!()
+    }
+
+    /// BN254 ECMUL (EIP-196). `input` is 96 bytes (G1 + scalar); output 64-byte G1.
+    #[cfg(feature = "bn254")]
+    #[allow(unused_variables)]
+    fn bn254_scalar_mul(&self, input: &[u8]) -> Result<[u8; 64], VerificationError> {
+        unimplemented!()
+    }
+
+    /// BN254 pairing product equality (EIP-197). `input` is `192·N` bytes of (G1‖G2) pairs.
+    #[cfg(feature = "bn254")]
+    #[allow(unused_variables)]
+    fn bn254_pairing_equality(&self, input: &[u8]) -> Result<bool, VerificationError> {
         unimplemented!()
     }
 

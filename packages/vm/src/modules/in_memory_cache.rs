@@ -5,7 +5,7 @@ use std::num::NonZeroUsize;
 use cosmwasm_std::Checksum;
 
 use super::cached_module::CachedModule;
-use crate::{modules::cached_module::CacheEntry, Size, VmError, VmResult};
+use crate::{cache::CacheKey, modules::cached_module::CacheEntry, Size, VmError, VmResult};
 
 // Minimum module size.
 // Based on `examples/module_size.sh`, and the cosmwasm-plus contracts.
@@ -20,12 +20,13 @@ const MINIMUM_MODULE_SIZE: Size = Size::kibi(250);
 struct SizeScale;
 
 // Single implementation covering both types via the enum
-impl WeightScale<Checksum, CacheEntry> for SizeScale {
+impl WeightScale<CacheKey, CacheEntry> for SizeScale {
     #[inline]
-    fn weight(&self, key: &Checksum, value: &CacheEntry) -> usize {
+    fn weight(&self, key: &CacheKey, value: &CacheEntry) -> usize {
         let val_size = match value {
             CacheEntry::Module(m) => m.size_estimate,
             CacheEntry::Circuit(c) => c.size_estimate,
+            CacheEntry::Param(p) => p.size_estimate,
         };
         std::mem::size_of_val(key) + val_size
     }
@@ -35,28 +36,36 @@ impl WeightScale<Checksum, CacheEntry> for SizeScale {
 pub struct InMemoryCache {
     /// A single LRU cache holding both modules and circuits.
     /// This guarantees the total memory used never exceeds the configured `Size`.
-    cache: Option<CLruCache<Checksum, CacheEntry, RandomState, SizeScale>>,
+    cache: Option<CLruCache<CacheKey, CacheEntry, RandomState, SizeScale>>,
 }
 
 #[cfg(feature = "zk")]
 impl InMemoryCache {
     pub fn store_circuit(
         &mut self,
-        checksum: &Checksum,
+        circuit_file_key: &[u8; 72],
         cached_zk: &super::CachedCircuit,
     ) -> VmResult<()> {
         if let Some(zk) = &mut self.cache {
-            zk.put_with_weight(*checksum, CacheEntry::Circuit(cached_zk.clone()))
-                .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
+            use crate::cache::CacheKey;
+
+            zk.put_with_weight(
+                CacheKey::CircuitKey(*circuit_file_key),
+                CacheEntry::Circuit(cached_zk.clone()),
+            )
+            .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
         }
         Ok(())
     }
     /// Looks up a module in the cache and creates a new module
-    pub fn load_circuit(&mut self, checksum: &Checksum) -> VmResult<Option<super::CachedCircuit>> {
+    pub fn load_circuit(
+        &mut self,
+        circuit_file_key: &[u8; 72],
+    ) -> VmResult<Option<super::CachedCircuit>> {
         println!("loading circuit from in_memory_cache;");
         if let Some(modules) = &mut self.cache {
             println!("in_memory_cache exists;");
-            match modules.get(checksum) {
+            match modules.get(&CacheKey::CircuitKey(*circuit_file_key)) {
                 Some(cached) => match cached {
                     CacheEntry::Circuit(zk) => Ok(Some(zk.clone())),
                     _ => Ok(None),
@@ -65,6 +74,58 @@ impl InMemoryCache {
             }
         } else {
             println!("no in_memory_cache;");
+            Ok(None)
+        }
+    }
+    pub fn store_param(
+        &mut self,
+        param_file_key: &[u8; 36],
+        cached_param: &super::CachedParam,
+    ) -> VmResult<()> {
+        if let Some(cache) = &mut self.cache {
+            cache
+                .put_with_weight(
+                    CacheKey::PartialKey(*param_file_key),
+                    CacheEntry::Param(cached_param.clone()),
+                )
+                .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
+        }
+        Ok(())
+    }
+
+    /// Looks up raw param bytes in the unified LRU cache.
+    pub fn load_param(
+        &mut self,
+        param_file_key: &[u8; 36],
+    ) -> VmResult<Option<super::CachedParam>> {
+        if let Some(modules) = &mut self.cache {
+            match modules.get(&CacheKey::PartialKey(*param_file_key)) {
+                Some(cached) => match cached {
+                    CacheEntry::Param(p) => Ok(Some(p.clone())),
+                    _ => Ok(None),
+                },
+                None => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Looks up a circuit stored under a 36-byte vk file key.
+    ///
+    /// Note: full circuits are normally keyed by the 72-byte circuit key via
+    /// [`Self::load_circuit`]. This exists for partial-key lookups of cs+vk
+    /// material that was cached under `CacheKey::PartialKey`.
+    pub fn load_vk(&mut self, vk_file_key: &[u8; 36]) -> VmResult<Option<super::CachedCircuit>> {
+        if let Some(modules) = &mut self.cache {
+            match modules.get(&CacheKey::PartialKey(*vk_file_key)) {
+                Some(cached) => match cached {
+                    CacheEntry::Circuit(zk) => Ok(Some(zk.clone())),
+                    _ => Ok(None),
+                },
+                None => Ok(None),
+            }
+        } else {
             Ok(None)
         }
     }
@@ -90,7 +151,10 @@ impl InMemoryCache {
     pub fn store(&mut self, checksum: &Checksum, cached_module: CachedModule) -> VmResult<()> {
         if let Some(modules) = &mut self.cache {
             modules
-                .put_with_weight(*checksum, CacheEntry::Module(cached_module))
+                .put_with_weight(
+                    CacheKey::Checksum(*checksum),
+                    CacheEntry::Module(cached_module),
+                )
                 .map_err(|e| VmError::cache_err(format!("{e:?}")))?;
         }
         Ok(())
@@ -99,7 +163,7 @@ impl InMemoryCache {
     /// Looks up a module in the cache and creates a new module
     pub fn load(&mut self, checksum: &Checksum) -> VmResult<Option<CachedModule>> {
         if let Some(modules) = &mut self.cache {
-            match modules.get(checksum) {
+            match modules.get(&CacheKey::Checksum(*checksum)) {
                 Some(cached) => match cached {
                     CacheEntry::Module(cached) => Ok(Some(cached.clone())),
                     _ => Ok(None),
@@ -192,7 +256,7 @@ mod tests {
         assert!(cache_entry.is_none());
 
         // Compile module
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let original = compile(&engine, &wasm).unwrap();
 
         // Ensure original module can be executed
@@ -242,7 +306,7 @@ mod tests {
         assert_eq!(cache.len(), 0);
 
         // Add 1
-        let engine1 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine1 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine1, &wasm1).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -252,7 +316,7 @@ mod tests {
         assert_eq!(cache.len(), 1);
 
         // Add 2
-        let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine2, &wasm2).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -262,7 +326,7 @@ mod tests {
         assert_eq!(cache.len(), 2);
 
         // Add 3 (pushes out the previous two)
-        let engine3 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine3 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine3, &wasm3).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
@@ -287,34 +351,37 @@ mod tests {
         assert_eq!(cache.size(), 0);
 
         // Add 1
-        let engine1 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine1 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine1, &wasm1).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
             size_estimate: 900_000,
         };
         cache.store(&checksum1, module).unwrap();
-        assert_eq!(cache.size(), 900_032);
+        assert_eq!(cache.size(), 900_000 + std::mem::size_of::<CacheKey>());
 
         // Add 2
-        let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine2 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine2, &wasm2).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
             size_estimate: 800_000,
         };
         cache.store(&checksum2, module).unwrap();
-        assert_eq!(cache.size(), 900_032 + 800_032);
+        assert_eq!(
+            cache.size(),
+            900_000 + 800_000 + 2 * std::mem::size_of::<CacheKey>()
+        );
 
         // Add 3 (pushes out the previous two)
-        let engine3 = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine3 = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let module = CachedModule {
             module: compile(&engine3, &wasm3).unwrap(),
             engine: make_runtime_engine(TESTING_MEMORY_LIMIT),
             size_estimate: 1_500_000,
         };
         cache.store(&checksum3, module).unwrap();
-        assert_eq!(cache.size(), 1_500_032);
+        assert_eq!(cache.size(), 1_500_000 + std::mem::size_of::<CacheKey>());
     }
 
     #[test]
@@ -336,7 +403,7 @@ mod tests {
         assert_eq!(cache.size(), 0);
 
         // Compile module
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
+        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT, None);
         let original = compile(&engine, &wasm).unwrap();
 
         // Store module

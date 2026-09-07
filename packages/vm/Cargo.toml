@@ -2,20 +2,10 @@
 name = "cosmwasm-vm"
 version = { workspace = true }
 authors = ["Ethan Frey <ethanfrey@users.noreply.github.com>"]
-edition = "2021"
-description = "VM bindings to run cosmwams contracts"
-repository = "https://github.com/CosmWasm/cosmwasm/tree/main/packages/vm"
-license = "Apache-2.0"
-
-[package.metadata.release]
-pre-release-hook = ["../../devtools/release_checks.sh"]
-pre-release-replacements = [
-    { file = "../../CHANGELOG.md", search = "## \\[Unreleased\\]", replace = "## [{{version}}] - {{date}}", exactly = 1 },
-    { file = "../../CHANGELOG.md", search = "(U|u)nreleased", replace = "{{version}}" },
-    { file = "../../CHANGELOG.md", search = "<!-- next-header -->", replace = "<!-- next-header -->\n\n## [Unreleased]", exactly = 1 },
-    { file = "../../CHANGELOG.md", search = "\\.\\.\\.HEAD", replace = "...{{tag_name}}", exactly = 1 },
-    { file = "../../CHANGELOG.md", search = "<!-- next-url -->\n", replace = "<!-- next-url -->\n\n[unreleased]: https://github.com/CosmWasm/cosmwasm/compare/{{tag_name}}...HEAD", exactly = 1 },
-]
+description = "VM bindings to run CosmWasm contracts"
+repository = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
 
 [package.metadata.optimizer]
 standard-build = true
@@ -28,7 +18,7 @@ bench = false
 [features]
 default = ["iterator", "staking", "zk"]
 # iterator allows us to iterate over all DB items in a given range
-# this must be enabled to support cosmwasm contracts compiled with the 'iterator' feature
+# this must be enabled to support CosmWasm contracts compiled with the 'iterator' feature
 # optional as some merkle stores (like tries) don't support this
 # given Ethereum 1.0, 2.0, Substrate, and other major projects use Tries
 # we keep this optional, to allow possible future integration (or different Cosmos Backends)
@@ -41,10 +31,24 @@ dhat-heap = ["dep:dhat"]
 # ibc2 enables ibc2-dependent messages, entrypoints and queries
 ibc2 = ["cosmwasm-std/ibc2"]
 zk = ["cosmwasm-std/zk", "dep:zk-cosmwasm"]
+# BN254 (alt_bn128) curve host functions — EIP-196/197/1108
+# Also enables zk-cosmwasm BN254 / Groth16 AnyVerifyingKey dispatch when `zk` is on.
+bn254 = ["cosmwasm-crypto/bn254", "zk-cosmwasm?/bn254"]
+# Native deterministic BLAKE2b-256 / BLAKE3-256 host digests (CPU only).
+hash-blake = ["cosmwasm-crypto/hash-blake"]
+# Algebraic Poseidon hosts (Zcash Pasta + Penumbra poseidon377).
+hash-poseidon = ["cosmwasm-crypto/hash-poseidon"]
+# RedPallas (Orchard) + RedJubjub (Sapling) signature verify hosts.
+redpallas = ["cosmwasm-crypto/redpallas"]
+# Optional host GPU backend for eligible ZK verify ops (CPU-golden, scheduled gas).
+# Default OFF — zero new deps when disabled. Does NOT enable GPU for blake.
+# See docs/research/gpu-accel/DESIGN-G1-verifier-backend.md
+gpu = ["zk-cosmwasm?/gpu"]
 
 [dependencies]
 bech32 = "0.11.0"
 blake2 = "0.10.6"
+blake3 = "1.5"
 clru = "0.6.1"
 # Uses the path when built locally; uses the given version from crates.io when published
 cosmwasm-core = { workspace = true }
@@ -61,7 +65,7 @@ rand = "0.8"
 rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { workspace = true }
 serde_json = "1.0.140"
-sha2 = "0.10.3"
+sha2 = "0.10"
 strum = { version = "0.26.2", default-features = false, features = ["derive"] }
 thiserror = "1.0.26"
 # We pin wasmer to a specific version because the layout of cached modules can change between patch versions.
@@ -69,8 +73,8 @@ wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
 
-halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs" }
-zk-cosmwasm  = { workspace = true, features = ["interface"], optional = true }
+halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs", default-features = false, features = ["batch"] }
+zk-cosmwasm  = { workspace = true, default-features = false, features = ["interface"], optional = true }
 
 tracing = "0.1.38"
 tracing-profile = "0.10.11"
@@ -84,6 +88,8 @@ glob = "0.3.1"
 hex-literal = "0.4.1"
 leb128 = "0.2"
 rand = "0.8"
+# Signing only for redpallas host round-trip tests (feature-gated usage).
+reddsa = { version = "0.5", features = ["std"] }
 target-lexicon = "0.12"
 tempfile = "3.1.0"
 time = { version = "0.3.35", features = ["formatting"] }
@@ -93,6 +99,11 @@ wat = "1.0"
 [[bench]]
 name = "main"
 harness = false
+
+[[bench]]
+name = "zk_circuit"
+harness = false
+required-features = ["zk"]
 
 [[example]]
 name = "heap_profiling"

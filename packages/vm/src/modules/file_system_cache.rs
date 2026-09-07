@@ -24,7 +24,7 @@ use super::CachedModule;
 /// This is a value you can manually modify to the cache.
 /// You normally _do not_ need to change this value yourself.
 ///
-/// Cases where you might need to update it yourself, is things like when the memory layout of some types in Rust [std] changes.
+/// Cases where you might need to update it yourself include changes in the memory layout of some types in Rust [std].
 ///
 /// ---
 ///
@@ -67,7 +67,9 @@ use super::CachedModule;
 /// - **v20**:<br>
 ///   New version because of Wasmer 4.3.3 -> 4.3.7 upgrade.
 ///   Module compatibility between Wasmer versions is not guaranteed.
-const MODULE_SERIALIZATION_VERSION: &str = "v20";
+/// - **v21**:<br>
+///   New version because of additional gas charging for function locals.
+const MODULE_SERIALIZATION_VERSION: &str = "v22";
 
 /// Function that actually does the heavy lifting of creating the module version discriminator.
 ///
@@ -263,16 +265,22 @@ impl FileSystemCache {
 #[cfg(feature = "zk")]
 impl FileSystemCache {
     /// Gets the circuit file path for a checksum.
-    fn circuit_file(&self, checksum: &Checksum) -> PathBuf {
-        let mut path = self.modules_path.join(checksum.to_hex());
+    fn circuit_file(&self, circuit_file_key: &[u8; 72]) -> PathBuf {
+        let mut path = self.modules_path.join(hex::encode(circuit_file_key));
+        path.set_extension("module");
+        path
+    }
+    /// Gets the circuit constraint system parameter file path for a checksum.
+    fn param_file(&self, param_file_key: &[u8; 36]) -> PathBuf {
+        let mut path = self.modules_path.join(hex::encode(param_file_key));
         path.set_extension("module");
         path
     }
 
     /// Loads a serialized verifying key from the file system and returns it.
-    pub fn load_circuit(&self, checksum: &Checksum) -> VmResult<Option<CachedCircuit>> {
+    pub fn load_circuit(&self, circuit_file_key: &[u8; 72]) -> VmResult<Option<CachedCircuit>> {
         println!("getting module from fs_cache;");
-        let file_path = self.circuit_file(checksum);
+        let file_path = self.circuit_file(circuit_file_key);
         // use cursor to load circuit?
         let raw_bytes = match std::fs::read(&file_path) {
             Ok(bytes) => bytes,
@@ -289,10 +297,10 @@ impl FileSystemCache {
         );
         println!("this is where the error occurs for sure;");
 
-        let result = zk_cosmwasm::VerifyingKey::from_bytes(&raw_bytes);
+        let result = zk_cosmwasm::AnyVerifyingKey::try_from(raw_bytes.as_slice());
         match result {
             Ok(vk) => {
-                let size_estimate = vk.to_bytes().expect("msg").len();
+                let size_estimate = vk.to_bytes_with_params()?.len();
                 println!("deserializing-vk::raw_bytes::length::{};", raw_bytes.len());
                 println!(
                     "deserializing-vk::size_estimate::length::{};",
@@ -314,11 +322,11 @@ impl FileSystemCache {
 
     /// Stores a serialized verifying key to the file system.
     /// serialized_to_vec is used to curate the zk bytes for this function.
-    pub fn store_circuit(&mut self, checksum: &Checksum, zk: &[u8]) -> VmResult<usize> {
+    pub fn store_circuit(&mut self, circuit_file_key: &[u8; 72], zk: &[u8]) -> VmResult<usize> {
         mkdir_p(&self.modules_path)
             .map_err(|_e| VmError::cache_err("Error creating circuits directory"))?;
 
-        let path = self.circuit_file(checksum);
+        let path = self.circuit_file(circuit_file_key);
         catch_unwind(|| {
             fs::write(&path, zk)
                 .map_err(|e| VmError::cache_err(format!("Error writing circuit to disk: {e}")))
@@ -328,8 +336,18 @@ impl FileSystemCache {
     }
 
     /// Removes a verifying key from the file system.
-    pub fn remove_circuit(&mut self, checksum: &Checksum) -> VmResult<()> {
-        let path = self.circuit_file(checksum);
+    pub fn remove_circuit(&mut self, circuit_file_key: &[u8; 72]) -> VmResult<()> {
+        let path = self.circuit_file(circuit_file_key);
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| {
+                VmError::cache_err(format!("Error removing circuit from disk: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn remove_params(&mut self, param_file_key: &[u8; 36]) -> VmResult<()> {
+        let path = self.param_file(param_file_key);
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| {
                 VmError::cache_err(format!("Error removing circuit from disk: {e}"))
@@ -374,7 +392,7 @@ fn modules_path(base_path: &Path, wasmer_module_version: u32, target: &Target) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wasm_backend::{compile, make_compiling_engine};
+    use crate::wasm_backend::compile_module;
     use tempfile::TempDir;
     use wasmer::{imports, Instance as WasmerInstance, Store};
     use wasmer_middlewares::metering::set_remaining_points;
@@ -405,8 +423,7 @@ mod tests {
         assert!(cached.is_none());
 
         // Store module
-        let compiling_engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
-        let module = compile(&compiling_engine, &wasm).unwrap();
+        let (module, _) = compile_module(&wasm, TESTING_MEMORY_LIMIT).unwrap();
         cache.store(&checksum, &module).unwrap();
 
         // Load module
@@ -454,8 +471,7 @@ mod tests {
         let checksum = Checksum::generate(&wasm);
 
         // Store module
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
-        let module = compile(&engine, &wasm).unwrap();
+        let (module, _) = compile_module(&wasm, TESTING_MEMORY_LIMIT).unwrap();
         cache.store(&checksum, &module).unwrap();
 
         let discriminator = raw_module_version_discriminator();
@@ -480,8 +496,7 @@ mod tests {
         let checksum = Checksum::generate(&wasm);
 
         // Store module
-        let compiling_engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
-        let module = compile(&compiling_engine, &wasm).unwrap();
+        let (module, _) = compile_module(&wasm, TESTING_MEMORY_LIMIT).unwrap();
         cache.store(&checksum, &module).unwrap();
 
         // It's there
@@ -522,7 +537,7 @@ mod tests {
         let id = target_id(&target);
         assert_eq!(id, "x86_64-nintendo-fuchsia-gnu-coff-E3770FA3");
 
-        // Works for durrect target (hashing is deterministic);
+        // Works for direct target (hashing is deterministic);
         let target = Target::default();
         let id1 = target_id(&target);
         let id2 = target_id(&target);
@@ -573,6 +588,6 @@ mod tests {
     #[test]
     fn module_version_static() {
         let version = raw_module_version_discriminator();
-        assert_eq!(version, "6c36aacf76");
+        assert_eq!(version, "db9eb9f9ba");
     }
 }
