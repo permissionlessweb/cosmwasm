@@ -596,7 +596,7 @@ Complexity: **S** < 1d, **M** 2–4d, **L** 1–2w (one engineer familiar with s
 ### 6.1 Commands (Phase B)
 
 ```bash
-cd /Users/returniflost/abstract/terp-core/crates/cosmwasm
+cd .
 
 # BN254 verify + golden
 cargo test -p zk-cosmwasm --features bn254 --lib bn254
@@ -671,7 +671,7 @@ cargo test -p terp-authenticator-suite
 After reading this plan, start **WP1 skeleton** by confirming ark deps resolve on the branch:
 
 ```bash
-cd /Users/returniflost/abstract/terp-core/crates/cosmwasm
+cd .
 # Read stub + Path A import once more, then add ark-groth16 to packages/zk and try:
 cargo check -p zk-cosmwasm --features bn254
 ```

@@ -17,14 +17,14 @@ from the cosmwasm workspace.
 Deterministic ark-groth16 setup+prove (seed 42, MultCircuit a=3,b=5):
 
 ```bash
-cd /Users/returniflost/abstract/terp-core/crates/cosmwasm
+cd .
 ZK_WRITE_GOLDEN=1 cargo test -p zk-cosmwasm --features bn254 --lib write_or_load_committed_golden
 ```
 
 ## How to regenerate
 
 ```bash
-cd /Users/returniflost/abstract/terp-core/crates/cosmwasm
+cd .
 cargo run --bin export_vk -- toy --output packages/zk/testdata/toy_vk.bin
 ```
 
@@ -52,13 +52,13 @@ pub fn cs(&self) -> &ConstraintSystem<C::Scalar> {
 Once the VK has `write()` and `cs()`:
 
 ```bash
-cd /Users/returniflost/abstract/terp-core/crates/vote-sdk/circuits
+cd the monorepo/crates/vote-sdk/circuits
 cargo run --bin gen_vk_data -- delegation   --output-dir /tmp/vk_data/
 cargo run --bin gen_vk_data -- vote_proof   --output-dir /tmp/vk_data/
 cargo run --bin gen_vk_data -- share_reveal --output-dir /tmp/vk_data/
 
 # Then wrap with footer:
-cd /Users/returniflost/abstract/terp-core/crates/cosmwasm
+cd .
 cargo run --bin export_vk -- delegation \
   --params /tmp/vk_data/delegation_params.bin \
   --vk-body /tmp/vk_data/delegation_vk_body.bin \

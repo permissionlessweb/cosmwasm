@@ -126,14 +126,14 @@ Real snarkjs proof bytes still optional (L2 crypto = square Path A; L3 = o-line 
 ## Review commands (after implement)
 
 ```bash
-cd /Users/returniflost/abstract/terp-core/crates/cosmwasm
+cd .
 cargo test -p zk-cosmwasm --features bn254 --lib
 cargo test -p cosmwasm-vm --features zk,bn254 --lib bn254_
 cargo test -p cosmwasm-vm --features zk,bn254 --lib proof_instance_verify_bn254
 cargo test -p cosmwasm-vm --features zk --lib halo2_store_circuit
 cargo test -p cosmwasm-vm --features zk --lib load_circuit
 
-cd /Users/returniflost/abstract/terp-core/crates/terp-rs
+cd terp-rs
 cargo test -p terp-authenticator-suite
 cargo test -p terp-authenticator-suite --features zk-host --test zk_host
 ```

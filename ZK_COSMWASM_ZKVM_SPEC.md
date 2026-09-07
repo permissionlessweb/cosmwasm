@@ -14,8 +14,8 @@ Transform the current zk-cosmwasm programmable circuit verification VM into a tr
 
 **Key Repos**:
 
-- `/Users/returniflost/ZK/zk-wasmvm/mvp` - Go/Rust FFI layer with circuit caching
-- `/Users/returniflost/ZK/zk-cosmwasm/` - VM packages with proof verification infrastructure
+- `crates/zk-wasmvm (mvp line)` - Go/Rust FFI layer with circuit caching
+- `packages/ in this repo` - VM packages with proof verification infrastructure
 
 **Design Decisions**:
 
