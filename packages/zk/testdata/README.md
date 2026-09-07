@@ -46,7 +46,7 @@ pub fn cs(&self) -> &ConstraintSystem<C::Scalar> {
 
 // The write() implementation is already in the local fork at zcash/halo2/halo2_proofs.
 // Copy it from there, or path-depend the local fork:
-//   halo2_proofs = { path = "../../../zcash/halo2/halo2_proofs" }
+//   halo2_proofs = { git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303" }
 ```
 
 Once the VK has `write()` and `cs()`:
