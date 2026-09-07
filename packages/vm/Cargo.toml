@@ -73,7 +73,7 @@ wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
 
-halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs", default-features = false, features = ["batch"] }
+halo2_proofs = { package = "halo2_proofs", git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303", default-features = false, features = ["batch"] }
 zk-cosmwasm  = { workspace = true, default-features = false, features = ["interface"], optional = true }
 
 tracing = "0.1.38"
