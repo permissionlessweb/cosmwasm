@@ -18,7 +18,7 @@ use crate::utils::impl_hidden_constructor;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum WasmQuery {
-    /// this queries the public API of another contract at a known address (with known ABI)
+    /// This queries the public API of another contract at a known address (with known ABI)
     /// Return value is whatever the contract returns (caller should know), wrapped in a
     /// ContractResult that is JSON encoded.
     Smart {
@@ -26,11 +26,11 @@ pub enum WasmQuery {
         /// msg is the json-encoded QueryMsg struct
         msg: Binary,
     },
-    /// this queries the raw kv-store of the contract.
-    /// returns the raw, unparsed data stored at that key, which may be an empty vector if not present
+    /// This queries the raw kv-store of the contract.
+    /// Returns the raw, unparsed data stored at that key, which may be an empty vector if not present
     Raw {
         contract_addr: String,
-        /// Key is the raw key used in the contracts Storage
+        /// Key is the raw key used in the contract's storage
         key: Binary,
     },
     /// Returns a [`ContractInfoResponse`] with metadata on the contract from the runtime
@@ -65,6 +65,13 @@ pub enum WasmQuery {
         /// The order in which you want to receive the key-value pairs.
         order: crate::Order,
     },
+    /// Returns a [`CircuitInfoResponse`] with metadata of the code
+    // #[cfg(feature = "cosmwasm_3_0")]
+    #[cfg(feature = "zk")]
+    CircuitInfo { zk_id: u64 },
+    /// Returns a [`CircuitResponse`] with metadata of the code
+    #[cfg(feature = "zk")]
+    Circuit { zk_id: u64 },
 }
 
 impl WasmQuery {
@@ -152,6 +159,58 @@ impl_hidden_constructor!(
 
 impl QueryResponseType for CodeInfoResponse {}
 
+#[cfg(feature = "zk")]
+pub use zk::{CircuitInfoResponse, CircuitResponse};
+#[cfg(feature = "zk")]
+pub mod zk {
+    use super::*;
+    /// The essential data from wasmd's [Circuit]/[CircuitResponse].
+    ///
+    /// This contains the circuit's constraint_system parameter bytes as well as the cs & vk, with the circuit footer bytes.
+    /// This is the minimum full bytes needed to power optimized proof verification.
+    /// [CircuitInfo]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/types.proto#L62-L72
+    /// [CircuitInfoResponse]: https://github.com/CosmWasm/wasmd/blob/v0.30.0/proto/cosmwasm/wasm/v1/query.proto#L184-L199
+    #[non_exhaustive]
+    #[derive(
+        Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema, cw_schema::Schemaifier,
+    )]
+    pub struct CircuitResponse {
+        pub data: Binary,
+    }
+
+    impl_hidden_constructor!(
+        CircuitResponse,
+        data: Binary
+    );
+
+    impl QueryResponseType for CircuitResponse {}
+
+    /// Metadata for an uploaded circuit (from wasmd `CircuitInfo`).
+    ///
+    /// The `circuit_key` is the wasmvm cache key (typically 72 bytes:
+    /// `[param_file_key 36][vk_file_key 36]`). It is **not** a 32-byte Wasm checksum.
+    /// Host proof verification uses this key with the local circuit cache (Path A).
+    #[non_exhaustive]
+    #[derive(
+        Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema, cw_schema::Schemaifier,
+    )]
+    pub struct CircuitInfoResponse {
+        pub zk_id: u64,
+        /// The address that initially stored the circuit
+        pub creator: Addr,
+        /// Wasmvm circuit file key used by `Cache::load_circuit` (usually 72 bytes).
+        pub circuit_key: Binary,
+    }
+
+    impl_hidden_constructor!(
+        CircuitInfoResponse,
+        zk_id: u64,
+        creator: Addr,
+        circuit_key: Binary
+    );
+    impl QueryResponseType for CircuitInfoResponse {}
+}
+
 #[non_exhaustive]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 pub struct RawRangeResponse {
@@ -172,7 +231,7 @@ pub type RawRangeEntry = (Binary, Binary);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::to_json_binary;
+    use crate::{from_json, to_json_binary};
 
     #[test]
     fn wasm_query_contract_info_serialization() {
@@ -232,6 +291,23 @@ mod tests {
             String::from_utf8_lossy(&json),
             r#"{"code_id":67,"creator":"jane","checksum":"f7bb7b18fb01bbf425cf4ed2cd4b7fb26a019a7fc75a4dc87e8a0b768c501f00"}"#,
         );
+    }
+    #[test]
+    #[cfg(feature = "cosmwasm_3_0")]
+    #[cfg(feature = "zk")]
+    fn circuit_info_response_serialization() {
+        let key = Binary::from(vec![0x11; 72]);
+        let response = CircuitInfoResponse {
+            zk_id: 67,
+            creator: Addr::unchecked("jane"),
+            circuit_key: key.clone(),
+        };
+        let json = to_json_binary(&response).unwrap();
+        let round: CircuitInfoResponse = from_json(json.as_slice()).unwrap();
+        assert_eq!(round.zk_id, 67);
+        assert_eq!(round.creator, Addr::unchecked("jane"));
+        assert_eq!(round.circuit_key, key);
+        assert_eq!(round.circuit_key.len(), 72);
     }
 
     #[test]

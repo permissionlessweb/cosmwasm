@@ -55,6 +55,15 @@ pub struct GasConfig {
     pub bls12_381_hash_to_g2_cost: u64,
     /// bls12-381 pairing equality check cost
     pub bls12_381_pairing_equality_cost: LinearGasCost,
+    /// RedPallas (Orchard / Pallas) signature verify cost — scheduled, not wall-time.
+    ///
+    /// Provisional weight until `cargo bench` / calibrate on validator CPUs.
+    /// Intentionally above ed25519: Pallas group ops are heavier than Edwards25519.
+    pub redpallas_verify_cost: u64,
+    /// RedJubjub (Sapling / Jubjub) signature verify cost — scheduled, not wall-time.
+    pub redjubjub_verify_cost: u64,
+    /// halo2 proof verification cost
+    pub halo2_proof_instance_verify_cost: LinearGasCost,
     /// cost for writing memory regions
     pub write_region_cost: LinearGasCost,
     /// cost for reading memory regions <= 8MB
@@ -106,6 +115,23 @@ impl Default for GasConfig {
             bls12_381_pairing_equality_cost: LinearGasCost {
                 base: 2112 * GAS_PER_US,
                 per_item: 163 * GAS_PER_US,
+            },
+            // RH5: dedicated RedPallas / RedJubjub weights (was ed25519_verify_cost).
+            // Provisional: ~120 µs Pallas RedDSA, ~80 µs Jubjub RedDSA @ GAS_PER_US
+            // (schedule units only — never wall µs at runtime). Re-calibrate with
+            // cosmwasm-crypto benches on target CPUs before production pin.
+            redpallas_verify_cost: 120 * GAS_PER_US,
+            redjubjub_verify_cost: 80 * GAS_PER_US,
+            // H-02 / docs/ZK-VERIFY-GAS.md — calibrated host:
+            //   cargo run -p zk-cosmwasm --features bn254 --bin verify_gas_calibrate --release
+            // Measured (aarch64 release): square Groth16 p95 ≈ 2.0 ms → need 2.7 ms @ 1.35×.
+            // base/per cover that with ≥1.2× headroom; per_item ≥ 200 µs/unit literature
+            // Halo2 size scale (DoS when proofs grow). Host units =
+            // 1 + ceil(proof/1024) + ceil(instances/32) in imports.rs.
+            // Re-run calibrate on validator CPUs after prover/layout changes.
+            halo2_proof_instance_verify_cost: LinearGasCost {
+                base: 2_700 * GAS_PER_US,  // ~2.7 ms fixed (rounded calibrate)
+                per_item: 200 * GAS_PER_US, // ~200 µs / unit
             },
             write_region_cost: LinearGasCost {
                 base: 230000,
@@ -208,7 +234,15 @@ pub struct DebugInfo<'a> {
 //                            v                                                 v
 pub type DebugHandlerFn = dyn for<'a, 'b> FnMut(/* msg */ &'a str, DebugInfo<'b>);
 
-/// A environment that provides access to the ContextData.
+/// Host-side circuit cache lookup used by `proof_instance_verify` (Path A).
+///
+/// Maps a 72-byte wasmvm circuit key to an already-deserialized verifying key.
+/// Constructed from `Cache` so the import never touches contract storage.
+#[cfg(feature = "zk")]
+pub type CircuitLoader =
+    Arc<dyn Fn([u8; 72]) -> crate::VmResult<Option<zk_cosmwasm::AnyVerifyingKey>> + Send + Sync>;
+
+/// An environment that provides access to the ContextData.
 /// The environment is cloneable but clones access the same underlying data.
 pub struct Environment<A, S, Q> {
     pub memory: Option<Memory>,
@@ -252,6 +286,27 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
         self.with_context_data(|context_data| {
             // This clone here requires us to wrap the function in Rc instead of Box
             context_data.debug_handler.clone()
+        })
+    }
+
+    /// Installs a Path A circuit loader (typically from `Cache::circuit_loader`).
+    #[cfg(feature = "zk")]
+    pub fn set_circuit_loader(&self, loader: Option<CircuitLoader>) {
+        self.with_context_data_mut(|context_data| {
+            context_data.circuit_loader = loader;
+        })
+    }
+
+    /// Runs `callback` with the installed circuit loader.
+    /// Returns `Ok(None)` when no loader is installed (e.g. unit tests without a `Cache`).
+    #[cfg(feature = "zk")]
+    pub fn with_circuit_loader<C, T>(&self, callback: C) -> crate::VmResult<Option<T>>
+    where
+        C: FnOnce(&CircuitLoader) -> crate::VmResult<T>,
+    {
+        self.with_context_data(|context_data| match &context_data.circuit_loader {
+            Some(loader) => callback(loader).map(Some),
+            None => Ok(None),
         })
     }
 
@@ -309,7 +364,7 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
         name: &str,
         args: &[Value],
     ) -> VmResult<Box<[Value]>> {
-        // Clone function before calling it to avoid dead locks
+        // Clone function before calling it to avoid deadlocks
         let func = self.with_wasmer_instance(|instance| {
             let func = instance.exports.get_function(name)?;
             Ok(func.clone())
@@ -383,7 +438,7 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
         })
     }
 
-    /// Creates a back reference from a contact to its partent instance
+    /// Creates a back reference from a contract to its parent instance
     pub fn set_wasmer_instance(&self, wasmer_instance: Option<NonNull<WasmerInstance>>) {
         self.with_context_data_mut(|context_data| {
             context_data.wasmer_instance = wasmer_instance;
@@ -504,6 +559,9 @@ pub struct ContextData<S, Q> {
     call_depth: usize,
     querier: Option<Q>,
     debug_handler: Option<Rc<RefCell<DebugHandlerFn>>>,
+    /// Path A: load deserialized verifying keys from the host circuit cache.
+    #[cfg(feature = "zk")]
+    circuit_loader: Option<CircuitLoader>,
     /// A non-owning link to the wasmer instance
     wasmer_instance: Option<NonNull<WasmerInstance>>,
 }
@@ -517,6 +575,8 @@ impl<S: Storage, Q: Querier> ContextData<S, Q> {
             call_depth: 0,
             querier: None,
             debug_handler: None,
+            #[cfg(feature = "zk")]
+            circuit_loader: None,
             wasmer_instance: None,
         }
     }
@@ -530,9 +590,11 @@ pub fn process_gas_info<A: BackendApi, S: Storage, Q: Querier>(
     let gas_left = env.get_gas_left(store);
 
     let new_limit = env.with_gas_state_mut(|gas_state| {
-        gas_state.externally_used_gas += info.externally_used;
-        // These lines reduce the amount of gas available to wasmer
-        // so it can not consume gas that was consumed externally.
+        gas_state.externally_used_gas = gas_state
+            .externally_used_gas
+            .saturating_add(info.externally_used);
+        // Reduce the amount of gas available to Wasm executor,
+        // so it cannot consume gas that was already consumed externally.
         gas_left
             .saturating_sub(info.externally_used)
             .saturating_sub(info.cost)
@@ -541,7 +603,10 @@ pub fn process_gas_info<A: BackendApi, S: Storage, Q: Querier>(
     // This tells wasmer how much more gas it can consume from this point in time.
     env.set_gas_left(store, new_limit);
 
-    if info.externally_used + info.cost > gas_left {
+    let Some(gas_total) = info.externally_used.checked_add(info.cost) else {
+        return Err(VmError::gas_depletion());
+    };
+    if gas_total > gas_left {
         Err(VmError::gas_depletion())
     } else {
         Ok(())
@@ -554,7 +619,7 @@ mod tests {
     use crate::conversion::ref_to_u32;
     use crate::size::Size;
     use crate::testing::{MockApi, MockQuerier, MockStorage};
-    use crate::wasm_backend::{compile, make_compiling_engine};
+    use crate::wasm_backend::compile_module;
     use cosmwasm_std::{
         coin, coins, from_json, to_json_vec, BalanceResponse, BankQuery, Empty, QueryRequest,
     };
@@ -583,8 +648,7 @@ mod tests {
     ) {
         let env = Environment::new(MockApi::default(), gas_limit);
 
-        let engine = make_compiling_engine(TESTING_MEMORY_LIMIT);
-        let module = compile(&engine, HACKATOM).unwrap();
+        let (module, engine) = compile_module(HACKATOM, TESTING_MEMORY_LIMIT).unwrap();
         let mut store = Store::new(engine);
 
         // we need stubs for all required imports
@@ -606,12 +670,26 @@ mod tests {
                 "bls12_381_pairing_equality" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32, _d: u32| -> u32 { 0 }),
                 "bls12_381_hash_to_g1" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32, _d: u32| -> u32 { 0 }),
                 "bls12_381_hash_to_g2" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32, _d: u32| -> u32 { 0 }),
+                "bn254_add" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "bn254_scalar_mul" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "bn254_pairing_equality" => Function::new_typed(&mut store, |_a: u32| -> u32 { 0 }),
+                "blake2b_256" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "blake3_256" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "poseidon_hash_pallas" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "poseidon_hash_vesta" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "poseidon377_hash" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
+                "redpallas_spendauth_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
+                "redpallas_binding_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
+                "redjubjub_spendauth_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
+                "redjubjub_binding_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "secp256k1_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "secp256k1_recover_pubkey" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u64 { 0 }),
                 "secp256r1_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "secp256r1_recover_pubkey" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u64 { 0 }),
                 "ed25519_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "ed25519_batch_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
+                "proof_instance_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32| -> u32 { 0 }),
+                "proof_instance_batch_verify" => Function::new_typed(&mut store, |_a: u32, _b: u32, _c: u32| -> u32 { 0 }),
                 "debug" => Function::new_typed(&mut store, |_a: u32| {}),
                 "abort" => Function::new_typed(&mut store, |_a: u32| {}),
             },
@@ -1015,6 +1093,29 @@ mod tests {
         assert_eq!(balance.amount, coin(INIT_AMOUNT, INIT_DENOM));
     }
 
+    // #[cfg(feature = "zk")]
+    // #[test]
+    // #[allow(deprecated)]
+    // fn with_querier_from_context_works_for_cirucits() {
+    //     let (env, _store, _instance) = make_instance(TESTING_GAS_LIMIT);
+    //     leave_default_data(&env);
+
+    //     let res = env
+    //         .with_querier_from_context::<_, _>(|querier| {
+    //             let req: QueryRequest<Empty> =
+    //                 QueryRequest::Wasm(WasmQuery::CircuitInfo { zk_id: 1 });
+    //             let (result, _gas_info) =
+    //                 querier.query_raw(&to_json_vec(&req).unwrap(), DEFAULT_QUERY_GAS_LIMIT);
+    //             Ok(result.unwrap())
+    //         })
+    //         .unwrap()
+    //         .unwrap()
+    //         .unwrap();
+    //     let circuit: CircuitInfoResponse = from_json(res).unwrap();
+
+    //     assert_eq!(circuit.zk_id, 1);
+    // }
+
     #[test]
     #[should_panic(expected = "A panic occurred in the callback.")]
     fn with_querier_from_context_handles_panics() {
@@ -1025,5 +1126,49 @@ mod tests {
             panic!("A panic occurred in the callback.")
         })
         .unwrap();
+    }
+
+    #[test]
+    fn gas_depletion_must_not_be_overpassed() {
+        let (env, mut store, _instance) = make_instance(100);
+        let gas_info = GasInfo {
+            externally_used: u64::MAX / 2 + 1,
+            cost: u64::MAX / 2 + 1,
+        };
+        assert!(matches!(
+            process_gas_info(&env, &mut store, gas_info).err().unwrap(),
+            VmError::GasDepletion { .. }
+        ));
+    }
+
+    #[test]
+    fn gas_info_add_assign_should_saturate() {
+        let mut gas_info = GasInfo {
+            cost: u64::MAX - 1,
+            externally_used: u64::MAX - 1,
+        };
+        let gas_info_delta = GasInfo {
+            cost: 2,
+            externally_used: 2,
+        };
+        gas_info += gas_info_delta;
+        assert_eq!(u64::MAX, gas_info.cost);
+        assert_eq!(u64::MAX, gas_info.externally_used);
+    }
+
+    #[test]
+    fn externally_used_gas_should_saturate() {
+        let (env, mut store, _instance) = make_instance(TESTING_GAS_LIMIT);
+        let gas_info = GasInfo {
+            cost: 0,
+            externally_used: u64::MAX / 2 + 1,
+        };
+        let _ = process_gas_info(&env, &mut store, gas_info);
+        let gas_before = env.with_gas_state(|gas_state| gas_state.externally_used_gas);
+        assert_eq!(u64::MAX / 2 + 1, gas_before);
+        let _ = process_gas_info(&env, &mut store, gas_info);
+        let gas_after = env.with_gas_state(|gas_state| gas_state.externally_used_gas);
+        assert!(gas_after > gas_before);
+        assert_eq!(u64::MAX, gas_after);
     }
 }

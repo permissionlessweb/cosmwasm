@@ -3,6 +3,8 @@ use std::fmt::{Debug, Display};
 use thiserror::Error;
 
 use cosmwasm_crypto::CryptoError;
+#[cfg(feature = "zk")]
+use zk_cosmwasm::ZkError;
 
 use super::communication_error::CommunicationError;
 use crate::backend::BackendError;
@@ -30,6 +32,9 @@ pub enum VmError {
         input: String,
         backtrace: BT,
     },
+    #[cfg(feature = "zk")]
+    #[error("ZkError error: {}", source)]
+    ZkError { source: ZkError, backtrace: BT },
     #[error("Crypto error: {}", source)]
     CryptoErr { source: CryptoError, backtrace: BT },
     #[error("Ran out of gas during contract execution")]
@@ -140,6 +145,14 @@ impl VmError {
 
     pub(crate) fn crypto_err(original: CryptoError) -> Self {
         VmError::CryptoErr {
+            source: original,
+            backtrace: BT::capture(),
+        }
+    }
+
+    #[cfg(feature = "zk")]
+    pub(crate) fn zk_err(original: ZkError) -> Self {
+        VmError::ZkError {
             source: original,
             backtrace: BT::capture(),
         }
@@ -276,6 +289,13 @@ impl From<CryptoError> for VmError {
     }
 }
 
+#[cfg(feature = "zk")]
+impl From<ZkError> for VmError {
+    fn from(original: ZkError) -> Self {
+        VmError::zk_err(original)
+    }
+}
+
 impl From<wasmer::wasmparser::BinaryReaderError> for VmError {
     fn from(original: wasmer::wasmparser::BinaryReaderError) -> Self {
         VmError::static_validation_err(format!(
@@ -313,10 +333,10 @@ impl From<wasmer::RuntimeError> for VmError {
         debug_assert!(
             original.to_string().starts_with(&message),
             "The error message we created is not a prefix of the error message from Wasmer. Our message: '{}'. Wasmer message: '{}'",
-            &message,
+            message,
             original
         );
-        VmError::runtime_err(format!("Wasmer runtime error: {}", &message))
+        VmError::runtime_err(format!("Wasmer runtime error: {}", message))
     }
 }
 

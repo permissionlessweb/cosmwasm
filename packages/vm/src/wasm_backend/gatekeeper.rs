@@ -8,7 +8,7 @@ use wasmer::{
 struct GatekeeperConfig {
     /// True iff float operations are allowed.
     ///
-    /// Note: there are float operations in the SIMD block as well and we do not yet handle
+    /// Note: there are float operations in the SIMD block as well, and we do not yet handle
     /// any combination of `allow_floats` and `allow_feature_simd` properly.
     allow_floats: bool,
     //
@@ -62,7 +62,7 @@ impl Default for Gatekeeper {
     fn default() -> Self {
         Self::new(GatekeeperConfig {
             allow_floats: true,
-            allow_feature_bulk_memory_operations: false,
+            allow_feature_bulk_memory_operations: true,
             // we allow the reference types proposal during compatibility checking because a subset
             // of it is required since Rust 1.82, but we don't allow any of the instructions specific
             // to the proposal here. Especially `table.grow` and `table.fill` can be abused to cause
@@ -338,13 +338,21 @@ impl<'a, 'b> ProposalValidator<'a, 'b> {
 
     #[inline]
     fn bulk_memory(&'b mut self, operator: Operator<'a>) -> Result<(), MiddlewareError> {
-        if self.config.allow_feature_bulk_memory_operations {
+        // rustc ≥ 1.87 emits these. table.copy / table.init stay rejected.
+        if self.config.allow_feature_bulk_memory_operations
+            && matches!(
+                operator,
+                Operator::MemoryCopy { .. }
+                    | Operator::MemoryFill { .. }
+                    | Operator::MemoryInit { .. }
+                    | Operator::DataDrop { .. }
+            )
+        {
             self.state.push_operator(operator);
-            Ok(())
-        } else {
-            let msg = format!("Bulk memory operation detected: {operator:?}. Bulk memory operations are not supported.");
-            Err(MiddlewareError::new(MIDDLEWARE_NAME, msg))
+            return Ok(());
         }
+        let msg = format!("Bulk memory operation detected: {operator:?}. Only memory.copy/fill/init/data.drop are supported.");
+        Err(MiddlewareError::new(MIDDLEWARE_NAME, msg))
     }
 
     #[inline]
@@ -423,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn bulk_operations_not_supported() {
+    fn bulk_memory_copy_is_supported() {
         let wasm = wat::parse_str(
             r#"
             (module
@@ -443,10 +451,32 @@ mod tests {
         compiler.push_middleware(deterministic);
         let store = Store::new(compiler);
         let result = Module::new(&store, wasm);
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Bulk memory operation"));
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn table_copy_still_rejected() {
+        let wasm = wat::parse_str(
+            r#"
+            (module
+                (table 2 funcref)
+                (func (export "cp")
+                    i32.const 0
+                    i32.const 0
+                    i32.const 1
+                    table.copy 0 0))
+            "#,
+        )
+        .unwrap();
+        let deterministic = Arc::new(Gatekeeper::default());
+        let mut compiler = make_compiler_config();
+        compiler.push_middleware(deterministic);
+        let store = Store::new(compiler);
+        let err = Module::new(&store, wasm).unwrap_err().to_string();
+        assert!(
+            err.contains("Bulk memory") || err.contains("table.copy") || err.contains("TableCopy"),
+            "{err}"
+        );
     }
 
     #[test]

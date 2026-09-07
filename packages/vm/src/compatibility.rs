@@ -26,12 +26,38 @@ const SUPPORTED_IMPORTS: &[&str] = &[
     "env.bls12_381_pairing_equality",
     "env.bls12_381_hash_to_g1",
     "env.bls12_381_hash_to_g2",
+    #[cfg(feature = "bn254")]
+    "env.bn254_add",
+    #[cfg(feature = "bn254")]
+    "env.bn254_scalar_mul",
+    #[cfg(feature = "bn254")]
+    "env.bn254_pairing_equality",
+    #[cfg(feature = "hash-blake")]
+    "env.blake2b_256",
+    #[cfg(feature = "hash-blake")]
+    "env.blake3_256",
+    #[cfg(feature = "hash-poseidon")]
+    "env.poseidon_hash_pallas",
+    #[cfg(feature = "hash-poseidon")]
+    "env.poseidon_hash_vesta",
+    #[cfg(feature = "hash-poseidon")]
+    "env.poseidon377_hash",
+    #[cfg(feature = "redpallas")]
+    "env.redpallas_spendauth_verify",
+    #[cfg(feature = "redpallas")]
+    "env.redpallas_binding_verify",
+    #[cfg(feature = "redpallas")]
+    "env.redjubjub_spendauth_verify",
+    #[cfg(feature = "redpallas")]
+    "env.redjubjub_binding_verify",
     "env.secp256k1_verify",
     "env.secp256k1_recover_pubkey",
     "env.secp256r1_verify",
     "env.secp256r1_recover_pubkey",
     "env.ed25519_verify",
     "env.ed25519_batch_verify",
+    "env.proof_instance_verify",
+    "env.proof_instance_batch_verify",
     "env.debug",
     "env.query_chain",
     #[cfg(feature = "iterator")]
@@ -265,7 +291,7 @@ fn check_wasm_capabilities(
     available_capabilities: &HashSet<String>,
     logs: Logger,
 ) -> VmResult<()> {
-    let required_capabilities = required_capabilities_from_module(module);
+    let required_capabilities = crate::capabilities::required_capabilities_including_opcodes(module);
     logs.add(|| {
         format!(
             "Required capabilities: {}",
@@ -295,6 +321,8 @@ fn check_wasm_functions(module: &ParsedWasm, limits: &WasmLimits, logs: Logger) 
             module.total_func_params
         )
     });
+    logs.add(|| format!("Max function locals: {}", module.max_func_locals));
+    logs.add(|| format!("Total function locals count: {}", module.total_func_locals));
 
     if module.function_count > limits.max_functions() {
         return Err(VmError::static_validation_err(format!(
@@ -319,6 +347,22 @@ fn check_wasm_functions(module: &ParsedWasm, limits: &WasmLimits, logs: Logger) 
         return Err(VmError::static_validation_err(format!(
             "Wasm contract contains more than {} function parameters in total",
             limits.max_total_function_params()
+        )));
+    }
+
+    if module.max_func_locals > limits.max_function_locals() {
+        return Err(VmError::static_validation_err(format!(
+            "Wasm contract contains function with more than {} locals: {}",
+            limits.max_function_locals(),
+            module.max_func_locals
+        )));
+    }
+
+    if module.total_func_locals > limits.max_total_function_locals() {
+        return Err(VmError::static_validation_err(format!(
+            "Wasm contract contains more than {} function locals in total: {}",
+            limits.max_total_function_locals(),
+            module.total_func_locals
         )));
     }
 
@@ -350,6 +394,7 @@ mod tests {
             "iterator".to_string(),
             "staking".to_string(),
             "stargate".to_string(),
+            crate::capabilities::CAP_BULK_MEMORY.to_string(),
         ])
     }
 
@@ -692,7 +737,7 @@ mod tests {
         let module = ParsedWasm::parse(&wasm).unwrap();
         check_wasm_exports(&module, Off).unwrap();
 
-        // this is invalid, as it doesn't any required export
+        // this is invalid, as it doesn't have any required export
         let wasm = wat::parse_str(
             r#"(module
                 (type (func))
