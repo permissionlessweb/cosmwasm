@@ -169,19 +169,17 @@ impl VestaVerifyingKey {
     ) -> ZkResult<Self> {
         let cs = plonk::ConstraintSystem::read(&mut reader)?;
         let _guard = CsBlueprintGuard::install(CsBlueprint {
-            num_fixed_columns: cs.get_num_fixed_columns(),
-            num_advice_columns: cs.get_num_advice_columns(),
-            num_instance_columns: cs.get_num_instance_columns(),
-            num_selectors: cs.get_num_selectors(),
-            permutation_columns: cs.get_permutation_columns(),
+            num_fixed_columns: cs.num_fixed_columns() as u8,
+            num_advice_columns: cs.num_advice_columns() as u8,
+            num_instance_columns: cs.num_instance_columns() as u8,
+            num_selectors: cs.num_selectors() as u32,
+            permutation_columns: cs.permutation_columns(),
         });
 
-        let empty_selectors: Vec<Vec<bool>> = vec![];
         let vk = halo2_proofs::plonk::VerifyingKey::read_with_cs::<std::io::Cursor<&[u8]>>(
             &mut reader,
             &p.params,
             cs,
-            empty_selectors,
         )
         .map_err(|e| {
             ZkError::new_io(std::io::Error::new(
@@ -258,7 +256,7 @@ impl VestaVerifyingKey {
     /// The embedded CS is deserialized and used for VK reconstruction,
     /// giving exact circuit-agnostic verification without the original Rust type.
     pub fn from_bytes_with_params(bytes: &[u8]) -> ZkResult<Self> {
-        let footer_bytes = &bytes[bytes.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..];
+        let footer_bytes = &bytes[bytes.len() - crate::COSMWASM_FOOTER_LENGTH..];
         let mut reader = std::io::Cursor::new(bytes);
         let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(&mut reader)?;
         Self::from_bytes_without_params(

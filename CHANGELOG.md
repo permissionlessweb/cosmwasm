@@ -4,6 +4,13 @@ The format is based on [Keep a Changelog], and this project adheres to [Semantic
 
 ## [Unreleased]
 
+### Changed
+
+- Pasta Halo2 (`halo2_proofs` / gadgets / poseidon / pasta_curves) now pins
+  `zakura-halo2-*` from `permissionlessweb/common` (`7703e9e`). Path A footer
+  length lives in `zk-cosmwasm` (`COSMWASM_FOOTER_LENGTH`), not halo2.
+  Axiom KZG is unchanged.
+
 ### Fixed
 
 - Vendor `cosmwasm-crypto-bn254` at `packages/crypto-bn254` so Cargo never walks to `junoclaw/wasmvm-fork` (CI was failing on `/home/runner/work/cosmwasm/junoclaw/...`). Exclude `zk-vote-bridge` from the workspace (vote-sdk path). CI toolchain 1.87.0.

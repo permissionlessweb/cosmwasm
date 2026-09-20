@@ -7,7 +7,7 @@ on:
   pull_request:
 
 env:
-  TOOLCHAIN_STABLE: 1.89.0 # Transitive crates (enum-ordinalize 4.4) require rustc 1.89.
+  TOOLCHAIN_STABLE: 1.91.0 # zakura-halo2-proofs MSRV
 
 jobs:
   format:

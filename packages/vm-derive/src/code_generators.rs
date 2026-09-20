@@ -128,16 +128,14 @@ impl CodeGenerator {
                 let _ = <#circuit_name as Circuit<pasta_curves::vesta::Scalar>>::configure(&mut cs);
 
                 // Extract metadata from the configured constraint system
-                let num_fixed_columns = cs.get_num_fixed_columns() as u32;
-                let num_advice_columns = cs.get_num_advice_columns() as u32;
-                let num_instance_columns = cs.get_num_instance_columns() as u32;
-                let num_selectors = cs.get_num_selectors() as u32;
-                let num_gates = cs.get_gate_count() as u32;
-                let degree = cs.get_degree() as u8;
-                let has_lookups = cs.get_has_lookups();
-
-                // Extract permutation columns (columns that participate in copy constraints)
-                let permutation_columns = cs.get_permutation_columns();
+                let num_fixed_columns = cs.num_fixed_columns() as u32;
+                let num_advice_columns = cs.num_advice_columns() as u32;
+                let num_instance_columns = cs.num_instance_columns() as u32;
+                let num_selectors = cs.num_selectors() as u32;
+                let num_gates = cs.gate_count() as u32;
+                let degree = cs.degree() as u8;
+                let has_lookups = cs.has_lookups();
+                let permutation_columns = cs.permutation_columns();
 
                 cosmwasm_vm::zk::ConstraintSystemMetadata {
                     num_fixed_columns,

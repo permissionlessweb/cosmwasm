@@ -18,7 +18,7 @@ use halo2_axiom::transcript::{Blake2bRead, Challenge255, TranscriptReadBuffer};
 use halo2_axiom::SerdeFormat;
 use halo2_base::gates::circuit::builder::BaseCircuitBuilder;
 use halo2_base::gates::circuit::{BaseCircuitParams, CircuitBuilderStage};
-use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+use crate::COSMWASM_FOOTER_LENGTH;
 use sha2::{Digest, Sha256};
 
 /// Footer `curve_id` for Axiom Halo2 KZG BN256 (not Groth16 BN254).

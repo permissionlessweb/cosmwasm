@@ -20,7 +20,7 @@ pub use {
         prove_flock, verify_flock_proof, StwoInstance, StwoVerifyingKey, ZkCurve,
         FLOCK_HOST_VERIFY, STWO_HOST_VERIFY,
     },
-    footer::CircuitFooter,
+    footer::{CircuitFooter, COSMWASM_FOOTER_LENGTH},
 };
 
 #[cfg(feature = "gpu")]

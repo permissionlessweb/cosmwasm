@@ -112,10 +112,8 @@ impl VoteVerifyingKey {
         let cs = plonk::ConstraintSystem::<Fp>::read(&mut vk_reader)
             .map_err(|e| ZkError::new_err(format!("failed to deserialize CS: {e}")))?;
 
-        let empty_selectors: Vec<Vec<bool>> = vec![];
-        let vk =
-            VerifyingKey::<EqAffine>::read_with_cs(&mut vk_reader, &params, cs, empty_selectors)
-                .map_err(|e| ZkError::new_err(format!("failed to deserialize VK: {e}")))?;
+        let vk = VerifyingKey::<EqAffine>::read_with_cs(&mut vk_reader, &params, cs)
+            .map_err(|e| ZkError::new_err(format!("failed to deserialize VK: {e}")))?;
 
         let strategy = SingleVerifier::new(&params);
         let mut transcript = Blake2bRead::<_, EqAffine, Challenge255<EqAffine>>::init(proof);
@@ -136,10 +134,8 @@ impl VoteVerifyingKey {
         let cs = plonk::ConstraintSystem::<Fp>::read(&mut vk_reader)
             .map_err(|e| ZkError::new_err(format!("failed to deserialize CS: {e}")))?;
 
-        let empty_selectors: Vec<Vec<bool>> = vec![];
-        let vk =
-            VerifyingKey::<EqAffine>::read_with_cs(&mut vk_reader, &params, cs, empty_selectors)
-                .map_err(|e| ZkError::new_err(format!("failed to deserialize VK: {e}")))?;
+        let vk = VerifyingKey::<EqAffine>::read_with_cs(&mut vk_reader, &params, cs)
+            .map_err(|e| ZkError::new_err(format!("failed to deserialize VK: {e}")))?;
 
         let mut proof_reader = proof;
         let strategy = SingleVerifier::new(&params);
@@ -165,7 +161,7 @@ impl TryFrom<&[u8]> for VoteVerifyingKey {
     /// Reconstruct from footer-format bytes:
     ///   [params_bytes] [vk_body_bytes] [80-byte CircuitFooter]
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+        use crate::COSMWASM_FOOTER_LENGTH;
 
         if bytes.len() < COSMWASM_FOOTER_LENGTH {
             return Err(ZkError::new_err(format!(

@@ -7,9 +7,9 @@ on:
   pull_request:
 
 env:
-  TOOLCHAIN_STABLE: 1.89.0
+  TOOLCHAIN_STABLE: 1.91.0
   TOOLCHAIN_NIGHTLY: nightly-2024-09-01
-  TOOLCHAIN_CHECK: 1.89.0
+  TOOLCHAIN_CHECK: 1.91.0
   COSMWASM_CHECK_VERSION: 3.0.8         # Last released cosmwasm-check tool before version 3.0.9.
 
 jobs:

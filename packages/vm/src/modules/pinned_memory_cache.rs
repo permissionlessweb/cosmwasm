@@ -363,7 +363,7 @@ mod tests {
 
         #[cfg(feature = "zk")]
         {
-            use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+            use crate::COSMWASM_FOOTER_LENGTH;
             use zk_cosmwasm::CircuitFooter;
 
             let zk = NORICK_CIRCUIT;
@@ -435,7 +435,7 @@ mod tests {
         {
             let zk = NORICK_CIRCUIT;
             let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-                &zk[zk.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+                &zk[zk.len() - crate::COSMWASM_FOOTER_LENGTH..],
             )
             .unwrap();
             assert!(!cache.has_circuit(&footer.to_circuit_key()));
@@ -506,7 +506,7 @@ mod tests {
             let zk = NORICK_CIRCUIT;
 
             let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-                &zk[zk.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+                &zk[zk.len() - crate::COSMWASM_FOOTER_LENGTH..],
             )
             .unwrap();
 
@@ -593,7 +593,7 @@ mod tests {
             let zk = NORICK_CIRCUIT;
 
             let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-                &zk[zk.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+                &zk[zk.len() - crate::COSMWASM_FOOTER_LENGTH..],
             )
             .unwrap();
 

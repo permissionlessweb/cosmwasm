@@ -31,7 +31,7 @@ use cosmwasm_vm::{capabilities_from_csv, Cache, CacheOptions, Size};
 use hex;
 
 #[cfg(feature = "zk")]
-use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+use cosmwasm_vm::COSMWASM_FOOTER_LENGTH;
 #[cfg(feature = "zk")]
 use zk_cosmwasm::CircuitFooter;
 

@@ -1,4 +1,5 @@
-use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+/// Trailer length on Path A circuit blobs (not part of halo2).
+pub const COSMWASM_FOOTER_LENGTH: usize = 80;
 
 use crate::circuits::CircuitType;
 use crate::curves::CurveType;

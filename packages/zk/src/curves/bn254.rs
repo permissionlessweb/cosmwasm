@@ -14,7 +14,7 @@
 //! - **Footer**: empty-param Groth16 (`prover_id=1`, `curve_id=4`, `param_len=0`)
 
 use crate::{curves::ZkCurve, ZkError, ZkResult};
-use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+use crate::COSMWASM_FOOTER_LENGTH;
 
 #[cfg(feature = "bn254")]
 use ark_bn254::{Bn254, Fr};

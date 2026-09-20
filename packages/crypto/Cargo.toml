@@ -34,12 +34,12 @@ cosmwasm-crypto-bn254 = { path = "../crypto-bn254", optional = true, default-fea
 blake2 = { version = "0.10", optional = true, default-features = false }
 blake3 = { version = "1.5", optional = true, default-features = false }
 # Zcash / Halo2 Poseidon (P128Pow5T3) over Pasta pallas/vesta base fields.
-halo2_poseidon = { git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303", optional = true }
-pasta_curves = { version = "0.5", optional = true }
+halo2_poseidon = { package = "zakura-halo2-poseidon", git = "https://github.com/permissionlessweb/common", rev = "7703e9eb21bdec5cd8bf4e17ec68e9f0d164807c", optional = true }
+pasta_curves = { package = "zakura-pasta-curves", git = "https://github.com/permissionlessweb/common", rev = "7703e9eb21bdec5cd8bf4e17ec68e9f0d164807c", optional = true }
 # Penumbra Poseidon over BLS12-377 scalar field (decaf377::Fq).
 poseidon377 = { version = "1.2.0", optional = true, default-features = false, features = ["arkworks"] }
 # group/ff used by Pasta Poseidon wrappers (also transitive via pasta_curves).
-group = { version = "0.13", optional = true }
+group = { version = "0.14", optional = true }
 # RedPallas (Orchard/Pallas) + RedJubjub (Sapling/Jubjub) via Zcash Foundation reddsa.
 reddsa = { version = "0.5", optional = true, default-features = false }
 

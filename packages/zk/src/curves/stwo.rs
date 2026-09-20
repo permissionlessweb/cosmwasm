@@ -8,7 +8,7 @@
 
 use std::sync::OnceLock;
 
-use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+use crate::COSMWASM_FOOTER_LENGTH;
 use sha2::{Digest, Sha256};
 
 use crate::{CircuitFooter, CircuitType, Proof, ZkError, ZkResult};

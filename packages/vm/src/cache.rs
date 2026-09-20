@@ -2,7 +2,7 @@
 use crate::{check_circuit, SerializedCircuitData};
 use cosmwasm_std::Checksum;
 #[cfg(feature = "zk")]
-use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+use crate::COSMWASM_FOOTER_LENGTH;
 use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -1144,7 +1144,7 @@ where
     //     dir: impl Into<PathBuf>,
     //     vk: &SerializedCircuitData,
     // ) -> VmResult<Checksum> {
-    //     use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+    //     use crate::COSMWASM_FOOTER_LENGTH;
     //     let len = vk.body.len();
     //     // hash is last 32 bytes
     //     let hash = &vk.footer[COSMWASM_FOOTER_LENGTH - 32..]
@@ -1293,7 +1293,7 @@ where
         println!("loading circuit from disk;");
         let bytes = load_circuit_from_disk(dir, checksum)?;
         println!("length on disk:{};", bytes.len());
-        let body = &bytes[0..bytes.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH];
+        let body = &bytes[0..bytes.len() - crate::COSMWASM_FOOTER_LENGTH];
         let footer = crate::check_circuit(&bytes)
             .map_err(VmError::zk_err)?
             .to_bytes();
@@ -2699,7 +2699,7 @@ mod tests {
         // Store
         let code = NORICK_CIRCUIT;
         let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-            &code[code.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+            &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
         )
         .unwrap();
 
@@ -2732,7 +2732,7 @@ mod tests {
         let path = tmp_dir.path();
         let code = NORICK_CIRCUIT;
         let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-            &code[code.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+            &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
         )
         .unwrap();
         let checksum = save_circuit_to_disk(path, &code, footer).unwrap();
@@ -2770,7 +2770,7 @@ mod tests {
         create_dir_all(&path).unwrap();
         let code = NORICK_CIRCUIT;
         let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-            &code[code.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+            &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
         )
         .unwrap();
 
@@ -2786,7 +2786,7 @@ mod tests {
         let path = tmp_dir.path();
         let code = NORICK_CIRCUIT;
         let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-            &code[code.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..],
+            &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
         )
         .unwrap();
         let checksum = save_circuit_to_disk(path, &code, footer).unwrap();

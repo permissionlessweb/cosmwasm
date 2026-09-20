@@ -7,12 +7,11 @@ use crate::{
         FlockInstance, FlockVerifyingKey, StwoInstance, StwoVerifyingKey, VestaInstance,
         VestaVerifyingKey, VoteInstance, VoteVerifyingKey, ZkCurve,
     },
-    CircuitFooter, ZkError, ZkResult,
+    CircuitFooter, COSMWASM_FOOTER_LENGTH, ZkError, ZkResult,
 };
 use halo2_proofs::{
     circuit::Layouter,
     plonk::{self, Circuit, ConstraintSystem},
-    COSMWASM_FOOTER_LENGTH,
 };
 use std::cell::RefCell;
 

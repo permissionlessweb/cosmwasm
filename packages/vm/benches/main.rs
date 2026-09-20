@@ -17,7 +17,7 @@ use cosmwasm_vm::{
 
 #[cfg(feature = "zk")]
 use {
-    cosmwasm_vm::CachedCircuit, halo2_proofs::COSMWASM_FOOTER_LENGTH, zk_cosmwasm::CircuitFooter,
+    cosmwasm_vm::CachedCircuit, cosmwasm_vm::COSMWASM_FOOTER_LENGTH, zk_cosmwasm::CircuitFooter,
 };
 
 // Instance
