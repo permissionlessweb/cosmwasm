@@ -1024,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "cosmwasm-check"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1038,11 +1038,11 @@ dependencies = [
 
 [[package]]
 name = "cosmwasm-core"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 
 [[package]]
 name = "cosmwasm-crypto"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "ark-bls12-381",
  "ark-ec 0.5.0",
@@ -1096,7 +1096,7 @@ dependencies = [
 
 [[package]]
 name = "cosmwasm-derive"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1105,7 +1105,7 @@ dependencies = [
 
 [[package]]
 name = "cosmwasm-schema"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "anyhow",
  "cosmwasm-schema-derive",
@@ -1121,7 +1121,7 @@ dependencies = [
 
 [[package]]
 name = "cosmwasm-schema-derive"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "cosmwasm-std"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "base64 0.22.1",
  "bech32",
@@ -1159,7 +1159,7 @@ dependencies = [
 
 [[package]]
 name = "cosmwasm-vm"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "bech32",
  "blake2",
@@ -1205,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "cosmwasm-vm-derive"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "blake2",
  "proc-macro2",
@@ -1395,7 +1395,7 @@ dependencies = [
 
 [[package]]
 name = "cw-schema"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "cw-schema-derive",
  "indexmap",
@@ -1411,7 +1411,7 @@ dependencies = [
 
 [[package]]
 name = "cw-schema-derive"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "heck",
  "itertools 0.13.0",
@@ -5235,7 +5235,7 @@ dependencies = [
 
 [[package]]
 name = "zk-cosmwasm"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 dependencies = [
  "ark-bn254",
  "ark-crypto-primitives 0.5.0",
