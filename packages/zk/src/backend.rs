@@ -445,7 +445,10 @@ mod tests {
             gpu.is_ok(),
             "CPU vs GPU-fallback accept/reject mismatch: cpu={cpu:?} gpu={gpu:?}"
         );
-        assert!(cpu.is_ok(), "square golden should verify true on CPU: {cpu:?}");
+        assert!(
+            cpu.is_ok(),
+            "square golden should verify true on CPU: {cpu:?}"
+        );
 
         // Bit-flip proof: both must reject (VerifyFailed or format)
         let mut bad = proof.0.clone();

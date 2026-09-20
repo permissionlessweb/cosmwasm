@@ -17,9 +17,7 @@ use cosmwasm_vm::{
 
 #[cfg(feature = "zk")]
 use {
-    cosmwasm_vm::CachedCircuit,
-    zk_cosmwasm::CircuitFooter,
-    halo2_proofs::COSMWASM_FOOTER_LENGTH,
+    cosmwasm_vm::CachedCircuit, halo2_proofs::COSMWASM_FOOTER_LENGTH, zk_cosmwasm::CircuitFooter,
 };
 
 // Instance
@@ -531,10 +529,9 @@ fn bench_zk_circuit_cache(c: &mut Criterion) {
     // Parse the NORICK circuit footer once so we can derive keys for the
     // store-then-load benchmarks.
     // ------------------------------------------------------------------
-    let footer = CircuitFooter::from_bytes(
-        &NORICK_CIRCUIT[NORICK_CIRCUIT.len() - COSMWASM_FOOTER_LENGTH..],
-    )
-    .unwrap();
+    let footer =
+        CircuitFooter::from_bytes(&NORICK_CIRCUIT[NORICK_CIRCUIT.len() - COSMWASM_FOOTER_LENGTH..])
+            .unwrap();
     let circuit_key: [u8; 72] = footer.to_circuit_key();
 
     // ------------------------------------------------------------------
@@ -552,7 +549,7 @@ fn bench_zk_circuit_cache(c: &mut Criterion) {
         let seed_options = CacheOptions::new(
             storage_dir.path(),
             capabilities_from_csv(DEFAULT_CAPABILITIES),
-            Size::mebi(200),   // allow memory cache
+            Size::mebi(200), // allow memory cache
             DEFAULT_MEMORY_LIMIT,
         );
         let seed_cache: Cache<MockApi, MockStorage, MockQuerier> =
@@ -694,7 +691,7 @@ fn bench_zk_circuit_cache(c: &mut Criterion) {
         let options = CacheOptions::new(
             temp.path(),
             capabilities_from_csv(DEFAULT_CAPABILITIES),
-            Size::new(0),                // no LRU — force fs fallback
+            Size::new(0), // no LRU — force fs fallback
             DEFAULT_MEMORY_LIMIT,
         );
         let cache: Cache<MockApi, MockStorage, MockQuerier> =
@@ -813,6 +810,12 @@ criterion_group!(
 );
 
 #[cfg(feature = "zk")]
-criterion_main!(instance, cache, combined, multi_threaded_instance, zk_circuit);
+criterion_main!(
+    instance,
+    cache,
+    combined,
+    multi_threaded_instance,
+    zk_circuit
+);
 #[cfg(not(feature = "zk"))]
 criterion_main!(instance, cache, combined, multi_threaded_instance);

@@ -460,7 +460,10 @@ mod tests {
         assert!(linear_bulk_cost(copy, 1) > linear_bulk_cost(copy, 0));
         assert!(linear_bulk_cost(copy, 64) < linear_bulk_cost(copy, 65));
         let max = linear_bulk_cost(copy, u32::MAX);
-        assert!(max < i64::MAX as u64, "dynamic cost must fit i64 for Wasm i64.mul");
+        assert!(
+            max < i64::MAX as u64,
+            "dynamic cost must fit i64 for Wasm i64.mul"
+        );
         // Huge copy must be far more expensive than a single opcode.
         assert!(max > 1_000_000_000_000);
     }
@@ -468,9 +471,7 @@ mod tests {
     #[test]
     fn branching_ops_are_detected() {
         assert!(is_branching_operator(&Operator::Return));
-        assert!(is_branching_operator(&Operator::Call {
-            function_index: 0
-        }));
+        assert!(is_branching_operator(&Operator::Call { function_index: 0 }));
         assert!(!is_branching_operator(&Operator::I32Const { value: 1 }));
     }
 }

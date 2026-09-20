@@ -13,10 +13,12 @@ pub fn install_path_a_hosts() {}
 
 pub use {
     backend::{select_backend, CpuBackend, SelectedBackend, VerifierBackend, VerifyItem},
-    circuits::{AnyInstance, AnyVerifyingKey, CircuitType, CosmwasmCircuit, Proof, SerializedCircuitData},
+    circuits::{
+        AnyInstance, AnyVerifyingKey, CircuitType, CosmwasmCircuit, Proof, SerializedCircuitData,
+    },
     curves::{
-        prove_flock, verify_flock_proof, StwoInstance, StwoVerifyingKey, ZkCurve, FLOCK_HOST_VERIFY,
-        STWO_HOST_VERIFY,
+        prove_flock, verify_flock_proof, StwoInstance, StwoVerifyingKey, ZkCurve,
+        FLOCK_HOST_VERIFY, STWO_HOST_VERIFY,
     },
     footer::CircuitFooter,
 };

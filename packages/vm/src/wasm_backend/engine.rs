@@ -266,11 +266,8 @@ mod tests {
         let budget = 20_000_000i64;
         set_remaining_points(&mut store, &instance, budget);
         let copy = instance.exports.get_function("copy").unwrap();
-        copy.call(
-            &mut store,
-            &[Value::I32(8), Value::I32(0), Value::I32(4)],
-        )
-        .unwrap();
+        copy.call(&mut store, &[Value::I32(8), Value::I32(0), Value::I32(4)])
+            .unwrap();
         assert!(!exhausted(&mut store, &instance));
         let left = remaining_points(&mut store, &instance);
         assert!(left < budget, "small copy must consume gas (left={left})");
@@ -330,7 +327,11 @@ mod tests {
             .view(&store)
             .read(0, &mut still)
             .unwrap();
-        assert_eq!(still, [0xAA, 0xBB, 0xCC, 0xDD], "copy must not mutate memory after gas trap");
+        assert_eq!(
+            still,
+            [0xAA, 0xBB, 0xCC, 0xDD],
+            "copy must not mutate memory after gas trap"
+        );
     }
 
     #[test]

@@ -1120,13 +1120,9 @@ impl Default for WasmQuerier {
                     addr: contract_addr.clone(),
                 },
                 #[cfg(feature = "zk")]
-                WasmQuery::CircuitInfo { zk_id } => SystemError::NoSuchCircuit {
-                    zk_id: *zk_id,
-                },
+                WasmQuery::CircuitInfo { zk_id } => SystemError::NoSuchCircuit { zk_id: *zk_id },
                 #[cfg(feature = "zk")]
-                WasmQuery::Circuit { zk_id } => SystemError::NoSuchCircuit {
-                    zk_id: *zk_id,
-                },
+                WasmQuery::Circuit { zk_id } => SystemError::NoSuchCircuit { zk_id: *zk_id },
             };
             SystemResult::Err(err)
         });

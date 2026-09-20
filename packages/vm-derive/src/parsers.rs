@@ -25,14 +25,12 @@ pub struct CircuitAttributes {
 }
 
 /// Circuit type attribute values
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CircuitTypeAttr {
     /// Plonkish circuit type (halo2)
     #[default]
     Plonkish,
 }
-
 
 impl CircuitTypeAttr {
     /// Convert to u8 for serialization

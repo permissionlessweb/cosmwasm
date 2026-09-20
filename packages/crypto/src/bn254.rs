@@ -1,8 +1,7 @@
 //! BN254 (alt_bn128) host primitives — optional multi-curve library.
 //!
-//! Implementation lives in the standalone crate
-//! `cosmwasm-crypto-bn254` (junoclaw wasmvm-fork / monorepo path).
-//! Enable with feature `bn254`.
+//! Implementation lives in in-tree `packages/crypto-bn254`.
+//! Enable with feature `bn254`. Never depends on junoclaw checkout paths.
 //!
 //! Host functions (when wired through cosmwasm-vm):
 //! - [`bn254_add`] — EIP-196 ECADD

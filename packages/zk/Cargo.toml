@@ -71,8 +71,8 @@ halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", rev = "362
 halo2_proofs = { package = "halo2_proofs", git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303", default-features = false, features = ["batch"] }
 # Axiom KZG backend for `halo2-kzg` (curve_id 6). Same wasm32 rule as above:
 # no multicore — host-side verify only.
-halo2-axiom = { package = "halo2-axiom", path = "../../../halo2-axiom/halo2_proofs", version = "0.5.1", optional = true, default-features = false, features = ["batch", "circuit-params"] }
-halo2-base = { package = "halo2-base", path = "../../../zcash/halo2-lib/halo2-base", version = "0.4.1", optional = true, default-features = false, features = ["halo2-axiom"] }
+halo2-axiom = { package = "halo2-axiom", git = "https://github.com/axiom-crypto/halo2", tag = "v0.5.1", optional = true, default-features = false, features = ["batch", "circuit-params"] }
+halo2-base = { package = "halo2-base", git = "https://github.com/axiom-crypto/halo2-lib", tag = "v0.4.1", optional = true, default-features = false, features = ["halo2-axiom"] }
 sha2 = "0.10"
 blake3 = "1"
 

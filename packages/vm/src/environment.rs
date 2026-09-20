@@ -130,7 +130,7 @@ impl Default for GasConfig {
             // 1 + ceil(proof/1024) + ceil(instances/32) in imports.rs.
             // Re-run calibrate on validator CPUs after prover/layout changes.
             halo2_proof_instance_verify_cost: LinearGasCost {
-                base: 2_700 * GAS_PER_US,  // ~2.7 ms fixed (rounded calibrate)
+                base: 2_700 * GAS_PER_US,   // ~2.7 ms fixed (rounded calibrate)
                 per_item: 200 * GAS_PER_US, // ~200 µs / unit
             },
             write_region_cost: LinearGasCost {

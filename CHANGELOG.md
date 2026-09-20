@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog], and this project adheres to [Semantic
 
 ## [Unreleased]
 
+### Fixed
+
+- Vendor `cosmwasm-crypto-bn254` at `packages/crypto-bn254` so Cargo never walks to `junoclaw/wasmvm-fork` (CI was failing on `/home/runner/work/cosmwasm/junoclaw/...`). Exclude `zk-vote-bridge` from the workspace (vote-sdk path). CI toolchain 1.87.0.
+
 ### Changed
 
 - Stwo and Flock Path A verifiers live in `packages/zk-hosts` (`zk-cosmwasm-hosts`), excluded from the CosmWasm workspace (stwo vs vote-sdk `crypto-common`). Hooks remain on `zk-cosmwasm`; libwasmvm calls `zk_cosmwasm_hosts::install()` at cache init.

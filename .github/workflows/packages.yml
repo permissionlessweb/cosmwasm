@@ -7,7 +7,7 @@ on:
   pull_request:
 
 env:
-  TOOLCHAIN_STABLE: 1.82.0 # Rust toolchain for building packages.
+  TOOLCHAIN_STABLE: 1.89.0 # Transitive crates (enum-ordinalize 4.4) require rustc 1.89.
 
 jobs:
   format:

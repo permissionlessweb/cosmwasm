@@ -219,11 +219,7 @@ impl VestaVerifyingKey {
         let params =
             halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(&mut param_reader)?;
         let mut vk_reader = std::io::Cursor::new(vk_body_bytes);
-        Self::from_bytes_without_params(
-            &mut vk_reader,
-            footer,
-            VestaParams::try_from(params)?,
-        )
+        Self::from_bytes_without_params(&mut vk_reader, footer, VestaParams::try_from(params)?)
     }
 }
 

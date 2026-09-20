@@ -168,8 +168,7 @@ impl PinnedMemoryCache {
         if !is_update {
             self.evict_circuits_for_insert(cached_circuit.size_estimate)?;
         } else {
-            self.circuit_pin_order
-                .retain(|k| k != circuit_checksum_key);
+            self.circuit_pin_order.retain(|k| k != circuit_checksum_key);
         }
         self.circuit_pin_order.push_back(*circuit_checksum_key);
         self.circuits.insert(

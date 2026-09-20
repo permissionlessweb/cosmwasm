@@ -14,9 +14,7 @@ use halo2_axiom::poly::commitment::ParamsProver;
 use halo2_axiom::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
 use halo2_axiom::poly::kzg::multiopen::VerifierSHPLONK;
 use halo2_axiom::poly::kzg::strategy::SingleStrategy;
-use halo2_axiom::transcript::{
-    Blake2bRead, Challenge255, TranscriptReadBuffer,
-};
+use halo2_axiom::transcript::{Blake2bRead, Challenge255, TranscriptReadBuffer};
 use halo2_axiom::SerdeFormat;
 use halo2_base::gates::circuit::builder::BaseCircuitBuilder;
 use halo2_base::gates::circuit::{BaseCircuitParams, CircuitBuilderStage};
@@ -109,16 +107,15 @@ impl Halo2KzgVerifyingKey {
             vk_body_bytes.split_at(cs_len)
         };
 
-        let config: BaseCircuitParams = serde_json::from_slice(cs_bytes).map_err(|e| {
-            ZkError::format_err(format!("halo2-kzg BaseCircuitParams JSON: {e}"))
-        })?;
+        let config: BaseCircuitParams = serde_json::from_slice(cs_bytes)
+            .map_err(|e| ZkError::format_err(format!("halo2-kzg BaseCircuitParams JSON: {e}")))?;
 
         let mut preader = std::io::Cursor::new(param_bytes);
         let params = ParamsKZG::<Bn256>::read_custom(&mut preader, SerdeFormat::RawBytesUnchecked)
             .map_err(|e| ZkError::format_err(format!("halo2-kzg ParamsKZG: {e}")))?;
 
-        let builder =
-            BaseCircuitBuilder::<Fr>::from_stage(CircuitBuilderStage::Keygen).use_params(config.clone());
+        let builder = BaseCircuitBuilder::<Fr>::from_stage(CircuitBuilderStage::Keygen)
+            .use_params(config.clone());
         let mut vreader = std::io::Cursor::new(vk_bytes);
         let vk = VerifyingKey::<G1Affine>::read::<_, BaseCircuitBuilder<Fr>>(
             &mut vreader,
@@ -192,7 +189,13 @@ impl TryFrom<&[u8]> for Halo2KzgVerifyingKey {
 }
 
 /// Build a CosmWasm footer for an Axiom KZG export (`prover_id=0`, `curve_id=6`).
-pub fn kzg_footer(k: u8, i: u8, param_bytes: &[u8], cs_bytes: &[u8], vk_bytes: &[u8]) -> CircuitFooter {
+pub fn kzg_footer(
+    k: u8,
+    i: u8,
+    param_bytes: &[u8],
+    cs_bytes: &[u8],
+    vk_bytes: &[u8],
+) -> CircuitFooter {
     let mut vk_body = Vec::with_capacity(cs_bytes.len() + vk_bytes.len());
     vk_body.extend_from_slice(cs_bytes);
     vk_body.extend_from_slice(vk_bytes);
@@ -236,7 +239,8 @@ mod tests {
     /// Tiny empty-config builder: proves host can read ParamsKZG + VK + footer.
     #[test]
     fn kzg_store_blob_deserializes() {
-        let mut builder = BaseCircuitBuilder::<Fr>::from_stage(CircuitBuilderStage::Keygen).use_k(4);
+        let mut builder =
+            BaseCircuitBuilder::<Fr>::from_stage(CircuitBuilderStage::Keygen).use_k(4);
         builder.set_instance_columns(1);
         let config = builder.calculate_params(Some(9));
         let params = ParamsKZG::<Bn256>::setup(4, OsRng);
@@ -248,7 +252,8 @@ mod tests {
             .unwrap();
         let cs = serde_json::to_vec(&config).unwrap();
         let mut vk_bytes = Vec::new();
-        vk.write(&mut vk_bytes, SerdeFormat::RawBytesUnchecked).unwrap();
+        vk.write(&mut vk_bytes, SerdeFormat::RawBytesUnchecked)
+            .unwrap();
         let footer = kzg_footer(4, 0, &params_body, &cs, &vk_bytes);
         let mut blob = params_body.clone();
         blob.extend_from_slice(&cs);

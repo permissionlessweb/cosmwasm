@@ -4,8 +4,6 @@ use crate::conversion::{ref_to_u32, to_u32};
 pub use crate::environment::DebugInfo;
 use crate::environment::Environment;
 use crate::errors::{CommunicationError, VmError, VmResult};
-#[cfg(feature = "zk")]
-use crate::imports::{do_proof_instance_batch_verify, do_proof_instance_verify};
 use crate::imports::{
     do_abort, do_addr_canonicalize, do_addr_humanize, do_addr_validate, do_bls12_381_aggregate_g1,
     do_bls12_381_aggregate_g2, do_bls12_381_hash_to_g1, do_bls12_381_hash_to_g2,
@@ -13,19 +11,21 @@ use crate::imports::{
     do_ed25519_batch_verify, do_ed25519_verify, do_query_chain, do_secp256k1_recover_pubkey,
     do_secp256k1_verify, do_secp256r1_recover_pubkey, do_secp256r1_verify,
 };
-#[cfg(feature = "bn254")]
-use crate::imports::{do_bn254_add, do_bn254_pairing_equality, do_bn254_scalar_mul};
 #[cfg(feature = "hash-blake")]
 use crate::imports::{do_blake2b_256, do_blake3_256};
+#[cfg(feature = "bn254")]
+use crate::imports::{do_bn254_add, do_bn254_pairing_equality, do_bn254_scalar_mul};
+#[cfg(feature = "iterator")]
+use crate::imports::{do_db_next, do_db_next_key, do_db_next_value, do_db_scan};
 #[cfg(feature = "hash-poseidon")]
-use crate::imports::{do_poseidon_hash_pallas, do_poseidon_hash_vesta, do_poseidon377_hash};
+use crate::imports::{do_poseidon377_hash, do_poseidon_hash_pallas, do_poseidon_hash_vesta};
+#[cfg(feature = "zk")]
+use crate::imports::{do_proof_instance_batch_verify, do_proof_instance_verify};
 #[cfg(feature = "redpallas")]
 use crate::imports::{
     do_redjubjub_binding_verify, do_redjubjub_spendauth_verify, do_redpallas_binding_verify,
     do_redpallas_spendauth_verify,
 };
-#[cfg(feature = "iterator")]
-use crate::imports::{do_db_next, do_db_next_key, do_db_next_value, do_db_scan};
 use crate::internals::compile_module;
 use crate::memory::{read_region, write_region};
 use crate::size::Size;

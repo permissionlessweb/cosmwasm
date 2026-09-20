@@ -1,11 +1,14 @@
-use crate::{
-    curves::{FlockInstance, FlockVerifyingKey, StwoInstance, StwoVerifyingKey, VestaInstance, VestaVerifyingKey, VoteInstance, VoteVerifyingKey, ZkCurve},
-    CircuitFooter, ZkError, ZkResult,
-};
 #[cfg(feature = "bn254")]
 use crate::curves::{Bn254Instance, Bn254VerifyingKey};
 #[cfg(feature = "halo2-kzg")]
 use crate::curves::{Halo2KzgInstance, Halo2KzgVerifyingKey};
+use crate::{
+    curves::{
+        FlockInstance, FlockVerifyingKey, StwoInstance, StwoVerifyingKey, VestaInstance,
+        VestaVerifyingKey, VoteInstance, VoteVerifyingKey, ZkCurve,
+    },
+    CircuitFooter, ZkError, ZkResult,
+};
 use halo2_proofs::{
     circuit::Layouter,
     plonk::{self, Circuit, ConstraintSystem},
@@ -111,14 +114,22 @@ impl TryFrom<&[u8]> for AnyVerifyingKey {
         // Dispatch on curve_id as the sole routing key.
         // curve_id is self-describing — each distinct circuit/curve has its own ID.
         match footer.curve_id {
-            0 => Ok(AnyVerifyingKey::Vesta(Box::new(VestaVerifyingKey::try_from(bytes)?))),
-            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(Box::new(VoteVerifyingKey::try_from(bytes)?))),
+            0 => Ok(AnyVerifyingKey::Vesta(Box::new(
+                VestaVerifyingKey::try_from(bytes)?,
+            ))),
+            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(Box::new(VoteVerifyingKey::try_from(
+                bytes,
+            )?))),
             #[cfg(feature = "bn254")]
-            4 => Ok(AnyVerifyingKey::Bn254(Box::new(Bn254VerifyingKey::try_from(bytes)?))),
+            4 => Ok(AnyVerifyingKey::Bn254(Box::new(
+                Bn254VerifyingKey::try_from(bytes)?,
+            ))),
             5 => Ok(AnyVerifyingKey::Stwo(StwoVerifyingKey::try_from(bytes)?)),
             7 => Ok(AnyVerifyingKey::Flock(FlockVerifyingKey::try_from(bytes)?)),
             #[cfg(feature = "halo2-kzg")]
-            6 => Ok(AnyVerifyingKey::Halo2Kzg(Box::new(Halo2KzgVerifyingKey::try_from(bytes)?))),
+            6 => Ok(AnyVerifyingKey::Halo2Kzg(Box::new(
+                Halo2KzgVerifyingKey::try_from(bytes)?,
+            ))),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
@@ -224,9 +235,9 @@ impl AnyVerifyingKey {
             0 => Ok(AnyVerifyingKey::Vesta(Box::new(
                 VestaVerifyingKey::from_bytes_with_params(bytes)?,
             ))),
-            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(Box::new(
-                VoteVerifyingKey::try_from(bytes)?,
-            ))),
+            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(Box::new(VoteVerifyingKey::try_from(
+                bytes,
+            )?))),
             #[cfg(feature = "bn254")]
             4 => Ok(AnyVerifyingKey::Bn254(Box::new(
                 Bn254VerifyingKey::try_from(bytes)?,

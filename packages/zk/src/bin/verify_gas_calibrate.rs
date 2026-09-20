@@ -58,8 +58,7 @@ impl ResourceVec {
     }
     /// Dynamic unit count used by production meter (imports.rs).
     fn units(&self) -> u64 {
-        1u64
-            .saturating_add(self.proof_kib())
+        1u64.saturating_add(self.proof_kib())
             .saturating_add(self.pi_limbs())
     }
 }
@@ -249,10 +248,7 @@ fn main() {
     let mut timed: Vec<Timed> = Vec::new();
 
     if let Some(w) = load_square() {
-        println!(
-            "## Workload `{}` (curve={})",
-            w.name, w.curve
-        );
+        println!("## Workload `{}` (curve={})", w.name, w.curve);
         println!(
             "- proof_len={} instances_len={} circuit_len={}",
             w.proof.len(),
@@ -284,7 +280,10 @@ fn main() {
     for p in &norick_paths {
         if let Ok(blob) = std::fs::read(p) {
             println!();
-            println!("## Workload `norick_vk_load` (Halo2 deserial proxy, {} B)", blob.len());
+            println!(
+                "## Workload `norick_vk_load` (Halo2 deserial proxy, {} B)",
+                blob.len()
+            );
             let t = time_circuit_load("norick_vk_load", &blob, warmup.min(5), iters.min(40));
             println!(
                 "- load median={:.1} µs  p95={:.1} µs  mean={:.1} µs  ok={}",

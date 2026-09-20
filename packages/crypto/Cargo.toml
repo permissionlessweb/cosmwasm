@@ -29,9 +29,8 @@ sha2 = "0.10"
 thiserror = "1.0.26"
 
 # Optional multi-curve / hash libraries (feature-gated — default stays light).
-# BN254 implementation: junoclaw wasmvm-fork crate (EIP-196/197/1108 layout).
-# Path: crates/cosmwasm/packages/crypto → ../../../junoclaw/...
-cosmwasm-crypto-bn254 = { path = "../../../junoclaw/wasmvm-fork/cosmwasm-crypto-bn254", optional = true, default-features = false, features = ["std"] }
+# BN254 (EIP-196/197/1108) is vendored in-tree so CI never walks out to junoclaw.
+cosmwasm-crypto-bn254 = { path = "../crypto-bn254", optional = true, default-features = false, features = ["std"] }
 blake2 = { version = "0.10", optional = true, default-features = false }
 blake3 = { version = "1.5", optional = true, default-features = false }
 # Zcash / Halo2 Poseidon (P128Pow5T3) over Pasta pallas/vesta base fields.

@@ -205,9 +205,8 @@ impl Bn254VerifyingKey {
 
         let ark_proof = deserialize_ark_proof(&proof.0)?;
 
-        let pvk = Groth16::<Bn254>::process_vk(&ark_vk).map_err(|e| {
-            ZkError::format_err(format!("prepare verifying key failed: {e}"))
-        })?;
+        let pvk = Groth16::<Bn254>::process_vk(&ark_vk)
+            .map_err(|e| ZkError::format_err(format!("prepare verifying key failed: {e}")))?;
 
         let ok = Groth16::<Bn254>::verify_with_processed_vk(&pvk, &public_inputs, &ark_proof)
             .map_err(|e| ZkError::format_err(format!("groth16 verify error: {e}")))?;
@@ -227,9 +226,8 @@ impl TryFrom<&[u8]> for Bn254VerifyingKey {
         if bytes.len() < COSMWASM_FOOTER_LENGTH {
             return Err(ZkError::format_err("Data too short for footer"));
         }
-        let footer = crate::CircuitFooter::from_bytes(
-            &bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..],
-        )?;
+        let footer =
+            crate::CircuitFooter::from_bytes(&bytes[bytes.len() - COSMWASM_FOOTER_LENGTH..])?;
         let vk_bytes = bytes[..bytes.len() - COSMWASM_FOOTER_LENGTH].to_vec();
         Ok(Self { vk_bytes, footer })
     }
@@ -275,7 +273,9 @@ fn fr_from_be32_checked(bytes: &[u8; 32]) -> ZkResult<Fr> {
         reencoded = padded;
     }
     if reencoded.as_slice() != bytes.as_slice() {
-        return Err(ZkError::format_err("Fr limb not canonical big-endian in [0, r)"));
+        return Err(ZkError::format_err(
+            "Fr limb not canonical big-endian in [0, r)",
+        ));
     }
     Ok(fr)
 }
@@ -292,9 +292,8 @@ fn fr_to_be32(fr: &Fr) -> [u8; 32] {
 #[cfg(feature = "bn254")]
 fn deserialize_ark_vk(bytes: &[u8]) -> ZkResult<ArkVerifyingKey<Bn254>> {
     // Validate::No: snarkjs-imported points use new_unchecked; groth16 verify is the gate.
-    ArkVerifyingKey::<Bn254>::deserialize_with_mode(bytes, Compress::Yes, Validate::No).map_err(
-        |e| ZkError::format_err(format!("invalid ark VerifyingKey encoding: {e}")),
-    )
+    ArkVerifyingKey::<Bn254>::deserialize_with_mode(bytes, Compress::Yes, Validate::No)
+        .map_err(|e| ZkError::format_err(format!("invalid ark VerifyingKey encoding: {e}")))
 }
 
 #[cfg(feature = "bn254")]
@@ -519,10 +518,7 @@ mod tests {
         assert!(bad.is_err());
         // Prefer VerifyFailed; format err also acceptable for corrupt encoding.
         let e = bad.unwrap_err();
-        assert!(
-            e.is_verify_failed() || e.is_format_err(),
-            "unexpected: {e}"
-        );
+        assert!(e.is_verify_failed() || e.is_format_err(), "unexpected: {e}");
 
         // Wrong public input → VerifyFailed
         let wrong_pub = encode_public_inputs_be(&[a]); // a instead of c
@@ -619,8 +615,7 @@ mod tests {
 
         // Prefer committed fixtures when present (CI / Path A).
         let blob = std::fs::read(testdata.join("square_vk.bin")).unwrap_or(blob);
-        let proof_bytes =
-            std::fs::read(testdata.join("square_proof.bin")).unwrap_or(proof_bytes);
+        let proof_bytes = std::fs::read(testdata.join("square_proof.bin")).unwrap_or(proof_bytes);
         let public_bytes =
             std::fs::read(testdata.join("square_public.bin")).unwrap_or(public_bytes);
 

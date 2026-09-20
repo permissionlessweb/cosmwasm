@@ -1,8 +1,8 @@
 use halo2_proofs::COSMWASM_FOOTER_LENGTH;
 
+use crate::circuits::CircuitType;
 use crate::curves::CurveType;
 use crate::errors::{ZkError, ZkResult};
-use crate::circuits::CircuitType;
 
 /// Circuit footer metadata - [[COSMWASM_FOOTER_LENGTH]] bytes containing complete constraint system specification.
 /// V2 CS-inclusive format: enables generic deserialization via DynamicCircuit

@@ -8,7 +8,6 @@ const REQUIRES_PREFIX: &str = "requires_";
 /// Detected from opcodes (and from a `requires_bulk_memory` export if present).
 pub const CAP_BULK_MEMORY: &str = "bulk_memory";
 
-
 /// Canonical capability strings for optional multi-curve / algebraic hosts.
 ///
 /// Contracts that need a host export `requires_<capability>` (see
@@ -79,7 +78,9 @@ pub fn capabilities_from_csv(csv: &str) -> HashSet<String> {
 
 /// Implementation for check_wasm, based on static analysis of the bytecode.
 /// This is used for code upload, to perform check before compiling the Wasm.
-pub fn required_capabilities_including_opcodes(module: &crate::parsed_wasm::ParsedWasm<'_>) -> HashSet<String> {
+pub fn required_capabilities_including_opcodes(
+    module: &crate::parsed_wasm::ParsedWasm<'_>,
+) -> HashSet<String> {
     let mut set = required_capabilities_from_module(module);
     if module.uses_metered_bulk_memory {
         set.insert(CAP_BULK_MEMORY.to_string());

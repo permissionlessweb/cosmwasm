@@ -90,7 +90,6 @@ pub fn is_metered_bulk_memory_op(op: &wasmer::wasmparser::Operator<'_>) -> bool 
     )
 }
 
-
 impl<'a> ParsedWasm<'a> {
     pub fn parse(wasm: &'a [u8]) -> VmResult<Self> {
         let features = WasmFeatures::MUTABLE_GLOBAL

@@ -122,7 +122,10 @@ mod tests {
                 .collect();
             let expected = fq(PENUMBRA_CHAIN[rate]).to_bytes();
             let out = poseidon377_hash(&d, &inputs).unwrap();
-            assert_eq!(out, expected, "poseidon377 rate {rate} mismatch (want Penumbra Fq / BLS12-377)");
+            assert_eq!(
+                out, expected,
+                "poseidon377 rate {rate} mismatch (want Penumbra Fq / BLS12-377)"
+            );
             let mut concat = Vec::new();
             for e in &inputs {
                 concat.extend_from_slice(e);

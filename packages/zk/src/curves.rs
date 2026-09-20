@@ -17,27 +17,26 @@ pub use snarkjs::{
     verify_snarkjs_fixtures, SnarkjsProof, SnarkjsVerifyingKey,
 };
 
-mod vote;
-mod stwo;
 mod flock;
 #[cfg(feature = "halo2-kzg")]
 mod halo2_kzg;
+mod stwo;
+mod vote;
+pub use flock::{
+    prove_flock, verify_flock_proof, FlockInstance, FlockVerifyingKey, FLOCK_CURVE_ID,
+    FLOCK_HOST_VERIFY, FLOCK_PROVER_ID,
+};
 #[cfg(feature = "halo2-kzg")]
-pub use halo2_kzg::{Halo2KzgInstance, Halo2KzgVerifyingKey, HALO2_KZG_CURVE_ID, kzg_footer};
+pub use halo2_kzg::{kzg_footer, Halo2KzgInstance, Halo2KzgVerifyingKey, HALO2_KZG_CURVE_ID};
 pub use stwo::{
     verify_stwo_proof, StwoInstance, StwoVerifyingKey, STWO_CURVE_ID, STWO_HOST_VERIFY,
     STWO_PROVER_ID,
 };
-pub use flock::{
-    FlockInstance, FlockVerifyingKey, prove_flock, verify_flock_proof, FLOCK_CURVE_ID,
-    FLOCK_HOST_VERIFY, FLOCK_PROVER_ID,
-};
-pub use vote::{VoteVerifyingKey, VoteInstance, VoteCircuitId};
+pub use vote::{VoteCircuitId, VoteInstance, VoteVerifyingKey};
 
 use crate::{ZkError, ZkResult};
 
 pub trait ConstraintSystemTrait: Send + Sync + std::fmt::Debug + 'static {
-
     fn write(&self) -> ZkResult<()>;
 }
 pub trait VerifyingKeyTrait: Send + Sync + 'static {

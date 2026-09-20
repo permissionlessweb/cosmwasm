@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{error::Error, fs};
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};

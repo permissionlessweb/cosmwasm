@@ -6,13 +6,13 @@
 //! shares the same byte-level serialization format, so we deserialize using
 //! the local fork at verification time.
 
+use group::ff::PrimeField;
 use halo2_proofs::{
     pasta::{EqAffine, Fp},
     plonk::{self, verify_proof, SingleVerifier, VerifyingKey},
     poly::commitment::Params,
     transcript::{Blake2bRead, Challenge255},
 };
-use group::ff::PrimeField;
 use sha2::{Digest, Sha256};
 
 use crate::{CircuitFooter, ZkError, ZkResult};
@@ -39,9 +39,7 @@ impl TryFrom<u8> for VoteCircuitId {
             1 => Ok(VoteCircuitId::Delegation),
             2 => Ok(VoteCircuitId::VoteCommitment),
             3 => Ok(VoteCircuitId::ShareReveal),
-            _ => Err(ZkError::new_err(format!(
-                "invalid VoteCircuitId: {v}"
-            ))),
+            _ => Err(ZkError::new_err(format!("invalid VoteCircuitId: {v}"))),
         }
     }
 }
@@ -115,25 +113,15 @@ impl VoteVerifyingKey {
             .map_err(|e| ZkError::new_err(format!("failed to deserialize CS: {e}")))?;
 
         let empty_selectors: Vec<Vec<bool>> = vec![];
-        let vk = VerifyingKey::<EqAffine>::read_with_cs(
-            &mut vk_reader,
-            &params,
-            cs,
-            empty_selectors,
-        )
-        .map_err(|e| ZkError::new_err(format!("failed to deserialize VK: {e}")))?;
+        let vk =
+            VerifyingKey::<EqAffine>::read_with_cs(&mut vk_reader, &params, cs, empty_selectors)
+                .map_err(|e| ZkError::new_err(format!("failed to deserialize VK: {e}")))?;
 
         let strategy = SingleVerifier::new(&params);
         let mut transcript = Blake2bRead::<_, EqAffine, Challenge255<EqAffine>>::init(proof);
-        verify_proof(
-            &params,
-            &vk,
-            strategy,
-            &[&[public_inputs]],
-            &mut transcript,
-        )
-        // C-06: crypto reject → VerifyFailed (host Ok(1)), not Aborted/VmError.
-        .map_err(|_e| ZkError::VerifyFailed)?;
+        verify_proof(&params, &vk, strategy, &[&[public_inputs]], &mut transcript)
+            // C-06: crypto reject → VerifyFailed (host Ok(1)), not Aborted/VmError.
+            .map_err(|_e| ZkError::VerifyFailed)?;
 
         Ok(())
     }
@@ -149,26 +137,16 @@ impl VoteVerifyingKey {
             .map_err(|e| ZkError::new_err(format!("failed to deserialize CS: {e}")))?;
 
         let empty_selectors: Vec<Vec<bool>> = vec![];
-        let vk = VerifyingKey::<EqAffine>::read_with_cs(
-            &mut vk_reader,
-            &params,
-            cs,
-            empty_selectors,
-        )
-        .map_err(|e| ZkError::new_err(format!("failed to deserialize VK: {e}")))?;
+        let vk =
+            VerifyingKey::<EqAffine>::read_with_cs(&mut vk_reader, &params, cs, empty_selectors)
+                .map_err(|e| ZkError::new_err(format!("failed to deserialize VK: {e}")))?;
 
         let mut proof_reader = proof;
         let strategy = SingleVerifier::new(&params);
         let mut transcript =
             Blake2bRead::<_, EqAffine, Challenge255<EqAffine>>::init(&mut proof_reader);
-        verify_proof(
-            &params,
-            &vk,
-            strategy,
-            &[&[public_inputs]],
-            &mut transcript,
-        )
-        .map_err(|e| ZkError::new_err(format!("proof verification failed: {e}")))?;
+        verify_proof(&params, &vk, strategy, &[&[public_inputs]], &mut transcript)
+            .map_err(|e| ZkError::new_err(format!("proof verification failed: {e}")))?;
 
         if !proof_reader.is_empty() {
             return Err(ZkError::new_err(format!(
@@ -210,8 +188,12 @@ impl TryFrom<&[u8]> for VoteVerifyingKey {
         let vk_body_bytes = bytes[param_len..footer_start].to_vec();
 
         // Determine circuit_id from footer.curve_id (1, 2, or 3)
-        let circuit_id = VoteCircuitId::try_from(footer.curve_id)
-            .map_err(|_| ZkError::new_err(format!("invalid curve_id for vote circuit: {}", footer.curve_id)))?;
+        let circuit_id = VoteCircuitId::try_from(footer.curve_id).map_err(|_| {
+            ZkError::new_err(format!(
+                "invalid curve_id for vote circuit: {}",
+                footer.curve_id
+            ))
+        })?;
 
         Ok(Self {
             circuit_id,
@@ -296,16 +278,29 @@ mod tests {
 
     #[test]
     fn test_vote_circuit_id_try_from() {
-        assert_eq!(VoteCircuitId::try_from(1).unwrap(), VoteCircuitId::Delegation);
-        assert_eq!(VoteCircuitId::try_from(2).unwrap(), VoteCircuitId::VoteCommitment);
-        assert_eq!(VoteCircuitId::try_from(3).unwrap(), VoteCircuitId::ShareReveal);
+        assert_eq!(
+            VoteCircuitId::try_from(1).unwrap(),
+            VoteCircuitId::Delegation
+        );
+        assert_eq!(
+            VoteCircuitId::try_from(2).unwrap(),
+            VoteCircuitId::VoteCommitment
+        );
+        assert_eq!(
+            VoteCircuitId::try_from(3).unwrap(),
+            VoteCircuitId::ShareReveal
+        );
         assert!(VoteCircuitId::try_from(0).is_err());
         assert!(VoteCircuitId::try_from(4).is_err());
     }
 
     #[test]
     fn test_vote_circuit_id_conversion() {
-        let ids = [VoteCircuitId::Delegation, VoteCircuitId::VoteCommitment, VoteCircuitId::ShareReveal];
+        let ids = [
+            VoteCircuitId::Delegation,
+            VoteCircuitId::VoteCommitment,
+            VoteCircuitId::ShareReveal,
+        ];
         let expected = [1u8, 2, 3];
         for (id, exp) in ids.iter().zip(expected.iter()) {
             let val: u8 = (*id).into();
@@ -322,7 +317,11 @@ mod tests {
         let vk_body_bytes = mock_vk_body_bytes();
 
         let vk = VoteVerifyingKey::from_voting_circuit_vk(
-            circuit_id, params_bytes.clone(), vk_body_bytes.clone(), 8, 1,
+            circuit_id,
+            params_bytes.clone(),
+            vk_body_bytes.clone(),
+            8,
+            1,
         );
 
         let footer_bytes: [u8; 80] = vk.footer.to_bytes();
@@ -350,7 +349,11 @@ mod tests {
         let vk_body_bytes = mock_vk_body_bytes();
 
         let vk = VoteVerifyingKey::from_voting_circuit_vk(
-            circuit_id, params_bytes.clone(), vk_body_bytes.clone(), 9, 2,
+            circuit_id,
+            params_bytes.clone(),
+            vk_body_bytes.clone(),
+            9,
+            2,
         );
 
         let footer_bytes: [u8; 80] = vk.footer.to_bytes();
@@ -359,8 +362,8 @@ mod tests {
         serialized.extend_from_slice(&vk_body_bytes);
         serialized.extend_from_slice(&footer_bytes);
 
-        let deserialized = VoteVerifyingKey::try_from(serialized.as_slice())
-            .expect("should deserialize");
+        let deserialized =
+            VoteVerifyingKey::try_from(serialized.as_slice()).expect("should deserialize");
 
         let expected_param_checksum: [u8; 32] = Sha256::digest(&params_bytes).into();
         let expected_vk_checksum: [u8; 32] = Sha256::digest(&vk_body_bytes).into();
