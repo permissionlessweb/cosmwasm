@@ -214,7 +214,7 @@ pub fn kzg_footer(k: u8, i: u8, param_bytes: &[u8], cs_bytes: &[u8], vk_bytes: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use halo2_axiom::plonk::{keygen_pk, keygen_vk, Circuit};
+    use halo2_axiom::plonk::{keygen_pk, keygen_vk};
     use halo2_axiom::poly::commitment::ParamsProver;
     use rand::rngs::OsRng;
 
@@ -256,6 +256,5 @@ mod tests {
         blob.extend_from_slice(&footer.to_bytes());
         let loaded = Halo2KzgVerifyingKey::try_from_blob(&blob).expect("load kzg vk");
         assert_eq!(loaded.footer.curve_id, HALO2_KZG_CURVE_ID);
-        let _ = Circuit::<Fr>::without_witnesses(&builder);
     }
 }

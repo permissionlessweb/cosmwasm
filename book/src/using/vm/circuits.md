@@ -62,6 +62,8 @@ Load prefers split files when both param and vk bodies exist; otherwise falls ba
 - Encode public inputs as concatenated field elements (typically **32 bytes each**).
 - Host builds `AnyInstance` from **`curve_id` in the footer**, so a single `zkid` space can hold circuits on different curves without remapping ids to curve enums.
 
+Product mapping (Flock archives, Stwo lean, Groth16 JWT, vote-sdk, Pasta/Orchard-class): [Curve IDs And Terp Use Cases](./curve-use-cases.md).
+
 ## `#[cosmwasm_circuit]` macro (circuit authors)
 
 The derive/attribute machinery under `packages/vm-derive` helps produce VM-compatible serialization:

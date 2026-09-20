@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog], and this project adheres to [Semantic
 
 (empty)
 
+## [3.1.0-zk] - 2026-09-20
+
+### Added
+
+- Penumbra poseidon377 host (`poseidon377_hash`) over BLS12-377 `decaf377::Fq`, with official rate-1…6 test vectors in crypto + VM imports.
+- Curve use-case mapping (Flock / Stwo / Groth16 / KZG / Pasta / vote-sdk) in the book.
+
+### Changed
+
+- Path A Stwo and Flock verify are fail-closed without the wasmvm host hook (no dummy DSTW / digest stub).
+- Flock host path is `verify_ligerito` (ids `prover_id=3`, `curve_id=7`).
+
 ## [3.0.8] - 2026-05-21
 
 ### Changed

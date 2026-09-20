@@ -1658,6 +1658,8 @@ fn instance_public_input_count(i: &zk_cosmwasm::AnyInstance) -> usize {
         zk_cosmwasm::AnyInstance::Bn254(v) => v.i.len(),
         zk_cosmwasm::AnyInstance::Stwo(v) => v.public_input_count(),
         zk_cosmwasm::AnyInstance::Flock(v) => v.public_input_count(),
+        #[cfg(feature = "halo2-kzg")]
+        zk_cosmwasm::AnyInstance::Halo2Kzg(v) => v.scalars.len(),
     }
 }
 
@@ -3569,6 +3571,68 @@ mod tests {
         );
     }
 
+    /// Penumbra poseidon377 (BLS12-377 `decaf377::Fq`, not BLS12-381) rates 1..=6.
+    /// Domain = LE Fq of `b"Penumbra_TestVec"`; inputs/outputs from the official testvec chain.
+    #[test]
+    #[cfg(feature = "hash-poseidon")]
+    fn do_poseidon377_hash_penumbra_testvecs_rate_1_through_6() {
+        use core::str::FromStr;
+        use poseidon377::Fq;
+
+        const CHAIN: &[&str] = &[
+            "7553885614632219548127688026174585776320152166623257619763178041781456016062",
+            "2337838243217876174544784248400816541933405738836087430664765452605435675740",
+            "4318449279293553393006719276941638490334729643330833590842693275258805886300",
+            "2884734248868891876687246055367204388444877057000108043377667455104051576315",
+            "5235431038142849831913898188189800916077016298531443239266169457588889298166",
+            "66948599770858083122195578203282720327054804952637730715402418442993895152",
+            "6797655301930638258044003960605211404784492298673033525596396177265014216269",
+        ];
+
+        let api = MockApi::default();
+        let (fe, mut store, instance) = make_instance(api);
+        let mut fe_mut = fe.into_mut(&mut store);
+
+        let domain = Fq::from_le_bytes_mod_order(b"Penumbra_TestVec").to_bytes();
+        let domain_ptr = write_data(&mut fe_mut, &domain);
+
+        for rate in 1..=6 {
+            let mut msg = Vec::new();
+            for s in &CHAIN[..rate] {
+                msg.extend_from_slice(&Fq::from_str(s).unwrap().to_bytes());
+            }
+            let expected = Fq::from_str(CHAIN[rate]).unwrap().to_bytes();
+            let inputs_ptr = write_data(&mut fe_mut, &msg);
+            let out_ptr = create_empty(&instance, &mut fe_mut, 32);
+            assert_eq!(
+                do_poseidon377_hash(fe_mut.as_mut(), domain_ptr, inputs_ptr, out_ptr).unwrap(),
+                0,
+                "host poseidon377 rate {rate} must succeed"
+            );
+            assert_eq!(
+                force_read(&mut fe_mut, out_ptr),
+                expected.as_slice(),
+                "host poseidon377 rate {rate} must match Penumbra testvec"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "hash-poseidon")]
+    fn do_poseidon377_hash_bad_arity_returns_1() {
+        let api = MockApi::default();
+        let (fe, mut store, instance) = make_instance(api);
+        let mut fe_mut = fe.into_mut(&mut store);
+        let domain_ptr = write_data(&mut fe_mut, &[0u8; 32]);
+        // Host caps message at 7*32; empty payload is a soft-fail (code 1), not RegionLengthTooBig.
+        let inputs_ptr = write_data(&mut fe_mut, &[]);
+        let out_ptr = create_empty(&instance, &mut fe_mut, 32);
+        assert_eq!(
+            do_poseidon377_hash(fe_mut.as_mut(), domain_ptr, inputs_ptr, out_ptr).unwrap(),
+            1
+        );
+    }
+
     /// RedPallas SpendAuth: reddsa sign → host verify returns 0.
     #[test]
     #[cfg(feature = "redpallas")]
@@ -4225,8 +4289,7 @@ mod tests {
         assert!(inner.is_err(), "missing circuit must be host Err, not Ok(0)");
     }
 
-    /// Circle STWO through the same Path A `proof_instance_verify` as other circuits.
-    /// Dummy DSTW (no STWO_HOST_VERIFY in this crate) + bitflip / missing zkid.
+    /// Circle STWO through Path A. Without STWO_HOST_VERIFY, dummy DSTW is rejected.
     #[test]
     #[cfg(feature = "zk")]
     fn proof_instance_verify_stwo_ok_bad_proof_missing_not_panic() {
@@ -4302,8 +4365,13 @@ mod tests {
                 0,
             )
         }))
-        .expect("no panic on valid DSTW");
-        assert_eq!(ok.expect("format ok"), 0, "valid dummy STWO/DSTW must Ok(0)");
+        .expect("no panic on dummy DSTW");
+        match ok {
+            Ok(1) => {}
+            Err(_) => {}
+            Ok(0) => panic!("dummy DSTW must not Ok(0) without host verifier"),
+            Ok(other) => panic!("unexpected code {other}"),
+        }
 
         let mut bad = dstw.clone();
         bad[14] ^= 1;

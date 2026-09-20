@@ -18,11 +18,13 @@ use halo2_proofs::{
     plonk::{keygen_vk, Circuit},
     poly::commitment::Params,
 };
-use sha2::{Digest, Sha256};
-use zk_cosmwasm::curves::{CurveType, VoteCircuitId, VoteVerifyingKey};
+use zk_cosmwasm::curves::{VoteCircuitId, VoteVerifyingKey};
 
 #[derive(Parser)]
-#[command(name = "export_vk", about = "Export circuit VK to CircuitFooter format")]
+#[command(
+    name = "export_vk",
+    about = "Export circuit VK to CircuitFooter format"
+)]
 struct Args {
     circuit: String,
     #[arg(short, long, default_value = "/tmp/vk.bin")]
@@ -53,7 +55,11 @@ fn export_toy(output: &PathBuf) {
 
     // Toy: curve_id=0 (Pasta, generic), k=4, i=1
     let vote_vk = VoteVerifyingKey::from_voting_circuit_vk(
-        VoteCircuitId::try_from(1).unwrap(), param_bytes, vk_body, 4, 1,
+        VoteCircuitId::try_from(1).unwrap(),
+        param_bytes,
+        vk_body,
+        4,
+        1,
     );
 
     let mut bytes = Vec::new();
@@ -66,7 +72,12 @@ fn export_toy(output: &PathBuf) {
     println!("  k=4, i=1");
 }
 
-fn export_from_files(circuit: &str, output: &PathBuf, params_path: &PathBuf, vk_body_path: &PathBuf) {
+fn export_from_files(
+    circuit: &str,
+    output: &PathBuf,
+    params_path: &PathBuf,
+    vk_body_path: &PathBuf,
+) {
     let param_bytes = std::fs::read(params_path).expect("read params file");
     let vk_body_bytes = std::fs::read(vk_body_path).expect("read vk body file");
 
@@ -77,7 +88,8 @@ fn export_from_files(circuit: &str, output: &PathBuf, params_path: &PathBuf, vk_
         other => panic!("Unknown circuit: {other}"),
     };
 
-    let vote_vk = VoteVerifyingKey::from_voting_circuit_vk(circuit_id, param_bytes, vk_body_bytes, k, i);
+    let vote_vk =
+        VoteVerifyingKey::from_voting_circuit_vk(circuit_id, param_bytes, vk_body_bytes, k, i);
 
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&vote_vk.params_bytes);
@@ -91,55 +103,97 @@ fn export_from_files(circuit: &str, output: &PathBuf, params_path: &PathBuf, vk_
 
 // ── Toy circuit (self-contained, no vote-sdk dependency) ─────────────────
 
-use std::marker::PhantomData;
 use group::ff::Field;
 use halo2_proofs::{
     circuit::{Chip, Layouter, SimpleFloorPlanner, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Instance, Selector},
+    plonk::{Advice, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
 };
+use std::marker::PhantomData;
 
 trait NumericInstructions<F: Field>: Chip<F> {
     type Num;
     fn load_private(&self, layouter: impl Layouter<F>, a: Value<F>) -> Result<Self::Num, Error>;
-    fn mul(&self, layouter: impl Layouter<F>, a: Self::Num, b: Self::Num) -> Result<Self::Num, Error>;
-    fn expose_public(&self, layouter: impl Layouter<F>, num: Self::Num, row: usize) -> Result<(), Error>;
+    fn mul(
+        &self,
+        layouter: impl Layouter<F>,
+        a: Self::Num,
+        b: Self::Num,
+    ) -> Result<Self::Num, Error>;
+    fn expose_public(
+        &self,
+        layouter: impl Layouter<F>,
+        num: Self::Num,
+        row: usize,
+    ) -> Result<(), Error>;
 }
 
 #[derive(Clone, Debug)]
-struct FieldConfig { advice: [Column<Advice>; 2], instance: Column<Instance>, s_mul: Selector }
+struct FieldConfig {
+    advice: [Column<Advice>; 2],
+    instance: Column<Instance>,
+    s_mul: Selector,
+}
 
-struct FieldChip<F: Field> { config: FieldConfig, _marker: PhantomData<F> }
+struct FieldChip<F: Field> {
+    config: FieldConfig,
+    _marker: PhantomData<F>,
+}
 
 impl<F: Field> Chip<F> for FieldChip<F> {
-    type Config = FieldConfig; type Loaded = ();
-    fn config(&self) -> &Self::Config { &self.config }
-    fn loaded(&self) -> &Self::Loaded { &() }
+    type Config = FieldConfig;
+    type Loaded = ();
+    fn config(&self) -> &Self::Config {
+        &self.config
+    }
+    fn loaded(&self) -> &Self::Loaded {
+        &()
+    }
 }
 
 #[derive(Clone)]
 struct Number<F: Field>(halo2_proofs::circuit::AssignedCell<F, F>);
 
 #[derive(Default)]
-struct ToyCircuit<F: Field> { constant: F, a: Value<F>, b: Value<F> }
+struct ToyCircuit<F: Field> {
+    constant: F,
+    a: Value<F>,
+    b: Value<F>,
+}
 
 impl<F: Field> Circuit<F> for ToyCircuit<F> {
     type Config = FieldConfig;
     type FloorPlanner = SimpleFloorPlanner;
-    fn without_witnesses(&self) -> Self { Self::default() }
+    fn without_witnesses(&self) -> Self {
+        Self::default()
+    }
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let advice = [meta.advice_column(), meta.advice_column()];
         let instance = meta.instance_column();
         let constant = meta.fixed_column();
-        meta.enable_equality(instance); meta.enable_constant(constant);
-        for col in &advice { meta.enable_equality(*col); }
+        meta.enable_equality(instance);
+        meta.enable_constant(constant);
+        for col in &advice {
+            meta.enable_equality(*col);
+        }
         let s_mul = meta.selector();
         meta.create_gate("mul", |meta| {
-            vec![meta.query_selector(s_mul) * (meta.query_advice(advice[0], Rotation::cur()) * meta.query_advice(advice[1], Rotation::cur()) - meta.query_advice(advice[0], Rotation::next()))]
+            vec![
+                meta.query_selector(s_mul)
+                    * (meta.query_advice(advice[0], Rotation::cur())
+                        * meta.query_advice(advice[1], Rotation::cur())
+                        - meta.query_advice(advice[0], Rotation::next())),
+            ]
         });
-        FieldConfig { advice, instance, s_mul }
+        FieldConfig {
+            advice,
+            instance,
+            s_mul,
+        }
     }
-    fn synthesize(&self, _config: Self::Config, _layouter: impl Layouter<F>) -> Result<(), Error> { Ok(()) }
+    fn synthesize(&self, _config: Self::Config, _layouter: impl Layouter<F>) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 fn main() {

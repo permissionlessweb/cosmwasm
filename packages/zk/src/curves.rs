@@ -28,7 +28,10 @@ pub use stwo::{
     verify_stwo_proof, StwoInstance, StwoVerifyingKey, STWO_CURVE_ID, STWO_HOST_VERIFY,
     STWO_PROVER_ID,
 };
-pub use flock::{FlockInstance, FlockVerifyingKey, prove_flock, verify_flock_proof, FLOCK_CURVE_ID, FLOCK_PROVER_ID};
+pub use flock::{
+    FlockInstance, FlockVerifyingKey, prove_flock, verify_flock_proof, FLOCK_CURVE_ID,
+    FLOCK_HOST_VERIFY, FLOCK_PROVER_ID,
+};
 pub use vote::{VoteVerifyingKey, VoteInstance, VoteCircuitId};
 
 use crate::{ZkError, ZkResult};
@@ -95,11 +98,16 @@ pub trait ZkCurve: 'static + Clone + Copy + Send + Sync + std::fmt::Debug {
 ///
 /// | ID | Curve | Circuit | Proving system |
 /// |----|-------|---------|---------------|
-/// | 0  | Pasta | Generic Plonkish | Plonkish (Halo2) |
+/// | 0  | Pasta | Generic Plonkish | Plonkish (Halo2 IPA) |
 /// | 1  | Pasta | Vote delegation (ZKP #1) | Plonkish (Halo2) |
 /// | 2  | Pasta | Vote commitment (ZKP #2) | Plonkish (Halo2) |
 /// | 3  | Pasta | Share reveal (ZKP #3) | Plonkish (Halo2) |
-/// | 4  | BN254 | Generic Groth16 | Groth16 |
+/// | 4  | BN254 | Generic Groth16 (snarkjs) | Groth16 |
+/// | 5  | M31 | Lean SSLE / fold | Stwo |
+/// | 6  | BN256 | zkjwt.passkey | Halo2 KZG |
+/// | 7  | Flock | Hash R1CS / archive | Ligerito |
+///
+/// Terp product uses: `crates/cosmwasm/book/src/using/vm/curve-use-cases.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CurveType {
@@ -119,7 +127,7 @@ pub enum CurveType {
     /// BN256 Halo2-axiom KZG / SHPLONK (zkjwt.passkey).
     #[cfg(feature = "halo2-kzg")]
     Bn256Kzg = 6,
-    /// Flock hash-based SNARK (BLAKE3 batches).
+    /// Flock R1CS / Ligerito (host `verify_ligerito`; not a BLAKE3 digest).
     FlockBlake3 = 7,
 }
 

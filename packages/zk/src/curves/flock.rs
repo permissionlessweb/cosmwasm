@@ -1,11 +1,12 @@
 //! Flock host arm (`prover_id=3`, `curve_id=7`).
 //!
-//! Hash-based SNARK option next to Plonkish / Groth16 / Stwo / Halo2-KZG.
-//! Path A: footer-only VK; verify binds **BLAKE3(public instances)** (the
-//! authorized action) inside the VM. Full Succinct Flock batch prover can
-//! replace [`verify_flock_proof`] without changing ids or footer layout.
+//! Path A footer-only VK. **Verify is fail-closed** unless zk-wasmvm installs
+//! [`FLOCK_HOST_VERIFY`], which must call `flock_core::verifier::verify_ligerito`
+//! (single-thread pool). The 72-byte BLAKE3 digest blob is **not** a proof.
 //!
 //! Not `CircuitType::Stwo`. Not Axiom KZG.
+
+use std::sync::OnceLock;
 
 use blake3::Hasher;
 use halo2_proofs::COSMWASM_FOOTER_LENGTH;
@@ -14,6 +15,11 @@ use sha2::{Digest, Sha256};
 use crate::{CircuitFooter, CircuitType, Proof, ZkError, ZkResult};
 
 use super::CurveType;
+
+/// zk-wasmvm installs `flock-core` `verify_ligerito` here. Digest stubs are
+/// rejected. Hook keeps `flock-core` (edition 2024 / rayon) off CosmWasm guest
+/// wasm32 builds.
+pub static FLOCK_HOST_VERIFY: OnceLock<fn(&[u8], &[u8]) -> ZkResult<()>> = OnceLock::new();
 
 /// Footer `prover_id` — [`CircuitType::Flock`].
 pub const FLOCK_PROVER_ID: u8 = CircuitType::Flock as u8;
@@ -120,7 +126,7 @@ pub fn flock_domain_digest(instances: &[u8]) -> [u8; 32] {
         .as_bytes()
 }
 
-/// Host Flock statement: two BLAKE3 compressions over public instances.
+/// Legacy digest blob (not a SNARK). Kept so tests can assert rejection.
 pub fn prove_flock(instances: &[u8]) -> Vec<u8> {
     let mut o = vec![0u8; FLOCK_PROOF_LEN];
     o[0..4].copy_from_slice(FLCK);
@@ -137,30 +143,12 @@ pub fn verify_flock_proof(proof: &[u8], instances: &[u8]) -> ZkResult<()> {
     if proof.len() > 2 * 1024 * 1024 {
         return Err(ZkError::new_err("flock: proof too large"));
     }
-    if proof.len() < FLOCK_PROOF_LEN {
-        return Err(ZkError::new_err("flock: truncated"));
+    if let Some(host) = FLOCK_HOST_VERIFY.get() {
+        return host(proof, instances);
     }
-    if &proof[0..4] != FLCK {
-        return Err(ZkError::VerifyFailed);
-    }
-    if proof[4] != FLOCK_PROVER_ID {
-        return Err(ZkError::new_err("flock: bad prover_id"));
-    }
-    if proof[5] != FLOCK_CURVE_ID {
-        return Err(ZkError::new_err("flock: bad curve_id"));
-    }
-    if proof[6] != VERSION {
-        return Err(ZkError::new_err("flock: bad version"));
-    }
-    let want_act = flock_action_digest(instances);
-    let want_dom = flock_domain_digest(instances);
-    if proof[8..40] != want_act {
-        return Err(ZkError::VerifyFailed);
-    }
-    if proof[40..72] != want_dom {
-        return Err(ZkError::VerifyFailed);
-    }
-    Ok(())
+    Err(ZkError::new_err(
+        "flock: host verifier required (digest stub is not a proof)",
+    ))
 }
 
 #[cfg(test)]
@@ -169,13 +157,10 @@ mod tests {
     use crate::{AnyInstance, AnyVerifyingKey, CircuitType};
 
     #[test]
-    fn flock_roundtrip_action_bind() {
+    fn flock_digest_stub_rejected_without_host() {
         let action = [7u8; 128];
         let proof = prove_flock(&action);
-        assert!(verify_flock_proof(&proof, &action).is_ok());
-        let mut bad = action;
-        bad[96] ^= 1;
-        assert!(verify_flock_proof(&proof, &bad).is_err());
+        assert!(verify_flock_proof(&proof, &action).is_err());
     }
 
     #[test]

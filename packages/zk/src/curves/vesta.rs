@@ -13,8 +13,8 @@ use sha2::{Digest as _, Sha256};
 
 pub(crate) type VestaInstance = CwInstance<VestaAffine>;
 pub(crate) type VestaVerifyingKey = CwVerifyingKey<VestaAffine>;
-pub(crate) type VestaProvingKey = CwProvingKey<VestaAffine>;
-pub(crate) type VestaConstraintSystem = CwConstraintSystem<VestaAffine>;
+pub(crate) type _VestaProvingKey = CwProvingKey<VestaAffine>;
+pub(crate) type _VestaConstraintSystem = CwConstraintSystem<VestaAffine>;
 pub(crate) type VestaParams = CwCircuitParam<VestaAffine>;
 
 impl TryFrom<halo2_proofs::poly::commitment::Params<vesta::Affine>> for VestaParams {

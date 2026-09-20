@@ -67,7 +67,7 @@ pub struct CwCircuitParam<C: ZkCurve> {
 /// The circuit constraint system
 #[derive(Debug)]
 pub struct CwConstraintSystem<C: ZkCurve> {
-    pub(crate) cs: C::ConstraintSystem,
+    pub(crate) _cs: C::ConstraintSystem,
 }
 
 /// A verifying key for any supported curve/circuit.

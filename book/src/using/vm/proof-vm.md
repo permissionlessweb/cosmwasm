@@ -274,14 +274,33 @@ Footer field `curve_id` routes `proof_instance_verify` (independent of app `zkid
     <tr class="api-new">
       <td><code>4</code> <span class="badge-new">NEW</span></td>
       <td>BN254 (alt_bn128)</td>
-      <td>Generic Groth16</td>
+      <td>Generic Groth16 (snarkjs / circom)</td>
       <td>Groth16 (feature <code>bn254</code>)</td>
+    </tr>
+    <tr class="api-new">
+      <td><code>5</code> <span class="badge-new">NEW</span></td>
+      <td>M31</td>
+      <td>Lean SSLE / fold / valset</td>
+      <td>Stwo Circle STARK</td>
+    </tr>
+    <tr class="api-new">
+      <td><code>6</code> <span class="badge-new">NEW</span></td>
+      <td>BN256</td>
+      <td>zkjwt.passkey</td>
+      <td>Halo2 KZG / SHPLONK (feature <code>halo2-kzg</code>)</td>
+    </tr>
+    <tr class="api-new">
+      <td><code>7</code> <span class="badge-new">NEW</span></td>
+      <td>Flock (hash / GF(2))</td>
+      <td>Hash-chain / archive attestation</td>
+      <td>Flock Ligerito (`verify_ligerito`)</td>
     </tr>
   </tbody>
   <caption>
     Defined as <code>CurveType</code> in <code>packages/zk</code>. Host BN254
     precompiles (<code>bn254_*</code>) share the same curve family as id
     <code>4</code> but are separate entrypoints from proof verification.
+    Terp product mapping: <a href="./curve-use-cases.md">Curve IDs And Terp Use Cases</a>.
   </caption>
 </table>
 

@@ -91,41 +91,44 @@ mod tests {
     use super::*;
     use core::str::FromStr;
 
-    /// Official poseidon377 crate test vector (rate_1).
-    #[test]
-    fn rate1_penumbra_testvec() {
-        let domain_sep = Fq::from_le_bytes_mod_order(b"Penumbra_TestVec");
-        let input = Fq::from_str(
-            "7553885614632219548127688026174585776320152166623257619763178041781456016062",
-        )
-        .unwrap();
-        let expected = Fq::from_str(
-            "2337838243217876174544784248400816541933405738836087430664765452605435675740",
-        )
-        .unwrap();
+    /// Penumbra poseidon377 spec vectors (capacity 1, domain `Penumbra_TestVec` as LE Fq).
+    /// Rate n uses the first n inputs; output is the next element in the chain.
+    /// Source: Penumbra Poseidon377 test vectors (BLS12-377 scalar / `decaf377::Fq`, not BLS12-381).
+    const PENUMBRA_CHAIN: &[&str] = &[
+        "7553885614632219548127688026174585776320152166623257619763178041781456016062",
+        "2337838243217876174544784248400816541933405738836087430664765452605435675740",
+        "4318449279293553393006719276941638490334729643330833590842693275258805886300",
+        "2884734248868891876687246055367204388444877057000108043377667455104051576315",
+        "5235431038142849831913898188189800916077016298531443239266169457588889298166",
+        "66948599770858083122195578203282720327054804952637730715402418442993895152",
+        "6797655301930638258044003960605211404784492298673033525596396177265014216269",
+    ];
 
-        let out = poseidon377_hash(&domain_sep.to_bytes(), &[input.to_bytes()]).unwrap();
-        assert_eq!(out, expected.to_bytes());
+    fn fq(s: &str) -> Fq {
+        Fq::from_str(s).unwrap()
+    }
+
+    fn domain() -> [u8; 32] {
+        Fq::from_le_bytes_mod_order(b"Penumbra_TestVec").to_bytes()
     }
 
     #[test]
-    fn rate2_penumbra_testvec() {
-        let domain_sep = Fq::from_le_bytes_mod_order(b"Penumbra_TestVec");
-        let a = Fq::from_str(
-            "7553885614632219548127688026174585776320152166623257619763178041781456016062",
-        )
-        .unwrap();
-        let b = Fq::from_str(
-            "2337838243217876174544784248400816541933405738836087430664765452605435675740",
-        )
-        .unwrap();
-        let expected = Fq::from_str(
-            "4318449279293553393006719276941638490334729643330833590842693275258805886300",
-        )
-        .unwrap();
-
-        let out = poseidon377_hash(&domain_sep.to_bytes(), &[a.to_bytes(), b.to_bytes()]).unwrap();
-        assert_eq!(out, expected.to_bytes());
+    fn penumbra_testvecs_rate_1_through_6() {
+        let d = domain();
+        for rate in 1..=6 {
+            let inputs: Vec<[u8; 32]> = PENUMBRA_CHAIN[..rate]
+                .iter()
+                .map(|s| fq(s).to_bytes())
+                .collect();
+            let expected = fq(PENUMBRA_CHAIN[rate]).to_bytes();
+            let out = poseidon377_hash(&d, &inputs).unwrap();
+            assert_eq!(out, expected, "poseidon377 rate {rate} mismatch (want Penumbra Fq / BLS12-377)");
+            let mut concat = Vec::new();
+            for e in &inputs {
+                concat.extend_from_slice(e);
+            }
+            assert_eq!(poseidon377_hash_bytes(&d, &concat).unwrap(), expected);
+        }
     }
 
     #[test]

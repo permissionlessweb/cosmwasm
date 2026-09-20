@@ -34,6 +34,12 @@ bn254 = [
 # Default OFF — no accelerator deps until G2 wires them under this feature only.
 # See docs/research/gpu-accel/DESIGN-G1-verifier-backend.md
 gpu = []
+# Axiom Halo2 KZG / SHPLONK on BN256 (curve_id 6; e.g. zkjwt passkey).
+# Default OFF — pulls halo2-axiom + halo2-base; host-side only, do not enable
+# for CosmWasm guest wasm32 builds (axiom enables multicore via halo2-base).
+# halo2_proofs/multicore keeps PSE batch.rs in sync with maybe-rayon/threads,
+# which halo2-base turns on transitively (mixed on/off fails to compile).
+halo2-kzg = ["dep:halo2-axiom", "dep:halo2-base", "halo2_proofs/multicore"]
 
 [dependencies]
 ark-bn254 = { version = "0.5.0", optional = true, default-features = false, features = ["curve"] }
@@ -62,6 +68,10 @@ thiserror = "1.0.26"
 # Guest wasm: never enable halo2_proofs default (batch+multicore) — multicore breaks wasm32.
 halo2_gadgets = { path = "../../../zcash/halo2/halo2_gadgets", default-features = false }
 halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs", default-features = false, features = ["batch"] }
+# Axiom KZG backend for `halo2-kzg` (curve_id 6). Same wasm32 rule as above:
+# no multicore — host-side verify only.
+halo2-axiom = { package = "halo2-axiom", path = "../../../halo2-axiom/halo2_proofs", version = "0.5.1", optional = true, default-features = false, features = ["batch", "circuit-params"] }
+halo2-base = { package = "halo2-base", path = "../../../zcash/halo2-lib/halo2-base", version = "0.4.1", optional = true, default-features = false, features = ["halo2-axiom"] }
 sha2 = "0.10"
 blake3 = "1"
 

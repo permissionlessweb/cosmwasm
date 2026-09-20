@@ -10,7 +10,10 @@ pub use errors::{ZkError, ZkResult};
 pub use {
     backend::{select_backend, CpuBackend, SelectedBackend, VerifierBackend, VerifyItem},
     circuits::{AnyInstance, AnyVerifyingKey, CircuitType, CosmwasmCircuit, Proof, SerializedCircuitData},
-    curves::{StwoInstance, StwoVerifyingKey, ZkCurve, STWO_HOST_VERIFY},
+    curves::{
+        prove_flock, verify_flock_proof, StwoInstance, StwoVerifyingKey, ZkCurve, FLOCK_HOST_VERIFY,
+        STWO_HOST_VERIFY,
+    },
     footer::CircuitFooter,
 };
 

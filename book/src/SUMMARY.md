@@ -12,6 +12,7 @@
 - [Proof VM](using/vm/proof-vm.md)
 - [Architecture](using/vm/architecture.md)
 - [Circuits And Verifying Keys](using/vm/circuits.md)
+- [Curve IDs And Terp Use Cases](using/vm/curve-use-cases.md)
 - [Storage And Caching](using/vm/storage-caching.md)
 - [Gas And Capabilities](using/vm/gas-capabilities.md)
 
