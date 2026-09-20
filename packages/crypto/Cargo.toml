@@ -35,7 +35,7 @@ cosmwasm-crypto-bn254 = { path = "../../../junoclaw/wasmvm-fork/cosmwasm-crypto-
 blake2 = { version = "0.10", optional = true, default-features = false }
 blake3 = { version = "1.5", optional = true, default-features = false }
 # Zcash / Halo2 Poseidon (P128Pow5T3) over Pasta pallas/vesta base fields.
-halo2_poseidon = { path = "../../../zcash/halo2/halo2_poseidon", optional = true }
+halo2_poseidon = { git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303", optional = true }
 pasta_curves = { version = "0.5", optional = true }
 # Penumbra Poseidon over BLS12-377 scalar field (decaf377::Fq).
 poseidon377 = { version = "1.2.0", optional = true, default-features = false, features = ["arkworks"] }

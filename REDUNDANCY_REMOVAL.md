@@ -1,5 +1,5 @@
 Analysis of Redundancies in ZK Circuit Serialization Parameters
-After thoroughly reviewing the /Users/returniflost/zk-cosmwasm/mvp/ZK_CIRCUIT_SERIALIZATION_FORMAT.md specification and comparing it with the implementation in suite.rs and cosmwasm_circuit.rs, I've identified several redundancies in the parameters assigned across the footer metadata and constraint system sections.
+After thoroughly reviewing the ZK_CIRCUIT_SERIALIZATION_FORMAT.md specification and comparing it with the implementation in suite.rs and cosmwasm_circuit.rs, I've identified several redundancies in the parameters assigned across the footer metadata and constraint system sections.
 Identified Redundancies
 The current Version 2 format intentionally includes "quick reference" fields in the footer for performance (validation without full CS deserialization), but this creates redundancy since the full constraint system now contains the same information:
 
