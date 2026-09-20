@@ -1,6 +1,6 @@
 [package]
 name = "zk-cosmwasm-hosts"
-version = "3.1.0-zk"
+version = "4.0.0-zk"
 edition = "2021"
 publish = false
 description = "Host-only Stwo/Flock Path A verifiers for zk-cosmwasm (not a CosmWasm workspace member)"

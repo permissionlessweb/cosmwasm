@@ -4,20 +4,24 @@ The format is based on [Keep a Changelog], and this project adheres to [Semantic
 
 ## [Unreleased]
 
+(empty)
+
+## [4.0.0-zk] - 2026-09-20
+
 ### Changed
 
-- Pasta Halo2 (`halo2_proofs` / gadgets / poseidon / pasta_curves) now pins
-  `zakura-halo2-*` from `permissionlessweb/common` (`5364d3d`). Path A footer
-  length lives in `zk-cosmwasm` (`COSMWASM_FOOTER_LENGTH`), not halo2.
-  Axiom KZG is unchanged.
+- **Breaking:** Path A dummy Flock digest / DSTW Stwo proofs are rejected. Hosts are `zk-cosmwasm-hosts` (`verify_ligerito`, pinned Stwo).
+- **Breaking:** Pasta Halo2 is `zakura-halo2-*` (`permissionlessweb/common` `5364d3d`). VK artifacts omit selector matrices. Footer length is `zk_cosmwasm::COSMWASM_FOOTER_LENGTH`.
+- rust-version **1.91**. In-tree `packages/crypto-bn254`.
+
+### Added
+
+- `ConstraintSystem` / `VerifyingKey` / `ProvingKey` artifact codec via zakura-halo2-proofs (`read_with_cs` / `write`).
+- Penumbra poseidon377 vectors (rates 1–6) on the host import.
 
 ### Fixed
 
-- Vendor `cosmwasm-crypto-bn254` at `packages/crypto-bn254` so Cargo never walks to `junoclaw/wasmvm-fork` (CI was failing on `/home/runner/work/cosmwasm/junoclaw/...`). Exclude `zk-vote-bridge` from the workspace (vote-sdk path). CI toolchain 1.87.0.
-
-### Changed
-
-- Stwo and Flock Path A verifiers live in `packages/zk-hosts` (`zk-cosmwasm-hosts`), excluded from the CosmWasm workspace (stwo vs vote-sdk `crypto-common`). Hooks remain on `zk-cosmwasm`; libwasmvm calls `zk_cosmwasm_hosts::install()` at cache init.
+- Vendor `cosmwasm-crypto-bn254` at `packages/crypto-bn254` so CI never walks to `junoclaw/wasmvm-fork`. Exclude `zk-vote-bridge` from the workspace.
 
 ## [3.1.0-zk] - 2026-09-20
 
