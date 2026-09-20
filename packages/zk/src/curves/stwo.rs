@@ -2,8 +2,8 @@
 //!
 //! Path A: `proof_instance_verify(zkid, proof, instances)` loads a footer-only
 //! VK (`curve_id=5`). **Verify is fail-closed** unless zk-wasmvm installs
-//! [`STWO_HOST_VERIFY`] (pinned `stwo::core::verifier::verify`). Dummy DSTW /
-//! 18-byte `c=3a+5b+7` blobs are not proofs.
+//! [`STWO_HOST_VERIFY`] (installed by [`crate::install_path_a_hosts`] from
+//! `host::stwo`). Dummy DSTW / 18-byte `c=3a+5b+7` blobs are not proofs.
 //! Not `CircuitType::Stark`.
 
 use std::sync::OnceLock;

@@ -1,7 +1,7 @@
 //! Flock host arm (`prover_id=3`, `curve_id=7`).
 //!
 //! Path A footer-only VK. **Verify is fail-closed** unless zk-wasmvm installs
-//! [`FLOCK_HOST_VERIFY`], which must call `flock_core::verifier::verify_ligerito`
+//! [`FLOCK_HOST_VERIFY`] (`host::flock` / `flock_core::verify_ligerito`)
 //! (single-thread pool). The 72-byte BLAKE3 digest blob is **not** a proof.
 //!
 //! Not `CircuitType::Stwo`. Not Axiom KZG.

@@ -1,6 +1,6 @@
 [workspace]
 members = ["packages/*"]
-exclude = ["contracts"]
+exclude = ["contracts", "packages/zk-hosts"]
 
 resolver = "2"
 

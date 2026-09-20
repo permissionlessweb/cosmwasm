@@ -30,7 +30,7 @@ mod wasm_backend;
 pub mod zk;
 
 #[cfg(feature = "zk")]
-pub use zk_cosmwasm::{self};
+pub use zk_cosmwasm::{self, install_path_a_hosts};
 
 #[cfg(feature = "zk")]
 pub use crate::zk::{check_circuit, AnyInstance, AnyVerifyingKey, Proof, SerializedCircuitData};

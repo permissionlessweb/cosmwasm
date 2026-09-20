@@ -4,7 +4,9 @@ The format is based on [Keep a Changelog], and this project adheres to [Semantic
 
 ## [Unreleased]
 
-(empty)
+### Changed
+
+- Stwo and Flock Path A verifiers live in `packages/zk-hosts` (`zk-cosmwasm-hosts`), excluded from the CosmWasm workspace (stwo vs vote-sdk `crypto-common`). Hooks remain on `zk-cosmwasm`; libwasmvm calls `zk_cosmwasm_hosts::install()` at cache init.
 
 ## [3.1.0-zk] - 2026-09-20
 
