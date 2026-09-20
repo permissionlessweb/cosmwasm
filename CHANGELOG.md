@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog], and this project adheres to [Semantic
 ### Changed
 
 - Pasta Halo2 (`halo2_proofs` / gadgets / poseidon / pasta_curves) now pins
-  `zakura-halo2-*` from `permissionlessweb/common` (`5f4f6c5`). Path A footer
+  `zakura-halo2-*` from `permissionlessweb/common` (`5364d3d`). Path A footer
   length lives in `zk-cosmwasm` (`COSMWASM_FOOTER_LENGTH`), not halo2.
   Axiom KZG is unchanged.
 
