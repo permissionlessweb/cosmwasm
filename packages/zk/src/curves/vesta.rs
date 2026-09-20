@@ -168,13 +168,7 @@ impl VestaVerifyingKey {
         p: VestaParams,
     ) -> ZkResult<Self> {
         let cs = plonk::ConstraintSystem::read(&mut reader)?;
-        let _guard = CsBlueprintGuard::install(CsBlueprint {
-            num_fixed_columns: cs.num_fixed_columns() as u8,
-            num_advice_columns: cs.num_advice_columns() as u8,
-            num_instance_columns: cs.num_instance_columns() as u8,
-            num_selectors: cs.num_selectors() as u32,
-            permutation_columns: cs.permutation_columns(),
-        });
+        let _guard = CsBlueprintGuard::install(CsBlueprint::from_cs(&cs)?);
 
         let vk = halo2_proofs::plonk::VerifyingKey::read_with_cs::<std::io::Cursor<&[u8]>>(
             &mut reader,

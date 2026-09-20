@@ -128,12 +128,16 @@ impl CodeGenerator {
                 let _ = <#circuit_name as Circuit<pasta_curves::vesta::Scalar>>::configure(&mut cs);
 
                 // Extract metadata from the configured constraint system
-                let num_fixed_columns = cs.num_fixed_columns() as u32;
-                let num_advice_columns = cs.num_advice_columns() as u32;
-                let num_instance_columns = cs.num_instance_columns() as u32;
-                let num_selectors = cs.num_selectors() as u32;
-                let num_gates = cs.gate_count() as u32;
-                let degree = cs.degree() as u8;
+                let num_fixed_columns = u32::try_from(cs.num_fixed_columns())
+                    .expect("fixed column count exceeds u32");
+                let num_advice_columns = u32::try_from(cs.num_advice_columns())
+                    .expect("advice column count exceeds u32");
+                let num_instance_columns = u32::try_from(cs.num_instance_columns())
+                    .expect("instance column count exceeds u32");
+                let num_selectors = u32::try_from(cs.num_selectors())
+                    .expect("selector count exceeds u32");
+                let num_gates = u32::try_from(cs.gate_count()).expect("gate count exceeds u32");
+                let degree = u8::try_from(cs.degree()).expect("cs degree exceeds u8");
                 let has_lookups = cs.has_lookups();
                 let permutation_columns = cs.permutation_columns();
 

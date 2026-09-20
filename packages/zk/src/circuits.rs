@@ -457,6 +457,31 @@ pub struct CsBlueprint {
     pub permutation_columns: Vec<plonk::Column<plonk::Any>>,
 }
 
+impl CsBlueprint {
+    /// Fail closed if a column count does not fit the stored widths (`u8` / `u32`).
+    pub fn from_cs<F: halo2_proofs::arithmetic::Field>(
+        cs: &plonk::ConstraintSystem<F>,
+    ) -> ZkResult<Self> {
+        fn u8_count(n: usize, what: &str) -> ZkResult<u8> {
+            u8::try_from(n).map_err(|_| {
+                ZkError::format_err(format!("{what} count {n} exceeds u8 (255)"))
+            })
+        }
+        Ok(Self {
+            num_fixed_columns: u8_count(cs.num_fixed_columns(), "fixed")?,
+            num_advice_columns: u8_count(cs.num_advice_columns(), "advice")?,
+            num_instance_columns: u8_count(cs.num_instance_columns(), "instance")?,
+            num_selectors: u32::try_from(cs.num_selectors()).map_err(|_| {
+                ZkError::format_err(format!(
+                    "selector count {} exceeds u32",
+                    cs.num_selectors()
+                ))
+            })?,
+            permutation_columns: cs.permutation_columns(),
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SerializedCircuitData {
     pub body: Vec<u8>,

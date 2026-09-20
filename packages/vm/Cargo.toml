@@ -78,7 +78,7 @@ wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
 
-halo2_proofs = { package = "zakura-halo2-proofs", git = "https://github.com/permissionlessweb/common", rev = "7703e9eb21bdec5cd8bf4e17ec68e9f0d164807c", default-features = false, features = ["batch"] }
+halo2_proofs = { package = "zakura-halo2-proofs", git = "https://github.com/permissionlessweb/common", rev = "5f4f6c55b425716daa5006145867ad4c5d3800fd", default-features = false, features = ["batch"] }
 zk-cosmwasm  = { workspace = true, default-features = false, features = ["interface"], optional = true }
 
 tracing = "0.1.38"
