@@ -44,6 +44,11 @@ pub enum SystemError {
         /// The code ID that is missing
         code_id: u64,
     },
+    /// A Wasm code was not found.
+    NoSuchCircuit {
+        /// The circuit ID that is missing
+        zk_id: u64,
+    },
     Unknown {},
     UnsupportedRequest {
         kind: String,
@@ -71,6 +76,7 @@ impl core::fmt::Display for SystemError {
             SystemError::UnsupportedRequest { kind } => {
                 write!(f, "Unsupported query type: {kind}")
             }
+            SystemError::NoSuchCircuit { zk_id } => write!(f, "No such circuit: {zk_id}"),
         }
     }
 }

@@ -22,6 +22,8 @@ pub use mock::{
     mock_wasmd_attr, BankQuerier, Envs, EnvsOptions, MockApi, MockQuerier,
     MockQuerierCustomHandlerResult, MOCK_CONTRACT_ADDR,
 };
+#[cfg(feature = "zk")]
+pub use mock::{clear_test_circuits, register_test_circuit};
 #[cfg(feature = "ibc2")]
 pub use mock::{
     mock_ibc2_packet_ack, mock_ibc2_packet_recv, mock_ibc2_packet_send, mock_ibc2_packet_timeout,

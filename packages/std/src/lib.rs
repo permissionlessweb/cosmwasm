@@ -50,7 +50,6 @@ mod utils;
 
 /// This module is to simplify no_std imports
 pub(crate) mod prelude;
-
 /// This modules is very advanced and will not be used directly by the vast majority of users.
 /// We want to offer it to ensure a stable storage key composition system but don't encourage
 /// contract devs to use it directly.
@@ -106,6 +105,9 @@ pub use crate::query::{
     GrpcQuery, IbcQuery, PortIdResponse, QueryRequest, RawRangeEntry, RawRangeResponse,
     StakingQuery, SupplyResponse, Validator, ValidatorMetadata, ValidatorResponse, WasmQuery,
 };
+
+#[cfg(feature = "zk")]
+pub use crate::query::{CircuitInfoResponse, CircuitResponse};
 
 #[cfg(all(feature = "stargate", feature = "cosmwasm_1_2"))]
 pub use crate::results::WeightedVoteOption;

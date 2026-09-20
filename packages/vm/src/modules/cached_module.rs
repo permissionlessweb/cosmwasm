@@ -7,6 +7,14 @@ pub fn engine_size_estimate() -> usize {
     10 * 1024
 }
 
+// NEW: A unified entry type so modules and circuits can share one LRU cache
+#[derive(Debug)]
+pub enum CacheEntry {
+    Module(CachedModule),
+    Circuit(CachedCircuit),
+    Param(CachedParam),
+}
+
 #[derive(Debug, Clone)]
 pub struct CachedModule {
     pub module: Module,
@@ -27,4 +35,29 @@ pub struct CachedModule {
     /// Some manual tests on Simon's machine showed that Engine is roughly 3-5 KB big, so give it a constant
     /// estimate: [`engine_size_estimate`].
     pub size_estimate: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedCircuit {
+    pub vk: zk_cosmwasm::AnyVerifyingKey,
+    pub size_estimate: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedParam {
+    /// Raw commitment-parameter bytes (not a verifying key).
+    /// Boxed slice: immutable after insert (no Vec capacity waste).
+    pub params: Box<[u8]>,
+    pub size_estimate: usize,
+}
+
+impl CachedParam {
+    pub fn from_bytes(params: impl Into<Box<[u8]>>) -> Self {
+        let params = params.into();
+        let size_estimate = params.len();
+        Self {
+            params,
+            size_estimate,
+        }
+    }
 }
