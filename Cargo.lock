@@ -1180,7 +1180,7 @@ dependencies = [
  "english-numbers",
  "glob",
  "group",
- "halo2_poseidon 0.1.0",
+ "halo2_poseidon 0.1.0 (git+https://github.com/permissionlessweb/halo2?rev=362ca361477bea76e30507b6f731a3abd5e85303)",
  "hex",
  "hex-literal",
  "k256",
@@ -2365,12 +2365,13 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.4.0"
+source = "git+https://github.com/permissionlessweb/halo2?rev=362ca361477bea76e30507b6f731a3abd5e85303#362ca361477bea76e30507b6f731a3abd5e85303"
 dependencies = [
  "arrayvec",
  "bitvec",
  "ff",
  "group",
- "halo2_poseidon 0.1.0",
+ "halo2_poseidon 0.1.0 (git+https://github.com/permissionlessweb/halo2?rev=362ca361477bea76e30507b6f731a3abd5e85303)",
  "halo2_proofs 0.3.2",
  "lazy_static",
  "pasta_curves",
@@ -2409,16 +2410,6 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.1.0"
-dependencies = [
- "bitvec",
- "ff",
- "group",
- "pasta_curves",
-]
-
-[[package]]
-name = "halo2_poseidon"
-version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa3da60b81f02f9b33ebc6252d766f843291fb4d2247a07ae73d20b791fc56f"
 dependencies = [
@@ -2429,8 +2420,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "halo2_poseidon"
+version = "0.1.0"
+source = "git+https://github.com/permissionlessweb/halo2?rev=362ca361477bea76e30507b6f731a3abd5e85303#362ca361477bea76e30507b6f731a3abd5e85303"
+dependencies = [
+ "bitvec",
+ "ff",
+ "group",
+ "pasta_curves",
+]
+
+[[package]]
 name = "halo2_proofs"
 version = "0.3.2"
+source = "git+https://github.com/permissionlessweb/halo2?rev=362ca361477bea76e30507b6f731a3abd5e85303#362ca361477bea76e30507b6f731a3abd5e85303"
 dependencies = [
  "blake2b_simd",
  "digest 0.10.7",
