@@ -634,7 +634,8 @@ mod tests {
     use cosmwasm_std::{
         coin, coins, from_json, to_json_vec, BalanceResponse, BankQuery, Empty, QueryRequest,
     };
-    use wasmer::{imports, Function, Instance as WasmerInstance, Store};
+    use crate::wasm_backend::MAX_WASM_CALL_DEPTH;
+    use wasmer::{imports, Function, Instance as WasmerInstance, Module, Store, Value};
 
     static HACKATOM: &[u8] = include_bytes!("../testdata/hackatom.wasm");
 
@@ -924,6 +925,38 @@ mod tests {
         // change back
         env.set_storage_readonly(true);
         assert!(env.is_storage_readonly());
+    }
+
+    /// `testdata/call_depth_recurse.wat` on the production engine.
+    /// go(1023) and go(1024) succeed. go(1025) returns `CallDepthExceeded`.
+    #[test]
+    fn call_depth_recurse_contract_returns_call_depth_exceeded() {
+        let wasm = wat::parse_str(include_str!("../testdata/call_depth_recurse.wat")).unwrap();
+        let engine = crate::wasm_backend::make_compiling_engine(TESTING_MEMORY_LIMIT, None);
+        let mut store = Store::new(engine);
+        let module = Module::new(&store, &wasm).unwrap();
+        let instance = Box::from(WasmerInstance::new(&mut store, &module, &imports! {}).unwrap());
+        let env: Environment<MockApi, MockStorage, MockQuerier> =
+            Environment::new(MockApi::default(), TESTING_GAS_LIMIT);
+        env.set_wasmer_instance(Some(NonNull::from(instance.as_ref())));
+        env.set_gas_left(&mut store, TESTING_GAS_LIMIT);
+
+        env.call_function0(
+            &mut store,
+            "go",
+            &[Value::I32(MAX_WASM_CALL_DEPTH - 1)],
+        )
+        .expect("MAX-1");
+        env.call_function0(&mut store, "go", &[Value::I32(MAX_WASM_CALL_DEPTH)])
+            .expect("MAX");
+        let err = env
+            .call_function0(
+                &mut store,
+                "go",
+                &[Value::I32(MAX_WASM_CALL_DEPTH + 1)],
+            )
+            .expect_err("MAX+1");
+        assert_eq!(err.to_string(), "CallDepthExceeded");
     }
 
     #[test]
