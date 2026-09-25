@@ -192,23 +192,10 @@ mod tests {
         compiler.into()
     }
 
-    /// `go(n)` places `n` Wasm activations on the stack, including itself.
+    /// `packages/vm/testdata/call_depth_recurse.wat`: go(n) places n activations
+    /// on the stack, including the export.
     fn recurse_wat() -> &'static str {
-        r#"
-        (module
-          (func (export "go") (param i32)
-            local.get 0
-            i32.const 1
-            i32.le_s
-            if
-              return
-            end
-            local.get 0
-            i32.const 1
-            i32.sub
-            call 0)
-        )
-        "#
+        include_str!("../../testdata/call_depth_recurse.wat")
     }
 
     fn call_go(max: i32, n: i32) -> Result<(), String> {
@@ -234,7 +221,9 @@ mod tests {
     }
 
     #[test]
-    fn max_minus_one_and_max_succeed_max_plus_one_traps() {
+    fn call_depth_recurse_contract_max_boundary() {
+        // Smaller than production 1024 so the test stays fast. The contract
+        // and the trap are the same ones production uses.
         const MAX: i32 = 64;
         call_go(MAX, MAX - 1).expect("MAX-1");
         call_go(MAX, MAX).expect("MAX");
