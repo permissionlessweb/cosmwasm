@@ -1,3 +1,4 @@
+use super::call_depth::{CallDepth, MAX_WASM_CALL_DEPTH};
 use super::Gatekeeper;
 use super::LimitingTunables;
 use super::{is_branching_operator, Metering};
@@ -66,6 +67,8 @@ pub fn make_compiling_engine(
     compiler.canonicalize_nans(true);
     compiler.push_middleware(deterministic);
     compiler.push_middleware(metering);
+    // After metering so the injected integer ops are not a gas-rule change.
+    compiler.push_middleware(Arc::new(CallDepth::new(MAX_WASM_CALL_DEPTH)));
     let mut engine: Engine = compiler.into();
     if let Some(limit) = memory_limit {
         let base = BaseTunables::for_target(&Target::default());

@@ -12,6 +12,7 @@ use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, M
 
 use crate::backend::{BackendApi, GasInfo, Querier, Storage};
 use crate::errors::{VmError, VmResult};
+use crate::wasm_backend::CALL_DEPTH_EXCEEDED_GLOBAL;
 
 /// Keep this as low as necessary to avoid deepy nested errors like this:
 ///
@@ -374,16 +375,19 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
             return Err(VmError::function_arity_mismatch(function_arity));
         };
         self.increment_call_depth()?;
-        let res = func.call(store, args).map_err(|runtime_err| -> VmError {
-            self.with_wasmer_instance::<_, Never>(|instance| {
-                let err: VmError = match get_remaining_points(store, instance) {
+        let res = match func.call(store, args) {
+            Ok(values) => Ok(values),
+            Err(runtime_err) => Err(self.with_wasmer_instance::<_, Never>(|instance| {
+                if Self::wasm_call_depth_exceeded(store, instance) {
+                    return Err(VmError::call_depth_exceeded());
+                }
+                let err = match get_remaining_points(store, instance) {
                     MeteringPoints::Remaining(_) => VmError::from(runtime_err),
                     MeteringPoints::Exhausted => VmError::gas_depletion(),
                 };
                 Err(err)
-            })
-            .unwrap_err() // with_wasmer_instance can only succeed if the callback succeeds
-        });
+            }).unwrap_err()),
+        };
         self.decrement_call_depth();
         res
     }
@@ -455,6 +459,13 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
             context_data.storage_readonly = new_value;
         })
     }
+
+fn wasm_call_depth_exceeded(store: &mut impl AsStoreMut, instance: &WasmerInstance) -> bool {
+    let Ok(global) = instance.exports.get_global(CALL_DEPTH_EXCEEDED_GLOBAL) else {
+        return false;
+    };
+    matches!(global.get(store), Value::I32(1))
+}
 
     /// Increments the call depth by 1 and returns the new value
     pub fn increment_call_depth(&self) -> VmResult<usize> {

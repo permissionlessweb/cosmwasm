@@ -69,7 +69,8 @@ use super::CachedModule;
 ///   Module compatibility between Wasmer versions is not guaranteed.
 /// - **v21**:<br>
 ///   New version because of additional gas charging for function locals.
-const MODULE_SERIALIZATION_VERSION: &str = "v22";
+/// v23: logical Wasm call-depth middleware. Old cached modules lack the counter.
+const MODULE_SERIALIZATION_VERSION: &str = "v23";
 
 /// Function that actually does the heavy lifting of creating the module version discriminator.
 ///

@@ -91,6 +91,10 @@ pub enum VmError {
     WriteAccessDenied { backtrace: BT },
     #[error("Maximum call depth exceeded.")]
     MaxCallDepthExceeded { backtrace: BT },
+    /// Wasm function activations exceeded [`crate::wasm_backend::MAX_WASM_CALL_DEPTH`].
+    /// Distinct from [`VmError::MaxCallDepthExceeded`], which is host re-entry.
+    #[error("CallDepthExceeded")]
+    CallDepthExceeded { backtrace: BT },
     #[error(
         "The called function args arity does not match. The contract's method arity: {}",
         contract_method_arity
@@ -260,6 +264,12 @@ impl VmError {
 
     pub(crate) fn max_call_depth_exceeded() -> Self {
         VmError::MaxCallDepthExceeded {
+            backtrace: BT::capture(),
+        }
+    }
+
+    pub(crate) fn call_depth_exceeded() -> Self {
+        VmError::CallDepthExceeded {
             backtrace: BT::capture(),
         }
     }
