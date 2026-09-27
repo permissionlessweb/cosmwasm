@@ -403,6 +403,7 @@ fn gas_check_linear_bulk_memory_wasm_code<'a>(
 }
 
 /// Pure helper used by tests: same ceil-div as the injected Wasm (`(len + unit-1) / unit`).
+#[cfg(test)]
 pub fn linear_bulk_cost(coeffs: MeteringCoefficients, len: u32) -> u64 {
     assert!(coeffs.unit_size > 0);
     let units = (len as u64).saturating_add(coeffs.unit_size - 1) / coeffs.unit_size;

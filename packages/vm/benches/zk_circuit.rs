@@ -14,49 +14,49 @@
 // Run: cargo bench --features zk --bench zk_circuit
 // ============================================================================
 
-#[cfg(feature = "zk")]
+
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-#[cfg(feature = "zk")]
+
 use std::sync::Arc;
-#[cfg(feature = "zk")]
+
 use std::time::{Duration, Instant};
-#[cfg(feature = "zk")]
+
 use tempfile::TempDir;
 
-#[cfg(feature = "zk")]
+
 use cosmwasm_vm::testing::{MockApi, MockQuerier, MockStorage};
-#[cfg(feature = "zk")]
+
 use cosmwasm_vm::{capabilities_from_csv, Cache, CacheOptions, Size};
-#[cfg(feature = "zk")]
+
 use hex;
 
-#[cfg(feature = "zk")]
+
 use cosmwasm_vm::COSMWASM_FOOTER_LENGTH;
-#[cfg(feature = "zk")]
+
 use zk_cosmwasm::CircuitFooter;
 
-#[cfg(feature = "zk")]
+
 const DEFAULT_CAPABILITIES: &str =
     "cosmwasm_1_1,cosmwasm_1_2,cosmwasm_1_3,cosmwasm_1_4,cosmwasm_2_0,cosmwasm_2_1,cosmwasm_2_2,iterator,staking";
-#[cfg(feature = "zk")]
+
 const DEFAULT_MEMORY_LIMIT: Size = Size::mebi(64);
 
 // Testdata
 // no_rick:  k=10, i=1, ~66KB blob
 // headstash: k=18, i=6, ~800KB (generate via test-press, place at testdata/)
-#[cfg(feature = "zk")]
+
 static NORICK_CIRCUIT: &[u8] = include_bytes!("../testdata/norick_vk.bin");
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-#[cfg(feature = "zk")]
+
 fn circuit_key_from_blob(blob: &[u8]) -> [u8; 72] {
     let footer = CircuitFooter::from_bytes(&blob[blob.len() - COSMWASM_FOOTER_LENGTH..])
         .expect("valid circuit footer");
     footer.to_circuit_key()
 }
 
-#[cfg(feature = "zk")]
+
 fn store_circuit_in_temp(blob: &[u8]) -> (TempDir, [u8; 72], CacheOptions) {
     let dir = TempDir::new().unwrap();
     let opts = CacheOptions::new(
@@ -72,7 +72,7 @@ fn store_circuit_in_temp(blob: &[u8]) -> (TempDir, [u8; 72], CacheOptions) {
     (dir, key, opts)
 }
 
-#[cfg(feature = "zk")]
+
 fn make_cache(dir: &TempDir, mem_size: Size) -> Cache<MockApi, MockStorage, MockQuerier> {
     let opts = CacheOptions::new(
         dir.path(),
@@ -85,7 +85,7 @@ fn make_cache(dir: &TempDir, mem_size: Size) -> Cache<MockApi, MockStorage, Mock
 
 // ── Benchmarks ───────────────────────────────────────────────────────────────
 
-#[cfg(feature = "zk")]
+
 fn bench_zk_circuit_cache(c: &mut Criterion) {
     let _norick_key = circuit_key_from_blob(NORICK_CIRCUIT);
 
@@ -416,7 +416,7 @@ fn bench_zk_circuit_cache(c: &mut Criterion) {
     }
 }
 
-#[cfg(feature = "zk")]
+
 fn make_config() -> Criterion {
     Criterion::default()
         .sample_size(50)
@@ -424,17 +424,12 @@ fn make_config() -> Criterion {
         .warm_up_time(Duration::from_secs(3))
 }
 
-#[cfg(feature = "zk")]
+
 criterion_group!(
     name = zk_circuit;
     config = make_config();
     targets = bench_zk_circuit_cache
 );
 
-#[cfg(feature = "zk")]
-criterion_main!(zk_circuit);
 
-#[cfg(not(feature = "zk"))]
-fn main() {
-    eprintln!("zk feature disabled — run with: cargo bench --features zk");
-}
+criterion_main!(zk_circuit);

@@ -2,7 +2,7 @@ use cosmwasm_std::Checksum;
 use std::collections::{HashMap, VecDeque};
 
 use super::cached_module::CachedModule;
-#[cfg(feature = "zk")]
+
 use crate::modules::{cached_module::CachedParam, CachedCircuit};
 use crate::VmResult;
 
@@ -16,7 +16,7 @@ pub struct InstrumentedModule {
 }
 /// Struct storing some additional metadata, which is only of interest for the pinned cache,
 /// alongside the cached module.
-#[cfg(feature = "zk")]
+
 pub struct InstrumentedCircuit {
     /// Number of loads from memory this module received
     pub hits: u32,
@@ -24,7 +24,7 @@ pub struct InstrumentedCircuit {
     pub circuit: CachedCircuit,
 }
 
-#[cfg(feature = "zk")]
+
 pub struct InstrumentedParam {
     /// Number of loads from memory this module received
     pub hits: u32,
@@ -33,24 +33,24 @@ pub struct InstrumentedParam {
 }
 
 /// Default maximum number of pinned ZK circuits before LRU eviction.
-#[cfg(feature = "zk")]
+
 const DEFAULT_MAX_PINNED_CIRCUITS: usize = 100;
 /// Default maximum total bytes for pinned ZK circuits before LRU eviction.
-#[cfg(feature = "zk")]
+
 const DEFAULT_MAX_PINNED_CIRCUIT_SIZE_BYTES: usize = 100 * 1024 * 1024;
 
 /// An pinned in memory module cache
 pub struct PinnedMemoryCache {
     modules: HashMap<Checksum, InstrumentedModule>,
-    #[cfg(feature = "zk")]
+    
     circuits: HashMap<[u8; 72], InstrumentedCircuit>,
-    #[cfg(feature = "zk")]
+    
     params: HashMap<[u8; 36], InstrumentedParam>,
-    #[cfg(feature = "zk")]
+    
     max_circuit_count: Option<usize>,
-    #[cfg(feature = "zk")]
+    
     max_circuit_size_bytes: Option<usize>,
-    #[cfg(feature = "zk")]
+    
     circuit_pin_order: VecDeque<[u8; 72]>,
 }
 
@@ -59,15 +59,15 @@ impl PinnedMemoryCache {
     pub fn new() -> Self {
         PinnedMemoryCache {
             modules: HashMap::new(),
-            #[cfg(feature = "zk")]
+            
             circuits: HashMap::new(),
-            #[cfg(feature = "zk")]
+            
             params: HashMap::new(),
-            #[cfg(feature = "zk")]
+            
             max_circuit_count: Some(DEFAULT_MAX_PINNED_CIRCUITS),
-            #[cfg(feature = "zk")]
+            
             max_circuit_size_bytes: Some(DEFAULT_MAX_PINNED_CIRCUIT_SIZE_BYTES),
-            #[cfg(feature = "zk")]
+            
             circuit_pin_order: VecDeque::new(),
         }
     }
@@ -120,7 +120,7 @@ impl PinnedMemoryCache {
     /// Returns the number of elements in the cache.
     pub fn len(&self) -> usize {
         let mut l = self.modules.len();
-        #[cfg(feature = "zk")]
+        
         {
             l += self.circuits.len();
         }
@@ -138,7 +138,6 @@ impl PinnedMemoryCache {
             .sum();
 
         // Sum circuit sizes: key (address) + circuit actual size
-        #[cfg(feature = "zk")]
         {
             let circuit_size: usize = self
                 .iter_circuits()
@@ -147,12 +146,10 @@ impl PinnedMemoryCache {
 
             module_size + circuit_size
         }
-        #[cfg(not(feature = "zk"))]
-        module_size
     }
 }
 
-#[cfg(feature = "zk")]
+
 impl PinnedMemoryCache {
     /// Returns true if and only if this cache has an entry identified by the given checksum
     pub fn has_circuit(&self, circuit_file_key: &[u8; 72]) -> bool {
@@ -361,7 +358,7 @@ mod tests {
 
         assert!(!cache.has(&checksum));
 
-        #[cfg(feature = "zk")]
+        
         {
             use crate::COSMWASM_FOOTER_LENGTH;
             use zk_cosmwasm::CircuitFooter;
@@ -431,7 +428,7 @@ mod tests {
 
         assert_eq!(module.hits, 1);
 
-        #[cfg(feature = "zk")]
+        
         {
             let zk = NORICK_CIRCUIT;
             let footer = zk_cosmwasm::CircuitFooter::from_bytes(
@@ -501,7 +498,7 @@ mod tests {
 
         assert_eq!(cache.len(), 0);
 
-        #[cfg(feature = "zk")]
+        
         {
             let zk = NORICK_CIRCUIT;
 
@@ -588,7 +585,7 @@ mod tests {
         cache.remove(&checksum2).unwrap();
         assert_eq!(cache.size(), 0);
 
-        #[cfg(feature = "zk")]
+        
         {
             let zk = NORICK_CIRCUIT;
 

@@ -21,7 +21,7 @@ use ark_bn254::{Fr, G1Affine, G2Affine};
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{BigInteger, PrimeField};
 
-use cosmwasm_crypto_bn254::{
+use cosmwasm_crypto::{
     bn254_add, bn254_pairing_equality, bn254_scalar_mul, Bn254Error, FQ_BYTES, FR_BYTES, G1_BYTES,
     G2_BYTES, PAIR_BYTES,
 };

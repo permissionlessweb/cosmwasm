@@ -147,3 +147,14 @@ might define others.
   running CosmWasm `2.2.0` or higher support this.
 - `cosmwasm_3_0` enables `WasmQuery::RawRange`. Only chains running CosmWasm
   `3.0.0` or higher support this.
+- `bn254` is the BN256 / alt_bn128 host: `bn254_add`, `bn254_scalar_mul`,
+  `bn254_pairing_equality`. It is a default feature of this VM, and
+  `wasmkeeper.BuiltInCapabilities` advertises it.
+- `hash_blake` is BLAKE2b-256 and BLAKE3-256 (`blake2b_256`, `blake3_256`).
+  It is a default feature of this VM. The capability name is `hash_blake`,
+  with an underscore.
+- `hash_poseidon` is Poseidon on Pasta (`poseidon_hash_pallas`,
+  `poseidon_hash_vesta`) and `poseidon377_hash`. It is a default feature of
+  this VM.
+- `redpallas` is RedPallas and RedJubjub spend-auth and binding verify. It is
+  a default feature of this VM.

@@ -16,7 +16,7 @@ builds = [{ name = "cosmwasm-vm", default-features = true }]
 bench = false
 
 [features]
-default = ["iterator", "staking", "zk"]
+default = ["iterator", "staking", "zk", "bn254", "hash-blake", "hash-poseidon", "redpallas"]
 # iterator allows us to iterate over all DB items in a given range
 # this must be enabled to support CosmWasm contracts compiled with the 'iterator' feature
 # optional as some merkle stores (like tries) don't support this
@@ -31,20 +31,11 @@ dhat-heap = ["dep:dhat"]
 # ibc2 enables ibc2-dependent messages, entrypoints and queries
 ibc2 = ["cosmwasm-std/ibc2"]
 zk = ["cosmwasm-std/zk", "dep:zk-cosmwasm"]
-# BN254 (alt_bn128) curve host functions — EIP-196/197/1108
-# Also enables zk-cosmwasm BN254 / Groth16 AnyVerifyingKey dispatch when `zk` is on.
 bn254 = ["cosmwasm-crypto/bn254", "zk-cosmwasm?/bn254"]
-# Axiom Halo2 KZG / SHPLONK on BN256 (curve_id 6) AnyVerifyingKey dispatch.
-# Host-side only (pulls halo2-axiom + halo2-base with multicore); never for guest wasm32.
 halo2-kzg = ["zk-cosmwasm?/halo2-kzg"]
-# Native deterministic BLAKE2b-256 / BLAKE3-256 host digests (CPU only).
 hash-blake = ["cosmwasm-crypto/hash-blake"]
-# Algebraic Poseidon hosts (Zcash Pasta + Penumbra poseidon377).
 hash-poseidon = ["cosmwasm-crypto/hash-poseidon", "dep:poseidon377"]
-# RedPallas (Orchard) + RedJubjub (Sapling) signature verify hosts.
 redpallas = ["cosmwasm-crypto/redpallas"]
-# Optional host GPU backend for eligible ZK verify ops (CPU-golden, scheduled gas).
-# Default OFF — zero new deps when disabled. Does NOT enable GPU for blake.
 # See docs/research/gpu-accel/DESIGN-G1-verifier-backend.md
 gpu = ["zk-cosmwasm?/gpu"]
 
@@ -77,6 +68,7 @@ thiserror = "1.0.26"
 wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass"] }
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
+nam-wasm-instrument = { version = "0.5.2", features = ["sign_ext"] }
 
 halo2_proofs = { package = "zakura-halo2-proofs", git = "https://github.com/permissionlessweb/common", rev = "5364d3d989640e5356351ee8c0d062ca18d4bfaa", default-features = false, features = ["batch"] }
 zk-cosmwasm  = { workspace = true, default-features = false, features = ["interface"], optional = true }

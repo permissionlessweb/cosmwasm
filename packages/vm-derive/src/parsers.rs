@@ -98,7 +98,7 @@ impl syn::parse::Parse for CircuitAttributes {
                         Error::new_spanned(
                             &lit,
                             format!(
-                                "Unknown circuit_type '{}'. Valid types: Plonkish",
+                                "Unknown circuit_type '{}'. This macro is Halo2 Plonkish on Pasta only. Flock, Groth16, and Stwo use their curve types, not #[cosmwasm_circuit].",
                                 lit.value()
                             ),
                         )

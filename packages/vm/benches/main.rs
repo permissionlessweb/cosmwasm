@@ -15,10 +15,7 @@ use cosmwasm_vm::{
     InstanceOptions, Size, VmError,
 };
 
-#[cfg(feature = "zk")]
-use {
-    cosmwasm_vm::CachedCircuit, cosmwasm_vm::COSMWASM_FOOTER_LENGTH, zk_cosmwasm::CircuitFooter,
-};
+use {cosmwasm_vm::COSMWASM_FOOTER_LENGTH, zk_cosmwasm::CircuitFooter};
 
 // Instance
 const DEFAULT_MEMORY_LIMIT: Size = Size::mebi(64);
@@ -39,10 +36,7 @@ const CONTRACTS: u64 = 10;
 const DEFAULT_CAPABILITIES: &str = "cosmwasm_1_1,cosmwasm_1_2,cosmwasm_1_3,cosmwasm_1_4,cosmwasm_2_0,cosmwasm_2_1,cosmwasm_2_2,iterator,staking";
 static HACKATOM: &[u8] = include_bytes!("../testdata/hackatom.wasm");
 static CYBERPUNK: &[u8] = include_bytes!("../testdata/cyberpunk.wasm");
-
-#[cfg(feature = "zk")]
 static NORICK_CIRCUIT: &[u8] = include_bytes!("../testdata/norick_vk.bin");
-
 static BENCH_CONTRACTS: &[&str] = &[
     "cyberpunk_rust170.wasm",
     "cyberpunk.wasm",
@@ -523,7 +517,6 @@ fn bench_combined(c: &mut Criterion) {
 // Run with: cargo bench --features zk  (zk is in default features)
 // ============================================================================
 
-#[cfg(feature = "zk")]
 fn bench_zk_circuit_cache(c: &mut Criterion) {
     // ------------------------------------------------------------------
     // Parse the NORICK circuit footer once so we can derive keys for the
@@ -798,7 +791,7 @@ criterion_group!(
         .configure_from_args();
     targets = bench_instance_threads
 );
-#[cfg(feature = "zk")]
+
 criterion_group!(
     name = zk_circuit;
     config = Criterion::default()
@@ -809,7 +802,6 @@ criterion_group!(
     targets = bench_zk_circuit_cache
 );
 
-#[cfg(feature = "zk")]
 criterion_main!(
     instance,
     cache,
@@ -817,5 +809,3 @@ criterion_main!(
     multi_threaded_instance,
     zk_circuit
 );
-#[cfg(not(feature = "zk"))]
-criterion_main!(instance, cache, combined, multi_threaded_instance);

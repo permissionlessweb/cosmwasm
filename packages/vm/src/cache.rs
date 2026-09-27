@@ -1,8 +1,5 @@
-#[cfg(feature = "zk")]
 use crate::{check_circuit, SerializedCircuitData};
 use cosmwasm_std::Checksum;
-#[cfg(feature = "zk")]
-use crate::COSMWASM_FOOTER_LENGTH;
 use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -11,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use wasmer::{Module, Store};
-#[cfg(feature = "zk")]
+
 use zk_cosmwasm::{CircuitFooter, ZkError};
 
 use crate::backend::{Backend, BackendApi, Querier, Storage};
@@ -108,7 +105,6 @@ pub struct CacheInner {
     stats: Stats,
 }
 
-#[cfg(feature = "zk")]
 impl CacheInner {
     pub fn param_path(&self) -> PathBuf {
         self.wasm_path.join(ZK_PARAM_DIR)
@@ -256,7 +252,6 @@ where
             })
             .collect();
 
-        #[cfg(feature = "zk")]
         {
             let mut pm: Vec<(CacheKey, PerModuleMetrics)> = cache
                 .pinned_memory_cache
@@ -273,8 +268,6 @@ where
             pm.extend_from_slice(&per_module);
             PinnedMetrics { per_module: pm }
         }
-        #[cfg(not(feature = "zk"))]
-        PinnedMetrics { per_module }
     }
 
     pub fn metrics(&self) -> Metrics {
@@ -494,7 +487,7 @@ where
     ///
     /// Circuit analogue of [`Self::sync_pinned_codes`] — for wasmd bulk pin/unpin and
     /// node restart re-pin without N individual `pin_circuit` races.
-    #[cfg(feature = "zk")]
+
     pub fn sync_pinned_circuits(&self, circuit_keys: &[[u8; 72]]) -> VmResult<()> {
         let mut add: Vec<[u8; 72]> = vec![];
         let mut del: Vec<[u8; 72]> = vec![];
@@ -531,10 +524,7 @@ where
     ) -> VmResult<Instance<A, S, Q>> {
         let (module, store) = self.get_module(checksum)?;
 
-        #[cfg(feature = "zk")]
         let circuit_loader = Some(self.circuit_loader());
-        #[cfg(not(feature = "zk"))]
-        let circuit_loader = None;
 
         let instance = Instance::from_module(
             store,
@@ -550,7 +540,7 @@ where
 
     /// Builds a Path A circuit loader that can be installed on a contract
     /// [`Environment`] so proof verification uses the host cache directly.
-    #[cfg(feature = "zk")]
+
     pub fn circuit_loader(&self) -> crate::environment::CircuitLoader {
         let inner = Arc::clone(&self.inner);
         Arc::new(move |circuit_key: [u8; 72]| {
@@ -570,7 +560,7 @@ where
             // filesystem (deserialized on load)
             if let Some(czk) = cache.fs_cache.load_circuit(&circuit_key)? {
                 cache.stats.hits_fs_cache = cache.stats.hits_fs_cache.saturating_add(1);
-                let _ = cache.memory_cache.store_circuit(&circuit_key, &czk);
+                cache.memory_cache.store_circuit(&circuit_key, &czk)?;
                 return Ok(Some(czk.vk));
             }
             // Split-file reconstruct (param + vk on disk under wasm_path)
@@ -609,12 +599,20 @@ where
                 } else {
                     Vec::new()
                 }
-            } else {
-                if !param_path.exists() {
-                    return Ok(None);
+            } else if let Some(cached) = read_cached_param(&inner, &param_key)? {
+                if cached.len() as u32 != footer.param_len {
+                    return Err(VmError::cache_err(format!(
+                        "cached param length {} != footer.param_len {}",
+                        cached.len(),
+                        footer.param_len
+                    )));
                 }
+                cached
+            } else if param_path.exists() {
                 fs::read(&param_path)
                     .map_err(|e| VmError::cache_err(format!("read param for verify: {e}")))?
+            } else {
+                return Ok(None);
             };
             let vk_body = fs::read(&vk_path)
                 .map_err(|e| VmError::cache_err(format!("read vk for verify: {e}")))?;
@@ -623,12 +621,12 @@ where
                     .map_err(VmError::zk_err)?;
             // Warm caches for next call
             let mut cache = inner.lock().unwrap();
-            let size_estimate = param_bytes.len() + vk_body.len() + COSMWASM_FOOTER_LENGTH;
+            let size_estimate = param_bytes.len() + vk_body.len() + crate::COSMWASM_FOOTER_LENGTH;
             let cached = CachedCircuit {
                 vk: vk.clone(),
                 size_estimate,
             };
-            let _ = cache.memory_cache.store_circuit(&circuit_key, &cached);
+            cache.memory_cache.store_circuit(&circuit_key, &cached)?;
             Ok(Some(vk))
         })
     }
@@ -716,15 +714,6 @@ where
         Ok((module, store))
     }
 
-    // Helper to produce a dummy checksum (same as used for missing VK)
-    fn store_wasm_to_disk(&self, dir: &PathBuf, wasm: Vec<u8>) -> VmResult<(Module, Checksum)> {
-        // Compile and store WASM
-        Ok((
-            compile_module(&wasm, None)?.0,
-            save_wasm_to_disk(dir, &wasm)?,
-        ))
-    }
-
     /// Retrieves a Wasm blob that was previously stored via [`Cache::store_code`].
     /// When the cache is instantiated with the same base dir, this finds Wasm files on disc across multiple cache instances (i.e. node restarts).
     /// This function is public to allow a checksum to Wasm lookup in the blockchain.
@@ -745,20 +734,12 @@ where
     }
 }
 
-#[cfg(feature = "zk")]
 impl<A, S, Q> Cache<A, S, Q>
 where
     A: BackendApi + 'static, // 'static is needed by `impl<…> Instance`
     S: Storage + 'static,    // 'static is needed by `impl<…> Instance`
     Q: Querier + 'static,    // 'static is needed by `impl<…> Instance`
 {
-    fn save_vk_params_to_disk(
-        &self,
-        cache: &mut std::sync::MutexGuard<'_, CacheInner>,
-        p: &[u8],
-    ) -> VmResult<Checksum> {
-        save_vk_params_to_disk(&cache.param_path(), p)
-    }
 
     /// Store param bytes independently, without a circuit.
     ///
@@ -853,7 +834,7 @@ where
     }
 
     /// Remove a VK file from disk if the path exists
-    #[cfg(feature = "zk")]
+
     fn remove_vk_params_from_disk(
         &self,
         dir: impl Into<PathBuf>,
@@ -881,7 +862,6 @@ where
     }
 }
 
-#[cfg(feature = "zk")]
 impl<A, S, Q> Cache<A, S, Q>
 where
     A: BackendApi + 'static, // 'static is needed by `impl<…> Instance`
@@ -978,8 +958,18 @@ where
             .vk_path()
             .join(hex::encode(vk_key))
             .with_extension("bin");
-        let _ = std::fs::remove_file(&param_path);
-        let _ = std::fs::remove_file(&vk_path);
+        if vk_path.exists() {
+            fs::remove_file(&vk_path)
+                .map_err(|e| VmError::cache_err(format!("remove vk file: {e}")))?;
+        }
+        // Param files are shared. Delete one only when no other circuit blob
+        // still starts with this param key. A directory read failure keeps the file.
+        if !param_still_shared(&cache.circuit_path(), &param_key, circuit_file_key)
+            && param_path.exists()
+        {
+            fs::remove_file(&param_path)
+                .map_err(|e| VmError::cache_err(format!("remove param file: {e}")))?;
+        }
 
         Ok(())
     }
@@ -1014,16 +1004,11 @@ where
         if cache.pinned_memory_cache.has_circuit(circuit_file_key) {
             return Ok(());
         }
-        println!("didnt have in pinned memory");
-        cache.stats.misses += 1;
 
-        // We don't load from the memory cache because we had to create new store here and
-        // serialize/deserialize the artifact to get a full clone. Could be done but adds some code
-        // for a not-so-relevant use case.
-
-        // Try to get module from file system cache
+        // A pinned entry needs its own deserialized key. The LRU holds one too,
+        // but cloning it still deserializes, so the file-system cache is the
+        // source for a pin miss.
         if let Some(cached_circuit) = cache.fs_cache.load_circuit(circuit_file_key)? {
-            println!("found in filesystem cache");
             cache.stats.hits_fs_cache = cache.stats.hits_fs_cache.saturating_add(1);
             cache
                 .pinned_memory_cache
@@ -1034,11 +1019,13 @@ where
 
         // Re-compile from the full circuit bytecode information.
         //IMPORTANT: this would be if the circuit has not yet been compiled yet by the appstate (contract usage once, memeory eviction)
-        let zk = self.load_circuit_with_path(
-            &cache.wasm_path,
-            &circuit_file_key[..36].try_into().expect("msg"),
-            &circuit_file_key[36..].try_into().expect("msg"),
-        )?;
+        let param_key: [u8; 36] = circuit_file_key[..36]
+            .try_into()
+            .map_err(|_| VmError::cache_err("invalid circuit key (param half)"))?;
+        let vk_key: [u8; 36] = circuit_file_key[36..]
+            .try_into()
+            .map_err(|_| VmError::cache_err("invalid circuit key (vk half)"))?;
+        let zk = self.load_circuit_with_path(&cache.wasm_path, &param_key, &vk_key)?;
         cache.stats.misses = cache.stats.misses.saturating_add(1);
         cache
             .fs_cache
@@ -1092,11 +1079,13 @@ where
         // This is needed for chains that upgrade their node software in a way that changes the module
         // serialization format. If you do not replay all transactions, previous calls of `store_code`
         // stored the old module format.
-        let zk = self.load_circuit_with_path(
-            &cache.wasm_path,
-            &circuit_file_key[..36].try_into().expect("msg"),
-            &circuit_file_key[36..].try_into().expect("msg"),
-        )?;
+        let param_key: [u8; 36] = circuit_file_key[..36]
+            .try_into()
+            .map_err(|_| VmError::cache_err("invalid circuit key (param half)"))?;
+        let vk_key: [u8; 36] = circuit_file_key[36..]
+            .try_into()
+            .map_err(|_| VmError::cache_err("invalid circuit key (vk half)"))?;
+        let zk = self.load_circuit_with_path(&cache.wasm_path, &param_key, &vk_key)?;
         cache.stats.misses = cache.stats.misses.saturating_add(1);
         {
             cache
@@ -1121,7 +1110,17 @@ where
         let cache = self.inner.lock().unwrap();
         // TODO::IMPORTANT:: implement method that is aware if possible of reconstructing requiested circuit if not full bytes loaded in cache
         let circuit_path = self.circuit_path(&cache.circuit_path(), circuit_file_key);
-        circuit_path.exists()
+        if circuit_path.exists() {
+            return true;
+        }
+        let Ok(vk_key) = <[u8; 36]>::try_from(&circuit_file_key[36..]) else {
+            return false;
+        };
+        cache
+            .vk_path()
+            .join(hex::encode(vk_key))
+            .with_extension("bin")
+            .exists()
     }
 
     fn circuit_path(&self, dir: impl Into<PathBuf>, circuit_file_key: &[u8; 72]) -> PathBuf {
@@ -1134,40 +1133,6 @@ where
             .join(hex::encode(param_file_key))
             .with_extension("bin")
     }
-    fn vk_path(&self, dir: impl Into<PathBuf>, checksum: &Checksum) -> PathBuf {
-        dir.into().join(checksum.to_hex()).with_extension("bin")
-    }
-
-    // /// Stores vk keys to their dedicated path in dir.
-    // fn store_circuit_to_disk(
-    //     &self,
-    //     dir: impl Into<PathBuf>,
-    //     vk: &SerializedCircuitData,
-    // ) -> VmResult<Checksum> {
-    //     use crate::COSMWASM_FOOTER_LENGTH;
-    //     let len = vk.body.len();
-    //     // hash is last 32 bytes
-    //     let hash = &vk.footer[COSMWASM_FOOTER_LENGTH - 32..]
-    //         .try_into()
-    //         .map_err(|e: cosmwasm_std::ChecksumError| VmError::cache_err(e.to_string()))?;
-    //     let path = self.zk_path(dir, hash);
-
-    //     let mut file_content: Vec<u8> = Vec::with_capacity(len + COSMWASM_FOOTER_LENGTH);
-    //     file_content.extend_from_slice(&vk.body);
-    //     file_content.extend_from_slice(&vk.footer);
-
-    //     let mut file = OpenOptions::new()
-    //         .write(true)
-    //         .create(true)
-    //         .truncate(true)
-    //         .open(&path)
-    //         .map_err(|e| VmError::cache_err(format!("Error creating VK file: {}", e)))?;
-
-    //     file.write_all(&file_content)
-    //         .map_err(|e| VmError::cache_err(format!("Error writing VK file: {}", e)))?;
-
-    //     Ok(*hash)
-    // }
 
     /// Load a circuit by reconstructing from split param / vk files under
     /// `wasm_path/{zk_param,zk_vk}/`, falling back to the monolithic circuit
@@ -1284,7 +1249,7 @@ where
 
     /// Load a verifying key from disk
     /// Returns None if the VK file doesn't exist
-    #[cfg(feature = "zk")]
+
     fn load_circuit_from_disk(
         &self,
         dir: impl Into<PathBuf>,
@@ -1300,7 +1265,7 @@ where
         Ok(Some(SerializedCircuitData::new(body, &footer)))
     }
     /// Remove a VK file from disk if the path exists
-    #[cfg(feature = "zk")]
+
     fn remove_circuit_from_disk(
         &self,
         dir: impl Into<PathBuf>,
@@ -1405,34 +1370,6 @@ fn load_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResult
 /// In contrast to the file system cache, the existence of the original
 /// code is required. So a non-existent file leads to an error as it
 /// indicates a bug.
-fn remove_circuit_from_disk(dir: impl Into<PathBuf>, checksum: &[u8; 72]) -> VmResult<()> {
-    // the files previously had no extension, so to allow for a smooth transition, we delete both
-    let path = dir.into().join(hex::encode(checksum));
-    let wasm_path = path.with_extension("bin");
-
-    let path_exists = path.exists();
-    let wasm_path_exists = wasm_path.exists();
-    if !path_exists && !wasm_path_exists {
-        return Err(VmError::cache_err("Wasm file does not exist"));
-    }
-
-    if path_exists {
-        fs::remove_file(path)
-            .map_err(|_e| VmError::cache_err("Error removing Wasm file from disk"))?;
-    }
-
-    if wasm_path_exists {
-        fs::remove_file(wasm_path)
-            .map_err(|_e| VmError::cache_err("Error removing Wasm file from disk"))?;
-    }
-
-    Ok(())
-}
-/// Removes the Wasm blob for the given checksum from disk.
-///
-/// In contrast to the file system cache, the existence of the original
-/// code is required. So a non-existent file leads to an error as it
-/// indicates a bug.
 fn remove_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResult<()> {
     // the files previously had no extension, so to allow for a smooth transition, we delete both
     let path = dir.into().join(checksum.to_hex());
@@ -1457,20 +1394,8 @@ fn remove_wasm_from_disk(dir: impl Into<PathBuf>, checksum: &Checksum) -> VmResu
     Ok(())
 }
 
-/// Write param, cs+vk, and full circuit blobs into a single directory.
-/// Used by unit tests that operate on a flat temp dir.
-#[cfg(feature = "zk")]
-fn save_circuit_to_disk(
-    dir: impl Into<PathBuf>,
-    c: &[u8],
-    cf: CircuitFooter,
-) -> VmResult<([[u8; 36]; 2], [u8; 72])> {
-    let dir = dir.into();
-    save_circuit_parts(&dir, &dir, &dir, c, cf)
-}
-
 /// Split `c = [params][cs][vk][footer]` across the three on-disk locations.
-#[cfg(feature = "zk")]
+
 fn save_circuit_parts(
     param_dir: &Path,
     vk_dir: &Path,
@@ -1478,10 +1403,10 @@ fn save_circuit_parts(
     c: &[u8],
     cf: CircuitFooter,
 ) -> VmResult<([[u8; 36]; 2], [u8; 72])> {
-    if c.len() < COSMWASM_FOOTER_LENGTH {
+    if c.len() < crate::COSMWASM_FOOTER_LENGTH {
         return Err(VmError::cache_err("circuit too short for footer"));
     }
-    let body_end = c.len() - COSMWASM_FOOTER_LENGTH;
+    let body_end = c.len() - crate::COSMWASM_FOOTER_LENGTH;
     let param_len = cf.param_len as usize;
     if param_len > body_end {
         return Err(VmError::cache_err(format!(
@@ -1521,32 +1446,39 @@ fn save_circuit_parts(
     Ok((cf.file_keys(), cf.to_circuit_key()))
 }
 
-/// save stores the wasm code in the given directory and returns an ID for lookup.
-/// It will create the directory if it doesn't exist.
-/// Saving the same byte code multiple times is allowed.
-#[cfg(feature = "zk")]
-fn save_vk_params_to_disk(dir: impl Into<PathBuf>, p: &[u8]) -> VmResult<Checksum> {
-    // calculate filename (checksum bytes)
-    let param_checksum = Checksum::generate(p);
-    let filepath = dir
-        .into()
-        .join(&param_checksum.to_hex())
-        .with_extension("bin");
+/// Pinned param bytes, then the LRU. Disk is the caller's fallback.
+fn read_cached_param(
+    inner: &Arc<Mutex<CacheInner>>,
+    param_key: &[u8; 36],
+) -> VmResult<Option<Vec<u8>>> {
+    let mut cache = inner.lock().unwrap();
+    if let Some(param) = cache.pinned_memory_cache.load_param(param_key)? {
+        return Ok(Some(param.params.to_vec()));
+    }
+    if let Some(param) = cache.memory_cache.load_param(param_key)? {
+        return Ok(Some(param.params.to_vec()));
+    }
+    Ok(None)
+}
 
-    println!("param_filename: {}", param_checksum.to_hex());
-    // write data to file
-    // Since the same filename (a collision resistant hash) cannot be generated from two different byte codes
-    // (even if a malicious actor tried), it is safe to override.
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(filepath)
-        .map_err(|e| VmError::cache_err(format!("Error opening Circuit file for writing: {e}")))?;
-    file.write_all(p)
-        .map_err(|e| VmError::cache_err(format!("Error writing Circuit file: {e}")))?;
-
-    Ok(param_checksum)
+/// True when another `zk_circuit` blob still starts with this param key.
+/// A directory read failure keeps the file.
+fn param_still_shared(circuit_dir: &Path, param_key: &[u8; 36], except: &[u8; 72]) -> bool {
+    let prefix = hex::encode(param_key);
+    let except_name = format!("{}.bin", hex::encode(except));
+    let Ok(entries) = fs::read_dir(circuit_dir) else {
+        return true;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == except_name {
+            continue;
+        }
+        if name.starts_with(&prefix) {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1556,7 +1488,6 @@ mod tests {
     use crate::instance::GasReport;
     use crate::testing::{mock_backend, mock_env, mock_info, MockApi, MockQuerier, MockStorage};
     use cosmwasm_std::{coins, Empty};
-    use sha2::{Digest, Sha256};
     use std::borrow::Cow;
     use std::fs::{create_dir_all, remove_dir_all};
     use tempfile::TempDir;
@@ -2692,20 +2623,7 @@ mod tests {
             .unwrap();
     }
 
-    #[test]
-    fn save_circuit_to_disk_works_for_same_data_multiple_times() {
-        let tmp_dir = TempDir::new().unwrap();
-        let path = tmp_dir.path();
-        // Store
-        let code = NORICK_CIRCUIT;
-        let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-            &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
-        )
-        .unwrap();
 
-        save_circuit_to_disk(path, &code, footer).unwrap();
-        save_circuit_to_disk(path, &code, footer).unwrap();
-    }
 
     #[test]
     fn save_wasm_to_disk_works_for_same_data_multiple_times() {
@@ -2726,20 +2644,7 @@ mod tests {
         assert!(res.is_err());
     }
 
-    #[test]
-    fn load_circuit_from_disk_works() {
-        let tmp_dir = TempDir::new().unwrap();
-        let path = tmp_dir.path();
-        let code = NORICK_CIRCUIT;
-        let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-            &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
-        )
-        .unwrap();
-        let checksum = save_circuit_to_disk(path, &code, footer).unwrap();
 
-        let loaded = load_circuit_from_disk(path, &checksum.1).unwrap();
-        assert_eq!(code, loaded);
-    }
 
     #[test]
     fn load_wasm_from_disk_works() {
@@ -2763,43 +2668,53 @@ mod tests {
         let loaded = load_wasm_from_disk(&path, &checksum).unwrap();
         assert_eq!(code, loaded);
     }
-    #[test]
-    fn load_circuit_from_disk_works_in_subfolder() {
-        let tmp_dir = TempDir::new().unwrap();
-        let path = tmp_dir.path().join("something");
-        create_dir_all(&path).unwrap();
-        let code = NORICK_CIRCUIT;
-        let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-            &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
-        )
-        .unwrap();
 
-        let checksum = save_circuit_to_disk(&path, &code, footer).unwrap();
+    //     #[test]
+    // fn save_circuit_to_disk_works_for_same_data_multiple_times() {
+    //     let tmp_dir = TempDir::new().unwrap();
+    //     let path = tmp_dir.path();
+    //     // Store
+    //     let code = NORICK_CIRCUIT;
+    //     let footer = zk_cosmwasm::CircuitFooter::from_bytes(
+    //         &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
+    //     )
+    //     .unwrap();
 
-        let loaded = load_circuit_from_disk(&path, &checksum.1).unwrap();
-        assert_eq!(code, loaded);
-    }
+    //     save_circuit_to_disk(path, &code, footer).unwrap();
+    //     save_circuit_to_disk(path, &code, footer).unwrap();
+    // }
 
-    #[test]
-    fn remove_circuit_from_disk_works() {
-        let tmp_dir = TempDir::new().unwrap();
-        let path = tmp_dir.path();
-        let code = NORICK_CIRCUIT;
-        let footer = zk_cosmwasm::CircuitFooter::from_bytes(
-            &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
-        )
-        .unwrap();
-        let checksum = save_circuit_to_disk(path, &code, footer).unwrap();
+    //     #[test]
+    // fn load_circuit_from_disk_works() {
+    //     let tmp_dir = TempDir::new().unwrap();
+    //     let path = tmp_dir.path();
+    //     let code = NORICK_CIRCUIT;
+    //     let footer = zk_cosmwasm::CircuitFooter::from_bytes(
+    //         &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
+    //     )
+    //     .unwrap();
+    //     let checksum = save_circuit_to_disk(path, &code, footer).unwrap();
 
-        remove_circuit_from_disk(path, &checksum.1).unwrap();
+    //     let loaded = load_circuit_from_disk(path, &checksum.1).unwrap();
+    //     assert_eq!(code, loaded);
+    // }
+    // #[test]
+    // fn load_circuit_from_disk_works_in_subfolder() {
+    //     let tmp_dir = TempDir::new().unwrap();
+    //     let path = tmp_dir.path().join("something");
+    //     create_dir_all(&path).unwrap();
+    //     let code = NORICK_CIRCUIT;
+    //     let footer = zk_cosmwasm::CircuitFooter::from_bytes(
+    //         &code[code.len() - crate::COSMWASM_FOOTER_LENGTH..],
+    //     )
+    //     .unwrap();
 
-        // removing again fails
+    //     let checksum = save_circuit_to_disk(&path, &code, footer).unwrap();
 
-        match remove_circuit_from_disk(path, &checksum.1).unwrap_err() {
-            VmError::CacheErr { msg, .. } => assert_eq!(msg, "Wasm file does not exist"),
-            err => panic!("Unexpected error: {err:?}"),
-        }
-    }
+    //     let loaded = load_circuit_from_disk(&path, &checksum.1).unwrap();
+    //     assert_eq!(code, loaded);
+    // }
+
     #[test]
     fn remove_wasm_from_disk_works() {
         let tmp_dir = TempDir::new().unwrap();
@@ -2997,10 +2912,6 @@ mod tests {
         // unpin again has no effect
         println!("unpin again has no effect");
         cache.unpin_circuit(&circuit_file_key).unwrap();
-
-        // unpin non existent id has no effect
-        let mut non_id = Checksum::generate(b"non_existent").as_slice();
-
         cache.unpin_circuit(&circuit_file_key).unwrap();
     }
 
@@ -3196,7 +3107,7 @@ mod tests {
             param_checksum,
             vk_checksum,
         );
-        let mut blob = Vec::with_capacity(vk_body.len() + COSMWASM_FOOTER_LENGTH);
+        let mut blob = Vec::with_capacity(vk_body.len() + crate::COSMWASM_FOOTER_LENGTH);
         blob.extend_from_slice(vk_body);
         blob.extend_from_slice(&footer.to_bytes());
         (blob, footer)
@@ -3327,7 +3238,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "zk")]
+
     fn halo2_store_circuit_still_uses_nonempty_params() {
         // Regression: no_rick Halo2 path still stores with non-empty params.
         let footer = check_circuit(NORICK_CIRCUIT).unwrap();

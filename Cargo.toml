@@ -9,7 +9,7 @@ version = "4.0.0-zk"
 edition = "2021"
 rust-version = "1.91.0"
 license = "Apache-2.0"
-repository = "https://github.com/CosmWasm/cosmwasm"
+repository = "https://github.com/permissionlessweb/cosmwasm"
 
 [workspace.dependencies]
 cosmwasm-core = { path = "packages/core" }

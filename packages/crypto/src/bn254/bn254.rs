@@ -13,8 +13,8 @@ use ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G2Affine};
 use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup};
 use ark_ff::{BigInteger, PrimeField, Zero};
 
-use crate::errors::Bn254Error;
-use crate::{FQ_BYTES, FR_BYTES, G1_BYTES, G2_BYTES, PAIR_BYTES};
+use super::errors::Bn254Error;
+use super::{FQ_BYTES, FR_BYTES, G1_BYTES, G2_BYTES, PAIR_BYTES};
 
 // ── Public API ─────────────────────────────────────────────────────────────
 

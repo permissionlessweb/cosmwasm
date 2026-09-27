@@ -28,7 +28,7 @@
 //! The full 24-vector suite is now complete (4 EIP-196/197 spec vectors +
 //! 20 go-ethereum `core/vm/testdata/precompiles/*.json` fixtures).
 
-use cosmwasm_crypto_bn254::{bn254_add, bn254_pairing_equality, bn254_scalar_mul, Bn254Error};
+use cosmwasm_crypto::{bn254_add, bn254_pairing_equality, bn254_scalar_mul, Bn254Error};
 
 /// Decode a hex string into a byte vector. Line comments (`//` to end of line)
 /// are stripped first, then any remaining non-hex character is dropped. This

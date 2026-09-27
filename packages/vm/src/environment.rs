@@ -238,7 +238,7 @@ pub type DebugHandlerFn = dyn for<'a, 'b> FnMut(/* msg */ &'a str, DebugInfo<'b>
 ///
 /// Maps a 72-byte wasmvm circuit key to an already-deserialized verifying key.
 /// Constructed from `Cache` so the import never touches contract storage.
-#[cfg(feature = "zk")]
+
 pub type CircuitLoader =
     Arc<dyn Fn([u8; 72]) -> crate::VmResult<Option<zk_cosmwasm::AnyVerifyingKey>> + Send + Sync>;
 
@@ -290,7 +290,7 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
     }
 
     /// Installs a Path A circuit loader (typically from `Cache::circuit_loader`).
-    #[cfg(feature = "zk")]
+    
     pub fn set_circuit_loader(&self, loader: Option<CircuitLoader>) {
         self.with_context_data_mut(|context_data| {
             context_data.circuit_loader = loader;
@@ -299,7 +299,7 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
 
     /// Runs `callback` with the installed circuit loader.
     /// Returns `Ok(None)` when no loader is installed (e.g. unit tests without a `Cache`).
-    #[cfg(feature = "zk")]
+    
     pub fn with_circuit_loader<C, T>(&self, callback: C) -> crate::VmResult<Option<T>>
     where
         C: FnOnce(&CircuitLoader) -> crate::VmResult<T>,
@@ -382,7 +382,7 @@ impl<A: BackendApi, S: Storage, Q: Querier> Environment<A, S, Q> {
                 };
                 Err(err)
             })
-            .unwrap_err() // with_wasmer_instance can only succeed if the callback succeeds
+            .unwrap_err()
         });
         self.decrement_call_depth();
         res
@@ -560,7 +560,7 @@ pub struct ContextData<S, Q> {
     querier: Option<Q>,
     debug_handler: Option<Rc<RefCell<DebugHandlerFn>>>,
     /// Path A: load deserialized verifying keys from the host circuit cache.
-    #[cfg(feature = "zk")]
+    
     circuit_loader: Option<CircuitLoader>,
     /// A non-owning link to the wasmer instance
     wasmer_instance: Option<NonNull<WasmerInstance>>,
@@ -575,7 +575,7 @@ impl<S: Storage, Q: Querier> ContextData<S, Q> {
             call_depth: 0,
             querier: None,
             debug_handler: None,
-            #[cfg(feature = "zk")]
+            
             circuit_loader: None,
             wasmer_instance: None,
         }
@@ -1093,7 +1093,7 @@ mod tests {
         assert_eq!(balance.amount, coin(INIT_AMOUNT, INIT_DENOM));
     }
 
-    // #[cfg(feature = "zk")]
+    // 
     // #[test]
     // #[allow(deprecated)]
     // fn with_querier_from_context_works_for_cirucits() {

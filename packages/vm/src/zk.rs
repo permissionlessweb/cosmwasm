@@ -25,8 +25,6 @@ pub fn get_circuit_key(zk_id: u64) -> Vec<u8> {
 
 pub use zk_cosmwasm::*;
 
-use crate::COSMWASM_FOOTER_LENGTH;
-
 /// Serializes SerializedCircuitData into a complete binary format for FFI transmission.
 pub fn serialize_circuit_data(vk_data: &SerializedCircuitData) -> Vec<u8> {
     let mut result = Vec::new();
@@ -197,7 +195,7 @@ mod tests {
     }
 
     /// Helper to create a minimal valid WASM module with a custom section
-    fn create_wasm_with_custom_section(section_name: &str, section_data: &[u8]) -> Vec<u8> {
+    fn _create_wasm_with_custom_section(section_name: &str, section_data: &[u8]) -> Vec<u8> {
         use wasm_encoder::{CustomSection, Module};
 
         let mut module = Module::new();

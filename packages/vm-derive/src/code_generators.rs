@@ -162,27 +162,26 @@ impl CodeGenerator {
         let instances = self.attrs.instances;
         let ct_byte = self.attrs.circuit_type.to_u8();
 
+        let k = self.attrs.k as u8;
         quote! {
-            pub fn footer() -> cosmwasm_vm::zk::CircuitFooter {
-                let cs_meta = Self::constraint_system_metadata();
-                cosmwasm_vm::zk::CircuitFooter::new(
-                    cosmwasm_vm::zk::CircuitType::from_u8(#ct_byte).expect("Valid circuit type"),
-                    #instances,
-                )
-            }
-
-            /// Get a complete footer with actual byte lengths
-            /// This is called during serialization when lengths are known
-            fn footer_with_lengths(
+            /// Footer identity only. Column counts stay on the constraint system.
+            pub fn footer_with_lengths(
                 params_len: u32,
-                vk_len: u32,
                 cs_len: u32,
-                crc32: u32,
+                vk_len: u32,
+                param_hash: [u8; 32],
+                vk_hash: [u8; 32],
             ) -> cosmwasm_vm::zk::CircuitFooter {
-                let cs_meta = Self::constraint_system_metadata();
                 cosmwasm_vm::zk::CircuitFooter::new(
                     cosmwasm_vm::zk::CircuitType::from_u8(#ct_byte).expect("Valid circuit type"),
+                    cosmwasm_vm::zk::CurveType::Pasta,
+                    #k,
                     #instances,
+                    params_len,
+                    cs_len,
+                    vk_len,
+                    param_hash,
+                    vk_hash,
                 )
             }
         }
@@ -227,26 +226,17 @@ impl CodeGenerator {
                 vk.write(&mut vk_buf)
                     .map_err(|e| cosmwasm_vm::zk::ZkError::new_err(format!("Failed to serialize VK: {}", e)))?;
 
-                // // Get the constraint system and serialize it
-                // let mut cs = halo2_proofs::plonk::ConstraintSystem::<pasta_curves::vesta::Scalar>::default();
-                // let _ = <#circuit_name as Circuit<pasta_curves::vesta::Scalar>>::configure(&mut cs);
-
-                // let mut cs_buf = Vec::new();
-                // cs.write(&mut cs_buf)
-                //     .map_err(|e| cosmwasm_vm::zk::ZkError::new_err(format!("Failed to serialize CS: {}", e)))?;
-
-
-
-                let paramlen =  params_buf.len();
-                let vklen = vk_buf.len();
-                let mut output = Vec::with_capacity(paramlen + vklen  + COSMWASM_FOOTER_LENGTH);
-                // write to output buffer, pad with known object len in ZcashDeserialize fashion
-                output.extend_from_slice(&[paramlen])
+                let params_len = u32::try_from(params_buf.len())
+                    .map_err(|_| cosmwasm_vm::zk::ZkError::new_err("params length exceeds u32"))?;
+                let vk_len = u32::try_from(vk_buf.len())
+                    .map_err(|_| cosmwasm_vm::zk::ZkError::new_err("vk length exceeds u32"))?;
+                let param_hash: [u8; 32] = sha2::Sha256::digest(&params_buf).into();
+                let vk_hash: [u8; 32] = sha2::Sha256::digest(&vk_buf).into();
+                let footer = Self::footer_with_lengths(params_len, 0, vk_len, param_hash, vk_hash);
+                let mut output = Vec::with_capacity(params_buf.len() + vk_buf.len() + footer.to_bytes().len());
                 output.extend_from_slice(&params_buf);
-                output.extend_from_slice(&[vklen])
                 output.extend_from_slice(&vk_buf);
-                output.extend_from_slice(&CircuitFooter::new(instances,Sha256::digest(output).into()).to_bytes());
-
+                output.extend_from_slice(&footer.to_bytes());
                 Ok(output)
             }
 

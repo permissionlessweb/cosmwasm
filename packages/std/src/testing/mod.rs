@@ -17,7 +17,7 @@ pub use message_info::message_info;
 pub use mock::DistributionQuerier;
 #[cfg(feature = "staking")]
 pub use mock::StakingQuerier;
-#[cfg(feature = "zk")]
+
 pub use mock::{clear_test_circuits, register_test_circuit};
 pub use mock::{
     mock_dependencies, mock_dependencies_with_balance, mock_dependencies_with_balances, mock_env,

@@ -12,7 +12,7 @@ use wasmer::{DeserializeError, Module, Target};
 use crate::errors::{VmError, VmResult};
 use crate::filesystem::mkdir_p;
 use crate::modules::current_wasmer_module_version;
-#[cfg(feature = "zk")]
+
 use crate::modules::CachedCircuit;
 use crate::wasm_backend::make_runtime_engine;
 use crate::wasm_backend::COST_FUNCTION_HASH;
@@ -69,7 +69,9 @@ use super::CachedModule;
 ///   Module compatibility between Wasmer versions is not guaranteed.
 /// - **v21**:<br>
 ///   New version because of additional gas charging for function locals.
-const MODULE_SERIALIZATION_VERSION: &str = "v22";
+/// - **v24**:<br>
+///   Stack-height limiter injected into the Wasm bytes before compile.
+const MODULE_SERIALIZATION_VERSION: &str = "v24";
 
 /// Function that actually does the heavy lifting of creating the module version discriminator.
 ///
@@ -262,7 +264,7 @@ impl FileSystemCache {
     }
 }
 
-#[cfg(feature = "zk")]
+
 impl FileSystemCache {
     /// Gets the circuit file path for a checksum.
     fn circuit_file(&self, circuit_file_key: &[u8; 72]) -> PathBuf {
@@ -450,7 +452,7 @@ mod tests {
             let result = add_one.call(&mut store, &[42.into()]).unwrap();
             assert_eq!(result[0].unwrap_i32(), 43);
         }
-        #[cfg(feature = "zk")]
+        
         {
             let zk = NORICK_CIRCUIT;
             let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
@@ -588,6 +590,6 @@ mod tests {
     #[test]
     fn module_version_static() {
         let version = raw_module_version_discriminator();
-        assert_eq!(version, "db9eb9f9ba");
+        assert_eq!(version, "63102db270");
     }
 }

@@ -20,16 +20,11 @@ mod errors;
 mod identity_digest;
 mod secp256k1;
 mod secp256r1;
-
-// Multi-curve / multi-hash libraries (feature-gated).
-#[cfg(feature = "hash-blake")]
-pub mod blake;
+mod blake;
 #[cfg(feature = "bn254")]
 mod bn254;
-#[cfg(feature = "hash-poseidon")]
-pub mod poseidon;
-#[cfg(feature = "redpallas")]
-pub mod redpallas;
+mod poseidon;
+mod redpallas;
 
 #[doc(hidden)]
 pub use crate::bls12_381::{
@@ -53,7 +48,6 @@ pub use crate::secp256k1::{secp256k1_recover_pubkey, secp256k1_verify};
 #[doc(hidden)]
 pub use crate::secp256r1::{secp256r1_recover_pubkey, secp256r1_verify};
 
-// Optional BN254 (Groth16 / EIP-196/197 layout) — multi-curve showcase.
 #[cfg(feature = "bn254")]
 #[doc(hidden)]
 pub use crate::bn254::{

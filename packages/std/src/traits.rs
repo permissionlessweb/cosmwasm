@@ -334,7 +334,7 @@ pub trait Api: Any {
     /// * `i` - The public instance bytes
     ///
     /// Returns `Ok(true)` if the proof is valid, `Ok(false)` if invalid, or an error if verification fails.
-    #[cfg(feature = "zk")]
+    
     #[allow(unused_variables)]
     fn proof_instance_verify(
         &self,
@@ -352,7 +352,7 @@ pub trait Api: Any {
     ///
     /// Host gas is scheduled before backend work (never wall-time). Optional
     /// feature `gpu` may select a CPU-golden GPU backend; accept/reject matches CPU.
-    #[cfg(feature = "zk")]
+    
     #[allow(unused_variables)]
     fn proof_instance_batch_verify(
         &self,
@@ -746,13 +746,13 @@ impl<'a, C: CustomQuery> QuerierWrapper<'a, C> {
     }
 
     /// Given a contract address, query information about that contract.
-    #[cfg(feature = "zk")]
+    
     pub fn query_circuit_info(&self, id: impl Into<u64>) -> StdResult<crate::CircuitInfoResponse> {
         let request = WasmQuery::CircuitInfo { zk_id: id.into() }.into();
         self.query(&request)
     }
     /// Given a contract address, query information about that contract.
-    #[cfg(feature = "zk")]
+    
     pub fn query_circuit(&self, id: impl Into<u64>) -> StdResult<crate::CircuitResponse> {
         let request = WasmQuery::Circuit { zk_id: id.into() }.into();
         self.query(&request)

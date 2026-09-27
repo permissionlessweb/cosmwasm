@@ -108,7 +108,7 @@ extern "C" {
     /// proof_len: length of proof bytes
     /// i_ptr: pointer to instance bytes in Wasm memory
     /// i_len: length of instance bytes
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_verify(
         zkid: u32,
         proof_ptr: u32,
@@ -119,7 +119,7 @@ extern "C" {
 
     /// Batch Path A verify (section-encoded zkids / proofs / instances).
     /// Returns 0 if all valid (or empty), 1 if any crypto-invalid, >1 on error.
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_batch_verify(zkids_ptr: u32, proofs_ptr: u32, instances_ptr: u32) -> u32;
 
     /// BLAKE2b-256 (feature hash-blake). Writes 32-byte digest to out_ptr. Returns 0.
@@ -778,7 +778,7 @@ impl Api for ExternalApi {
         }
     }
 
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_verify(
         &self,
         zkid: u64,
@@ -823,7 +823,7 @@ impl Api for ExternalApi {
         }
     }
 
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_batch_verify(
         &self,
         zkids: &[u64],

@@ -45,8 +45,6 @@ pub struct CachedCircuit {
 
 #[derive(Debug, Clone)]
 pub struct CachedParam {
-    /// Raw commitment-parameter bytes (not a verifying key).
-    /// Boxed slice: immutable after insert (no Vec capacity waste).
     pub params: Box<[u8]>,
     pub size_estimate: usize,
 }

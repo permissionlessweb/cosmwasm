@@ -244,7 +244,7 @@ cargo bench --features zk
 ### 4.4 Benchmark Implementation Details
 
 ```rust
-// In benches/main.rs - behind #[cfg(feature = "zk")]
+// In benches/main.rs - behind 
 
 // 1. Cold load: fresh cache per iteration, circuit pre-stored on disk
 fn bench_zk_circuit_cache(c: &mut Criterion) {

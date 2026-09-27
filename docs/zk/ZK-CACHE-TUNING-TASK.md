@@ -266,7 +266,7 @@ pub trait ZkCwEnv {
 
 The `CachedCircuit` type is re-exported from `cosmwasm_vm` as:
 ```rust
-#[cfg(feature = "zk")]
+
 pub use crate::modules::CachedCircuit;
 ```
 
@@ -307,7 +307,7 @@ After tuning, aim for:
 | `packages/vm/benches/zk_circuit.rs` | ZK benchmark suite (10 groups) |
 | `packages/vm/benches/main.rs` | Existing WASM cache benchmarks |
 | `docs/zk-cache-benchmarking.md` | Full documentation with architecture, footer spec, ops tuning |
-| `packages/vm/src/lib.rs` | Re-exports `CachedCircuit` behind `#[cfg(feature = "zk")]` |
+| `packages/vm/src/lib.rs` | Re-exports `CachedCircuit` behind `` |
 | `packages/vm/Cargo.toml` | `[[bench]]` entry for `zk_circuit` with `required-features = ["zk"]` |
 
 ---

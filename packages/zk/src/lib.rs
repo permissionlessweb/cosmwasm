@@ -17,7 +17,7 @@ pub use {
         AnyInstance, AnyVerifyingKey, CircuitType, CosmwasmCircuit, Proof, SerializedCircuitData,
     },
     curves::{
-        prove_flock, verify_flock_proof, StwoInstance, StwoVerifyingKey, ZkCurve,
+        prove_flock, verify_flock_proof, CurveType, StwoInstance, StwoVerifyingKey, ZkCurve,
         FLOCK_HOST_VERIFY, STWO_HOST_VERIFY,
     },
     footer::{CircuitFooter, COSMWASM_FOOTER_LENGTH},

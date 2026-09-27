@@ -23,8 +23,8 @@ mod halo2_kzg;
 mod stwo;
 mod vote;
 pub use flock::{
-    prove_flock, verify_flock_proof, FlockInstance, FlockVerifyingKey, FLOCK_CURVE_ID,
-    FLOCK_HOST_VERIFY, FLOCK_PROVER_ID,
+    flock_circuit_blob, flock_circuit_footer, prove_flock, verify_flock_proof, FlockInstance,
+    FlockVerifyingKey, FLOCK_CURVE_ID, FLOCK_HOST_VERIFY, FLOCK_PROVER_ID,
 };
 #[cfg(feature = "halo2-kzg")]
 pub use halo2_kzg::{kzg_footer, Halo2KzgInstance, Halo2KzgVerifyingKey, HALO2_KZG_CURVE_ID};

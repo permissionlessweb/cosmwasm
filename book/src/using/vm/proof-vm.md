@@ -117,38 +117,42 @@ Contract Wasm imports under `env` (wired in `packages/vm`). **Highlighted rows**
     <tr class="api-new">
       <td><code>blake2b_256</code> <span class="badge-new">NEW</span></td>
       <td>Hash</td>
-      <td><code>hash-blake</code></td>
+      <td>default (<code>hash_blake</code>)</td>
       <td>BLAKE2b digest truncated/output 32 bytes</td>
     </tr>
     <tr class="api-new">
       <td><code>blake3_256</code> <span class="badge-new">NEW</span></td>
       <td>Hash</td>
-      <td><code>hash-blake</code></td>
+      <td>default (<code>hash_blake</code>)</td>
       <td>BLAKE3 256-bit digest</td>
     </tr>
     <tr class="api-new">
       <td><code>bn254_add</code> <span class="badge-new">NEW</span></td>
       <td>Pairing curve</td>
-      <td><code>bn254</code></td>
+      <td>default (<code>bn254</code>)</td>
       <td>EIP-196 ECADD on alt_bn128 G1</td>
     </tr>
     <tr class="api-new">
       <td><code>bn254_scalar_mul</code> <span class="badge-new">NEW</span></td>
       <td>Pairing curve</td>
-      <td><code>bn254</code></td>
+      <td>default (<code>bn254</code>)</td>
       <td>EIP-196 ECMUL on alt_bn128 G1</td>
     </tr>
     <tr class="api-new">
       <td><code>bn254_pairing_equality</code> <span class="badge-new">NEW</span></td>
       <td>Pairing curve</td>
-      <td><code>bn254</code></td>
+      <td>default (<code>bn254</code>)</td>
       <td>EIP-197 pairing check (also used by Groth16 path)</td>
     </tr>
   </tbody>
   <caption>
-    Stock CosmWasm rows are always present on modern hosts. Rows marked
-    <span class="badge-new">NEW</span> require the listed feature on the linked
-    wasmvm / cosmwasm-vm build. Contract crates call
+    Stock CosmWasm rows are always present on modern hosts. BLAKE2b, BLAKE3,
+    BN254 (<code>bn254</code>, the BN256 / alt_bn128 host), Poseidon
+    (<code>hash_poseidon</code>), and RedPallas / RedJubjub
+    (<code>redpallas</code>) are default features of this VM and are in
+    <code>BuiltInCapabilities</code>. Other rows marked
+    <span class="badge-new">NEW</span> still require the listed feature.
+    Contract crates call
     <code>api.proof_instance_verify</code> via <code>cosmwasm-std</code> feature
     <code>zk</code>; hash and BN254 may be used as Wasm imports depending on std bindings.
   </caption>

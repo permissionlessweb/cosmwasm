@@ -71,7 +71,7 @@ const MAX_LENGTH_PROOF: usize = MI;
 const MAX_LENGTH_INSTANCES: usize = MI;
 /// Max number of items in one `proof_instance_batch_verify` call.
 /// Arbitrary bound for memory / DoS (each item is a full ZK verify).
-#[cfg(feature = "zk")]
+
 const MAX_COUNT_PROOF_INSTANCE_BATCH: usize = 32;
 
 #[inline(always)]
@@ -513,7 +513,7 @@ pub fn do_bls12_381_hash_to_g2<
 }
 
 // ── BN254 host functions (feature "bn254") ────────────────────────────────
-// EIP-196 / EIP-197 / EIP-1108 gas schedule from cosmwasm_crypto_bn254::gas.
+// EIP-196 / EIP-197 / EIP-1108 gas schedule from cosmwasm_crypto::gas.
 
 #[cfg(feature = "bn254")]
 /// Return code (error code) for a valid BN254 pairing
@@ -1284,7 +1284,7 @@ pub fn do_ed25519_batch_verify<
 
 /// Scheduled gas units for one Path A verify item (see docs/ZK-VERIFY-GAS.md).
 /// `units = 1 + max(1, ceil(proof/1024)) + ceil(instances/32)`.
-#[cfg(feature = "zk")]
+
 fn proof_instance_verify_gas_units(proof_len: usize, instances_len: usize) -> u64 {
     let proof_kib = (proof_len as u64).div_ceil(1024).max(1);
     let pi_limbs = (instances_len as u64).div_ceil(32);
@@ -1293,7 +1293,7 @@ fn proof_instance_verify_gas_units(proof_len: usize, instances_len: usize) -> u6
 
 /// Path A: resolve `zkid` → `AnyVerifyingKey` via CircuitInfo + host cache / cold Circuit.
 /// Never reads the contract's sandboxed KVStore for circuit data. Pin/LRU unchanged.
-#[cfg(feature = "zk")]
+
 fn load_verifying_key_for_zkid<
     A: BackendApi + 'static,
     S: Storage + 'static,
@@ -1373,7 +1373,7 @@ fn load_verifying_key_for_zkid<
 }
 
 /// Build + arity-check public instances for a VK (footer.curve_id routing, H-05).
-#[cfg(feature = "zk")]
+
 fn prepare_instances_for_vk(
     vk: &zk_cosmwasm::AnyVerifyingKey,
     instances_bytes: &[u8],
@@ -1406,7 +1406,7 @@ fn prepare_instances_for_vk(
 /// scheduled `halo2_proof_instance_verify_cost` below — never wall-time.
 /// Blake hosts never use GPU. Pin/LRU unchanged (load ≠ pin).
 /// See docs/research/gpu-accel/DESIGN-G1-verifier-backend.md
-#[cfg(feature = "zk")]
+
 pub fn do_proof_instance_verify<
     A: BackendApi + 'static,
     S: Storage + 'static,
@@ -1480,7 +1480,7 @@ pub fn do_proof_instance_verify<
 ///
 /// Dispatches to `select_backend().batch_verify(...)` (`CpuBackend` golden; `GpuBackend` stub OK).
 /// See docs/research/gpu-accel/DESIGN-G1-verifier-backend.md §5 / §8.
-#[cfg(feature = "zk")]
+
 pub fn do_proof_instance_batch_verify<
     A: BackendApi + 'static,
     S: Storage + 'static,
@@ -1605,7 +1605,7 @@ pub fn do_proof_instance_batch_verify<
 }
 
 /// Canonical zkid section: 8-byte little-endian `u64`. Also accepts 4-byte LE `u32`.
-#[cfg(feature = "zk")]
+
 fn parse_batch_zkid_section(sec: &[u8]) -> VmResult<u64> {
     match sec.len() {
         8 => {
@@ -1625,7 +1625,7 @@ fn parse_batch_zkid_section(sec: &[u8]) -> VmResult<u64> {
 }
 
 /// Count public-input field limbs for H-05 arity check.
-#[cfg(feature = "zk")]
+
 fn instance_public_input_count(i: &zk_cosmwasm::AnyInstance) -> usize {
     match i {
         zk_cosmwasm::AnyInstance::Vesta(v) => v.get_size(),
@@ -1640,7 +1640,7 @@ fn instance_public_input_count(i: &zk_cosmwasm::AnyInstance) -> usize {
 }
 
 /// Helper: run a cosmwasm query through the instance querier and return the system result.
-#[cfg(feature = "zk")]
+
 fn query_raw<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
     data: &Environment<A, S, Q>,
     store: &mut impl wasmer::AsStoreMut,
@@ -4214,9 +4214,9 @@ mod tests {
 
     /// Missing CircuitInfo/Circuit for zkid → host Err (not process panic, not Ok(0)).
     #[test]
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_verify_missing_circuit_is_err_not_panic() {
-        use cosmwasm_std::{ContractResult, SystemResult, WasmQuery};
+        use cosmwasm_std::{SystemResult, WasmQuery};
 
         let api = MockApi::default();
         let (fe, mut store, _instance) =
@@ -4265,7 +4265,7 @@ mod tests {
 
     /// Circle STWO through Path A. Without STWO_HOST_VERIFY, dummy DSTW is rejected.
     #[test]
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_verify_stwo_ok_bad_proof_missing_not_panic() {
         use cosmwasm_std::{
             to_json_binary, Addr, CircuitInfoResponse, CircuitResponse, ContractResult,
@@ -4378,7 +4378,7 @@ mod tests {
 
     /// Empty batch: section-empty inputs → Ok(0), gas charged (base only).
     #[test]
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_batch_verify_empty_ok() {
         let api = MockApi::default();
         let (fe, mut store, _instance) = make_instance(api);
@@ -4403,7 +4403,7 @@ mod tests {
 
     /// Length mismatch between section lists → host Err (before verify).
     #[test]
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_batch_verify_length_mismatch_err() {
         let api = MockApi::default();
         let (fe, mut store, _instance) = make_instance(api);

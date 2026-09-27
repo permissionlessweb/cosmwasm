@@ -39,7 +39,6 @@ pub struct InMemoryCache {
     cache: Option<CLruCache<CacheKey, CacheEntry, RandomState, SizeScale>>,
 }
 
-#[cfg(feature = "zk")]
 impl InMemoryCache {
     pub fn store_circuit(
         &mut self,
@@ -111,24 +110,6 @@ impl InMemoryCache {
         }
     }
 
-    /// Looks up a circuit stored under a 36-byte vk file key.
-    ///
-    /// Note: full circuits are normally keyed by the 72-byte circuit key via
-    /// [`Self::load_circuit`]. This exists for partial-key lookups of cs+vk
-    /// material that was cached under `CacheKey::PartialKey`.
-    pub fn load_vk(&mut self, vk_file_key: &[u8; 36]) -> VmResult<Option<super::CachedCircuit>> {
-        if let Some(modules) = &mut self.cache {
-            match modules.get(&CacheKey::PartialKey(*vk_file_key)) {
-                Some(cached) => match cached {
-                    CacheEntry::Circuit(zk) => Ok(Some(zk.clone())),
-                    _ => Ok(None),
-                },
-                None => Ok(None),
-            }
-        } else {
-            Ok(None)
-        }
-    }
 }
 
 impl InMemoryCache {

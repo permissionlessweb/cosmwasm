@@ -26,13 +26,12 @@ mod static_analysis;
 pub mod testing;
 mod wasm_backend;
 
-#[cfg(feature = "zk")]
 pub mod zk;
 
-#[cfg(feature = "zk")]
+
 pub use zk_cosmwasm::{self, install_path_a_hosts};
 
-#[cfg(feature = "zk")]
+
 pub use crate::zk::{check_circuit, AnyInstance, AnyVerifyingKey, Proof, SerializedCircuitData};
 
 pub use crate::backend::{
@@ -61,7 +60,7 @@ pub use crate::calls::{
     call_ibc_packet_ack, call_ibc_packet_ack_raw, call_ibc_packet_receive,
     call_ibc_packet_receive_raw, call_ibc_packet_timeout, call_ibc_packet_timeout_raw,
 };
-#[cfg(feature = "zk")]
+
 pub use crate::modules::CachedCircuit;
 
 pub use crate::capabilities::{
@@ -91,3 +90,4 @@ pub mod internals {
         compile, compile_module, make_compiling_engine, make_runtime_engine,
     };
 }
+

@@ -6,7 +6,7 @@
 
 This document describes the three-tier caching architecture used to store and retrieve Halo2 zero-knowledge proof circuit data. By extending the existing CosmWasm VM caching infrastructure with separate param/vk/circuit storage paths, we minimize memory pressure while keeping hot circuit keys instantly accessible.
 
-The key insight: commitment parameters are 65KB+ and identical across all circuits sharing the same `k` value. Storing a copy of the params alongside every VK in pinned memory would waste hundreds of KB per circuit. Instead, params are stored independently and reconstructed only when the circuit is loaded from disk.
+Commitment parameters for a given `(prover_id, curve_id, k)` are identical across circuits and are stored once as `zk_param/<param_key>.bin`. That sharing is on disk. A cached circuit holds its own deserialized `AnyVerifyingKey`, params included. The verify path does not consult the param LRU or the pinned param map; a circuit miss reads the param file and deserializes it again. `param_len = 0` (BN254 / Groth16) has no reusable param blob.
 
 ---
 
@@ -16,7 +16,7 @@ The key insight: commitment parameters are 65KB+ and identical across all circui
 
 | Layer | Key Type | Eviction Policy | Persistence |
 |-------|----------|-----------------|-------------|
-| **Pinned Memory** | `[u8; 72]` (circuit) / `[u8; 36]` (param) | Manual only | Until node restart |
+| **Pinned Memory** | `[u8; 72]` (circuit) / `[u8; 36]` (param) | Circuits: oldest-first at 100 entries or 100 MiB. Params: no eviction | Until node restart |
 | **In-Memory LRU** | `CacheKey` enum (unified) | LRU automatic | Until node restart |
 | **File System** | `[u8; 72]` / `[u8; 36]` hex filenames | Manual only | Survives restart |
 
@@ -149,24 +149,20 @@ When a circuit is loaded via `Cache::load_circuit(circuit_key)`:
 ```
 load_circuit(circuit_key)
     │
-    ├── PinnedMemoryCache hit?  → return CachedCircuit    ← <1 μs
+    ├── Pinned circuit hit?  → clone that circuit's CachedCircuit
     │
-    ├── InMemoryCache hit?      → return CachedCircuit    ← <1 μs
+    ├── LRU circuit hit?     → clone that circuit's CachedCircuit
     │
-    ├── FileSystemCache hit?    → return, store in LRU    ← 1-10 ms
+    ├── FileSystem circuit hit? → deserialize, store in LRU
     │
-    └── MISS: load_circuit_with_path(wasm_path, param_key, vk_key)
+    └── MISS: read zk_param/{param_key}.bin and zk_vk/{vk_key}.bin
+              from disk. This does not call load_param.
             │
-            ├── zk_param/{param_key}.bin exists AND
-            │   zk_vk/{vk_key}.bin exists?
-            │   → read both files
-            │   → validate checksums
+            ├── split files match the footer
             │   → AnyVerifyingKey::from_split_bytes(...)
-            │   → store in FS cache + LRU cache
+            │   → store that circuit in the LRU
             │
-            └── monolithic fallback:
-                → zk_circuit/{circuit_key}.bin
-                → load_circuit_from_disk()
+            └── else monolithic zk_circuit/{circuit_key}.bin
                 → AnyVerifyingKey::from_bytes()
 ```
 
@@ -196,7 +192,7 @@ load_circuit(circuit_key)
 
 ## Pinned Memory Cache
 
-Provides the fastest access tier. Entries are never automatically evicted.
+Provides the fastest access tier. Circuit entries evict oldest-first at 100 circuits or 100 MiB (`PinnedMemoryCache::new`). Param entries are not evicted. The verify loader does not read the param map.
 
 ```rust
 pub struct PinnedMemoryCache {

@@ -13,8 +13,8 @@
 //! - **Instances**: concat of 32-byte **big-endian** Fr limbs; Fr ≥ r rejected
 //! - **Footer**: empty-param Groth16 (`prover_id=1`, `curve_id=4`, `param_len=0`)
 
-use crate::{curves::ZkCurve, ZkError, ZkResult};
 use crate::COSMWASM_FOOTER_LENGTH;
+use crate::{curves::ZkCurve, ZkError, ZkResult};
 
 #[cfg(feature = "bn254")]
 use ark_bn254::{Bn254, Fr};
@@ -55,12 +55,6 @@ impl Bn254Scalar {
         fr_from_be32_checked(&self.0)
     }
 }
-
-// ── Affine ────────────────────────────────────────────────────────────────
-
-/// BN254 affine curve point (G1).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Bn254Affine(pub [u8; 64]);
 
 // ── Instance ──────────────────────────────────────────────────────────────
 
@@ -162,14 +156,8 @@ impl Bn254VerifyingKey {
     /// - Well-formed but invalid proof → `ZkError::VerifyFailed`
     /// - Valid proof → `Ok(())`
     pub fn verify(&self, proof: &crate::Proof, instances: &[Bn254Instance]) -> ZkResult<()> {
-        #[cfg(feature = "bn254")]
         {
             self.verify_ark(proof, instances)
-        }
-        #[cfg(not(feature = "bn254"))]
-        {
-            let _ = (proof, instances);
-            Err(ZkError::new_err("BN254 feature not enabled"))
         }
     }
 
@@ -232,6 +220,10 @@ impl TryFrom<&[u8]> for Bn254VerifyingKey {
         Ok(Self { vk_bytes, footer })
     }
 }
+
+/// BN254 affine curve point (G1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bn254Affine(pub [u8; 64]);
 
 // ── ZkCurve impl ──────────────────────────────────────────────────────────
 

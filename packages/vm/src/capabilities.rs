@@ -33,12 +33,7 @@ pub mod multi_curve_caps {
 
 /// Returns capability names enabled by **this** `cosmwasm-vm` build's cargo features.
 ///
-/// Use when assembling the chain's available-capabilities set so guest
-/// `requires_*` exports match the linked host imports. Feature-off default
-/// returns only `zk` when the default `zk` feature is on (see package features).
-///
-/// Does **not** claim chain genesis already advertises these — that is an
-/// operator / wasmd residual (RH3 docs).
+/// `bn254`, `hash_blake`, `hash_poseidon`, and `redpallas` are default features.
 pub fn feature_gated_host_capabilities() -> HashSet<String> {
     let mut set = HashSet::new();
     // This VM always meters rustc memory.copy/fill. Chains that have not
@@ -60,7 +55,7 @@ pub fn feature_gated_host_capabilities() -> HashSet<String> {
     {
         set.insert(multi_curve_caps::REDPALLAS.to_string());
     }
-    #[cfg(feature = "zk")]
+    
     {
         set.insert(multi_curve_caps::ZK.to_string());
     }
@@ -121,17 +116,12 @@ mod tests {
     #[test]
     fn feature_gated_host_capabilities_respects_cfg() {
         let set = feature_gated_host_capabilities();
-        // Default package features include `zk`; multi-curve stay off unless opted in.
-        #[cfg(feature = "zk")]
+        
         assert!(set.contains(multi_curve_caps::ZK));
-        #[cfg(not(feature = "bn254"))]
-        assert!(!set.contains(multi_curve_caps::BN254));
-        #[cfg(not(feature = "hash-blake"))]
-        assert!(!set.contains(multi_curve_caps::HASH_BLAKE));
-        #[cfg(not(feature = "hash-poseidon"))]
-        assert!(!set.contains(multi_curve_caps::HASH_POSEIDON));
-        #[cfg(not(feature = "redpallas"))]
-        assert!(!set.contains(multi_curve_caps::REDPALLAS));
+        assert!(set.contains(multi_curve_caps::BN254));
+        assert!(set.contains(multi_curve_caps::HASH_BLAKE));
+        assert!(set.contains(multi_curve_caps::HASH_POSEIDON));
+        assert!(set.contains(multi_curve_caps::REDPALLAS));
     }
 
     #[test]
