@@ -68,7 +68,7 @@ thiserror = "1.0.26"
 wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass"] }
 wasmer-middlewares = "=5.0.6"
 wasmer-types = "=5.0.6"
-nam-wasm-instrument = { git = "https://github.com/permissionlessweb/nam-wasm-instrument", rev = "a198fb5b634acb36f0f47de931084cb8773c87f7", features = ["sign_ext", "bulk", "simd"] }
+nam-wasm-instrument = { git = "https://github.com/permissionlessweb/nam-wasm-instrument", rev = "248ac2796903fe39977f31cb9bdef54c77ccf7a0", features = ["sign_ext", "bulk", "simd"] }
 
 halo2_proofs = { package = "zakura-halo2-proofs", git = "https://github.com/permissionlessweb/common", rev = "5364d3d989640e5356351ee8c0d062ca18d4bfaa", default-features = false, features = ["batch"] }
 zk-cosmwasm  = { workspace = true, default-features = false, features = ["interface"], optional = true }

@@ -2835,8 +2835,8 @@ dependencies = [
 
 [[package]]
 name = "nam-wasm-instrument"
-version = "0.5.3-terp.1"
-source = "git+https://github.com/permissionlessweb/nam-wasm-instrument?rev=a198fb5b634acb36f0f47de931084cb8773c87f7#a198fb5b634acb36f0f47de931084cb8773c87f7"
+version = "0.5.3-terp.2"
+source = "git+https://github.com/permissionlessweb/nam-wasm-instrument?rev=248ac2796903fe39977f31cb9bdef54c77ccf7a0#248ac2796903fe39977f31cb9bdef54c77ccf7a0"
 dependencies = [
  "parity-wasm",
 ]
@@ -2988,7 +2988,7 @@ dependencies = [
 [[package]]
 name = "parity-wasm"
 version = "0.45.0"
-source = "git+https://github.com/permissionlessweb/nam-wasm-instrument?rev=a198fb5b634acb36f0f47de931084cb8773c87f7#a198fb5b634acb36f0f47de931084cb8773c87f7"
+source = "git+https://github.com/permissionlessweb/nam-wasm-instrument?rev=248ac2796903fe39977f31cb9bdef54c77ccf7a0#248ac2796903fe39977f31cb9bdef54c77ccf7a0"
 
 [[package]]
 name = "parking_lot"
