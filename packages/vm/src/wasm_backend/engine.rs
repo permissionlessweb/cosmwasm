@@ -58,7 +58,14 @@ pub fn make_compiling_engine(
     memory_limit: Option<Size>,
     parsed_wasm: Option<ParsedWasm>,
 ) -> Engine {
-    let gas_limit = 0;
+    compiling_engine(0, memory_limit, parsed_wasm)
+}
+
+fn compiling_engine(
+    gas_limit: u64,
+    memory_limit: Option<Size>,
+    parsed_wasm: Option<ParsedWasm>,
+) -> Engine {
     let deterministic = Arc::new(Gatekeeper::default());
     let metering = Arc::new(Metering::new(gas_limit, cost, parsed_wasm));
 
@@ -73,6 +80,11 @@ pub fn make_compiling_engine(
         engine.set_tunables(tunables);
     }
     engine
+}
+
+#[cfg(test)]
+pub fn make_compiling_engine_with_gas(gas_limit: u64) -> Engine {
+    compiling_engine(gas_limit, None, None)
 }
 
 fn limit_to_pages(limit: Size) -> Pages {

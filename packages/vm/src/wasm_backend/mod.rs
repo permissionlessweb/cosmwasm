@@ -5,7 +5,7 @@ mod limiting_tunables;
 mod metering;
 
 #[cfg(test)]
-pub use engine::make_compiler_config;
+pub use engine::{make_compiler_config, make_compiling_engine_with_gas};
 
 pub use compile::{compile, compile_module};
 pub use engine::{make_compiling_engine, make_runtime_engine, COST_FUNCTION_HASH};

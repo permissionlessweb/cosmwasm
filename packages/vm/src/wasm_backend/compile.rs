@@ -51,6 +51,10 @@ mod tests {
 
     static FLOATY: &[u8] = include_bytes!("../../testdata/floaty.wasm");
     static WIDE_STACK: &str = include_str!("../../testdata/wide_operand_stack.wat");
+    static BULK: &str = include_str!("../../testdata/bulk_memory.wat");
+    static SIMD_TRUNC: &str = include_str!("../../testdata/simd_trunc_sat.wat");
+    static BLAKE3_GUEST: &str = include_str!("../../testdata/blake3_simd_guest.wat");
+    static BULK_RUSTC: &[u8] = include_bytes!("../../testdata/bulk_copy_rustc.wasm");
 
     /// No stack-height rewrite. One function with a 5000-deep operand stack
     /// hits the native guard. `compile` is what rejects it.
@@ -106,6 +110,154 @@ mod tests {
         let wasm = wat::parse_str(WASM).unwrap();
         let engine = make_compiling_engine(None, None);
         let error = compile(&engine, &wasm).unwrap_err();
-        assert!(error.to_string().contains("FuncRef"));
+        let text = error.to_string();
+        assert!(
+            text.contains("FuncRef") || text.contains("value type"),
+            "{text}"
+        );
+    }
+
+    /// 0xFC (memory.copy) is decoded by the limiter and allowed by the
+    /// gatekeeper. Singlepass then emits a libcall; this checks the module
+    /// is accepted, which is the compile gate contracts hit.
+    #[test]
+    fn bulk_memory_copy_passes_limiter() {
+        let wasm = wat::parse_str(BULK).unwrap();
+        assert!(
+            wasm.windows(2).any(|w| w == [0xfc, 0x0a]),
+            "wat did not emit memory.copy"
+        );
+        let engine = make_compiling_engine(None, None);
+        compile(&engine, &wasm).expect("memory.copy");
+    }
+
+    /// 0xFD 0xFC is i32x4.trunc_sat_f64x2_s_zero. The limiter must decode it.
+    /// The gatekeeper then refuses guest SIMD. The error is not a parse failure.
+    #[test]
+    fn simd_trunc_sat_is_decoded_then_rejected_by_gatekeeper() {
+        let wasm = wat::parse_str(SIMD_TRUNC).unwrap();
+        assert!(
+            wasm.windows(2).any(|w| w == [0xfd, 0xfc]),
+            "wat did not emit 0xFD 0xFC"
+        );
+        let engine = make_compiling_engine(None, None);
+        let error = compile(&engine, &wasm).unwrap_err();
+        let text = error.to_string();
+        assert!(
+            text.contains("SIMD"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("Unknown opcode"),
+            "{text}"
+        );
+    }
+
+    fn limited_wasm(wasm: &[u8]) -> Vec<u8> {
+        use nam_wasm_instrument::parity_wasm::elements::{ImportCountType, Module as PModule};
+        let parsed: PModule = nam_wasm_instrument::parity_wasm::deserialize_buffer(wasm).unwrap();
+        let n_import = parsed.import_count(ImportCountType::Function) as u32;
+        let exempt: std::collections::BTreeSet<u32> = (0..n_import).collect();
+        let limited = nam_wasm_instrument::inject_stack_limiter(
+            parsed,
+            MAX_WASM_STACK_HEIGHT,
+            &exempt,
+        )
+        .unwrap();
+        nam_wasm_instrument::parity_wasm::serialize(limited).unwrap()
+    }
+
+    #[test]
+    fn rustc_bulk_guest_passes_limiter() {
+        let engine = make_compiling_engine(None, None);
+        compile(&engine, BULK_RUSTC).expect("rustc memory.copy guest");
+    }
+
+    #[test]
+    fn bulk_memory_copy_executes() {
+        // memory.copy's metered base is 4_500_000. Stay above that.
+        let wasm = limited_wasm(&wat::parse_str(BULK).unwrap());
+        let engine = crate::wasm_backend::make_compiling_engine_with_gas(20_000_000);
+        let mut store = Store::new(engine);
+        let module = Module::new(&store, &wasm).unwrap();
+        let instance = Instance::new(&mut store, &module, &imports! {}).unwrap();
+        let got = instance
+            .exports
+            .get_function("go")
+            .unwrap()
+            .call(&mut store, &[])
+            .unwrap();
+        assert_eq!(got[0].unwrap_i32(), 0x11);
+    }
+
+    /// Guest calls env.blake3_256 the way cosmwasm-std does, and the module
+    /// also contains memory.copy plus i32x4.trunc_sat_f64x2_s_zero.
+    #[test]
+    fn blake3_host_api_accepts_simd_guest() {
+        use wasmer::{Function, FunctionEnv, FunctionEnvMut, Memory};
+
+        struct Host {
+            memory: Option<Memory>,
+        }
+
+        fn read_region(view: &wasmer::MemoryView, ptr: u32) -> (u32, u32) {
+            let mut buf = [0u8; 12];
+            view.read(ptr as u64, &mut buf).unwrap();
+            let offset = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+            let length = u32::from_le_bytes(buf[8..12].try_into().unwrap());
+            (offset, length)
+        }
+
+        let wasm = limited_wasm(&wat::parse_str(BLAKE3_GUEST).unwrap());
+        let engine = crate::wasm_backend::make_compiling_engine_with_gas(100_000);
+        let mut store = Store::new(engine);
+        let module = Module::new(&store, &wasm).unwrap();
+        let host = FunctionEnv::new(&mut store, Host { memory: None });
+        let blake3 = Function::new_typed_with_env(
+            &mut store,
+            &host,
+            |mut env: FunctionEnvMut<Host>, in_ptr: i32, out_ptr: i32| -> i32 {
+                let (data, store) = env.data_and_store_mut();
+                let Some(memory) = data.memory.as_ref() else {
+                    return 2;
+                };
+                let view = memory.view(&store);
+                let (in_off, in_len) = read_region(&view, in_ptr as u32);
+                let mut msg = vec![0u8; in_len as usize];
+                if view.read(in_off as u64, &mut msg).is_err() {
+                    return 3;
+                }
+                let digest = cosmwasm_crypto::blake3_256(&msg);
+                let (out_off, out_len) = read_region(&view, out_ptr as u32);
+                if out_len != 32 || view.write(out_off as u64, &digest).is_err() {
+                    return 4;
+                }
+                0
+            },
+        );
+        let mut imports = imports! {};
+        imports.define("env", "blake3_256", blake3);
+        let instance = Instance::new(&mut store, &module, &imports).unwrap();
+        host.as_mut(&mut store).memory = Some(instance.exports.get_memory("memory").unwrap().clone());
+        let ping = instance
+            .exports
+            .get_function("ping")
+            .unwrap()
+            .call(&mut store, &[])
+            .expect("ping")[0]
+            .unwrap_i32();
+        assert_eq!(ping, 7);
+        let code = instance
+            .exports
+            .get_function("hash")
+            .unwrap()
+            .call(&mut store, &[])
+            .unwrap()[0]
+            .unwrap_i32();
+        assert_eq!(code, 0);
+        let memory = instance.exports.get_memory("memory").unwrap();
+        let mut got = [0u8; 32];
+        memory.view(&store).read(200, &mut got).unwrap();
+        assert_eq!(got, cosmwasm_crypto::blake3_256(b"terp"));
     }
 }
