@@ -13,8 +13,8 @@ use sha2::{Digest as _, Sha256};
 
 pub(crate) type VestaInstance = CwInstance<VestaAffine>;
 pub(crate) type VestaVerifyingKey = CwVerifyingKey<VestaAffine>;
-pub(crate) type VestaProvingKey = CwProvingKey<VestaAffine>;
-pub(crate) type VestaConstraintSystem = CwConstraintSystem<VestaAffine>;
+pub(crate) type _VestaProvingKey = CwProvingKey<VestaAffine>;
+pub(crate) type _VestaConstraintSystem = CwConstraintSystem<VestaAffine>;
 pub(crate) type VestaParams = CwCircuitParam<VestaAffine>;
 
 impl TryFrom<halo2_proofs::poly::commitment::Params<vesta::Affine>> for VestaParams {
@@ -168,20 +168,12 @@ impl VestaVerifyingKey {
         p: VestaParams,
     ) -> ZkResult<Self> {
         let cs = plonk::ConstraintSystem::read(&mut reader)?;
-        let _guard = CsBlueprintGuard::install(CsBlueprint {
-            num_fixed_columns: cs.get_num_fixed_columns(),
-            num_advice_columns: cs.get_num_advice_columns(),
-            num_instance_columns: cs.get_num_instance_columns(),
-            num_selectors: cs.get_num_selectors(),
-            permutation_columns: cs.get_permutation_columns(),
-        });
+        let _guard = CsBlueprintGuard::install(CsBlueprint::from_cs(&cs)?);
 
-        let empty_selectors: Vec<Vec<bool>> = vec![];
         let vk = halo2_proofs::plonk::VerifyingKey::read_with_cs::<std::io::Cursor<&[u8]>>(
             &mut reader,
             &p.params,
             cs,
-            empty_selectors,
         )
         .map_err(|e| {
             ZkError::new_io(std::io::Error::new(
@@ -219,11 +211,7 @@ impl VestaVerifyingKey {
         let params =
             halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(&mut param_reader)?;
         let mut vk_reader = std::io::Cursor::new(vk_body_bytes);
-        Self::from_bytes_without_params(
-            &mut vk_reader,
-            footer,
-            VestaParams::try_from(params)?,
-        )
+        Self::from_bytes_without_params(&mut vk_reader, footer, VestaParams::try_from(params)?)
     }
 }
 
@@ -262,7 +250,7 @@ impl VestaVerifyingKey {
     /// The embedded CS is deserialized and used for VK reconstruction,
     /// giving exact circuit-agnostic verification without the original Rust type.
     pub fn from_bytes_with_params(bytes: &[u8]) -> ZkResult<Self> {
-        let footer_bytes = &bytes[bytes.len() - halo2_proofs::COSMWASM_FOOTER_LENGTH..];
+        let footer_bytes = &bytes[bytes.len() - crate::COSMWASM_FOOTER_LENGTH..];
         let mut reader = std::io::Cursor::new(bytes);
         let params = halo2_proofs::poly::commitment::Params::<vesta::Affine>::read(&mut reader)?;
         Self::from_bytes_without_params(

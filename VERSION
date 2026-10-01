@@ -1,0 +1,4 @@
+source_repo: https://github.com/permissionlessweb/cosmwasm
+source_commit: ede49ae375a47c48c821863cf202a65abc892bd8
+folded_into: crates/cosmwasm
+archive_when_accepted: public archive of permissionlessweb/cosmwasm

@@ -26,21 +26,20 @@ mod static_analysis;
 pub mod testing;
 mod wasm_backend;
 
-#[cfg(feature = "zk")]
 pub mod zk;
 
-#[cfg(feature = "zk")]
-pub use zk_cosmwasm::{self};
 
-#[cfg(feature = "zk")]
+pub use zk_cosmwasm::{self, install_path_a_hosts};
+
+
 pub use crate::zk::{check_circuit, AnyInstance, AnyVerifyingKey, Proof, SerializedCircuitData};
 
 pub use crate::backend::{
     Backend, BackendApi, BackendError, BackendResult, GasInfo, Querier, Storage,
 };
-pub use crate::cache::{AnalysisReport, CacheKey, Cache, Metrics, PerModuleMetrics, PinnedMetrics, Stats};
-#[cfg(feature = "zk")]
-pub use crate::modules::CachedCircuit;
+pub use crate::cache::{
+    AnalysisReport, Cache, CacheKey, Metrics, PerModuleMetrics, PinnedMetrics, Stats,
+};
 pub use crate::calls::{
     call_execute, call_execute_raw, call_ibc_destination_callback,
     call_ibc_destination_callback_raw, call_ibc_source_callback, call_ibc_source_callback_raw,
@@ -62,6 +61,8 @@ pub use crate::calls::{
     call_ibc_packet_receive_raw, call_ibc_packet_timeout, call_ibc_packet_timeout_raw,
 };
 
+pub use crate::modules::CachedCircuit;
+
 pub use crate::capabilities::{
     capabilities_from_csv, feature_gated_host_capabilities, multi_curve_caps, CAP_BULK_MEMORY,
 };
@@ -74,7 +75,7 @@ pub use crate::instance::{DebugInfo, GasReport, Instance, InstanceOptions};
 pub use crate::serde::{from_slice, to_vec};
 pub use crate::size::Size;
 
-pub use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+pub use zk_cosmwasm::COSMWASM_FOOTER_LENGTH;
 
 pub mod internals {
     #![doc(hidden)]
@@ -89,3 +90,4 @@ pub mod internals {
         compile, compile_module, make_compiling_engine, make_runtime_engine,
     };
 }
+

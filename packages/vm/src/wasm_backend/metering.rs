@@ -9,10 +9,10 @@ use crate::parsed_wasm::ParsedWasm;
 use std::sync::{Arc, Mutex};
 use wasmer::wasmparser::{BlockType, Operator};
 use wasmer::{
-    ExportIndex, FunctionMiddleware, GlobalInit, GlobalType, LocalFunctionIndex, MiddlewareError,
-    MiddlewareReaderState, ModuleMiddleware, Mutability, Type,
+    sys::{FunctionMiddleware, MiddlewareReaderState, ModuleMiddleware},
+    ExportIndex, GlobalInit, GlobalType, LocalFunctionIndex, Mutability, Type,
 };
-use wasmer_types::{GlobalIndex, ModuleInfo};
+use wasmer_types::{GlobalIndex, MiddlewareError, ModuleInfo};
 
 /// Minimum number of local variables in a function
 /// that incur charging with additional gas points.
@@ -122,7 +122,10 @@ impl<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync> Metering<F> {
 impl<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync + 'static> ModuleMiddleware
     for Metering<F>
 {
-    fn generate_function_middleware(&self, idx: LocalFunctionIndex) -> Box<dyn FunctionMiddleware> {
+    fn generate_function_middleware<'a>(
+        &self,
+        idx: LocalFunctionIndex,
+    ) -> Box<dyn FunctionMiddleware<'a>> {
         let locals_count = self
             .function_locals
             .get(idx.as_u32() as usize)
@@ -213,7 +216,7 @@ impl<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync> std::fmt::Debug
     }
 }
 
-impl<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync> FunctionMiddleware
+impl<F: Fn(&Operator) -> MeteringCoefficients + Send + Sync> FunctionMiddleware<'_>
     for FunctionMetering<F>
 {
     fn feed<'a>(
@@ -403,6 +406,7 @@ fn gas_check_linear_bulk_memory_wasm_code<'a>(
 }
 
 /// Pure helper used by tests: same ceil-div as the injected Wasm (`(len + unit-1) / unit`).
+#[cfg(test)]
 pub fn linear_bulk_cost(coeffs: MeteringCoefficients, len: u32) -> u64 {
     assert!(coeffs.unit_size > 0);
     let units = (len as u64).saturating_add(coeffs.unit_size - 1) / coeffs.unit_size;
@@ -460,7 +464,10 @@ mod tests {
         assert!(linear_bulk_cost(copy, 1) > linear_bulk_cost(copy, 0));
         assert!(linear_bulk_cost(copy, 64) < linear_bulk_cost(copy, 65));
         let max = linear_bulk_cost(copy, u32::MAX);
-        assert!(max < i64::MAX as u64, "dynamic cost must fit i64 for Wasm i64.mul");
+        assert!(
+            max < i64::MAX as u64,
+            "dynamic cost must fit i64 for Wasm i64.mul"
+        );
         // Huge copy must be far more expensive than a single opcode.
         assert!(max > 1_000_000_000_000);
     }
@@ -468,9 +475,7 @@ mod tests {
     #[test]
     fn branching_ops_are_detected() {
         assert!(is_branching_operator(&Operator::Return));
-        assert!(is_branching_operator(&Operator::Call {
-            function_index: 0
-        }));
+        assert!(is_branching_operator(&Operator::Call { function_index: 0 }));
         assert!(!is_branching_operator(&Operator::I32Const { value: 1 }));
     }
 }

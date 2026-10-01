@@ -19,14 +19,14 @@
 
 #![cfg(feature = "hash-poseidon")]
 
-mod pasta;
 mod bls12_377;
+mod pasta;
 
-pub use pasta::{
-    poseidon_hash_pallas, poseidon_hash_pallas_bytes, poseidon_hash_vesta,
-    poseidon_hash_vesta_bytes, PASTA_FIELD_BYTES, PASTA_MAX_ARITY,
-};
 pub use bls12_377::{
     poseidon377_hash, poseidon377_hash_bytes, POSEIDON377_FIELD_BYTES, POSEIDON377_MAX_ARITY,
     POSEIDON377_MIN_ARITY,
+};
+pub use pasta::{
+    poseidon_hash_pallas, poseidon_hash_pallas_bytes, poseidon_hash_vesta,
+    poseidon_hash_vesta_bytes, PASTA_FIELD_BYTES, PASTA_MAX_ARITY,
 };

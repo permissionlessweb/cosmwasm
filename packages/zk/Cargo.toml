@@ -34,6 +34,13 @@ bn254 = [
 # Default OFF — no accelerator deps until G2 wires them under this feature only.
 # See docs/research/gpu-accel/DESIGN-G1-verifier-backend.md
 gpu = []
+# Axiom Halo2 KZG / SHPLONK on BN256 (curve_id 6; e.g. zkjwt passkey).
+# Default OFF — pulls halo2-axiom + halo2-base; host-side only, do not enable
+# for CosmWasm guest wasm32 builds (axiom enables multicore via halo2-base).
+# halo2_proofs/multicore keeps PSE batch.rs in sync with maybe-rayon/threads,
+# which halo2-base turns on transitively (mixed on/off fails to compile).
+halo2-kzg = ["dep:halo2-axiom", "dep:halo2-base", "halo2_proofs/multicore"]
+
 
 [dependencies]
 ark-bn254 = { version = "0.5.0", optional = true, default-features = false, features = ["curve"] }
@@ -49,19 +56,21 @@ base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 # Uses the path when built locally; uses the given version from crates.io when published
 cosmwasm-vm-derive = { workspace = true }
-group = "0.13.0"
+group = "0.14"
 hex = "0.4"
-pasta_curves = "0.5"
+pasta_curves = { package = "zakura-pasta-curves", git = "https://github.com/permissionlessweb/common", rev = "5364d3d989640e5356351ee8c0d062ca18d4bfaa" }
 rand = "0.8"
 rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { workspace = true }
 serde_json = "1.0.140"
 thiserror = "1.0.26"
-# Do not enable `test-dependencies` here — that pulls proptest/wait-timeout and
-# breaks CosmWasm guest wasm32 builds (cw-headstash BridgeMintNote / ict funded).
 # Guest wasm: never enable halo2_proofs default (batch+multicore) — multicore breaks wasm32.
-halo2_gadgets = { path = "../../../zcash/halo2/halo2_gadgets", default-features = false }
-halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs", default-features = false, features = ["batch"] }
+halo2_gadgets = { package = "zakura-halo2-gadgets", git = "https://github.com/permissionlessweb/common", rev = "5364d3d989640e5356351ee8c0d062ca18d4bfaa", default-features = false }
+halo2_proofs = { package = "zakura-halo2-proofs", git = "https://github.com/permissionlessweb/common", rev = "5364d3d989640e5356351ee8c0d062ca18d4bfaa", default-features = false, features = ["batch"] }
+# Axiom KZG backend for `halo2-kzg` (curve_id 6). Same wasm32 rule as above:
+# no multicore — host-side verify only.
+halo2-axiom = { package = "halo2-axiom", git = "https://github.com/axiom-crypto/halo2", tag = "v0.5.1", optional = true, default-features = false, features = ["batch", "circuit-params"] }
+halo2-base = { package = "halo2-base", git = "https://github.com/axiom-crypto/halo2-lib", tag = "v0.4.1", optional = true, default-features = false, features = ["halo2-axiom"] }
 sha2 = "0.10"
 blake3 = "1"
 
@@ -69,14 +78,10 @@ blake3 = "1"
 # Target-gate so `cw-headstash` can compile to wasm32 (BridgeMintNote / ict_local_funded).
 # Pin versions: wasmer module layout can change between patch versions.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass"] }
-wasmer-middlewares = "=5.0.6"
-wasmer-types = "=5.0.6"
+wasmer = { version = "=7.4.2", default-features = false, features = ["singlepass"] }
+wasmer-middlewares = "=7.4.2"
+wasmer-types = "=7.4.2"
 
-# patch halo2_gadgets and hao2_proofs with the release commit from its git source
-[patch.crates-io]
-halo2_gadgets = { git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303" }
-halo2_proofs = { git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303" }
 
 [dev-dependencies]
 clap = "4"

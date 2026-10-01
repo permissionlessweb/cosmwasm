@@ -45,15 +45,13 @@ pub struct SnarkjsProof {
 }
 
 fn parse_fq(s: &str) -> ZkResult<Fq> {
-    Fq::from_str(s.trim()).map_err(|_| {
-        ZkError::format_err(format!("invalid Fq decimal: {}", &s[..s.len().min(32)]))
-    })
+    Fq::from_str(s.trim())
+        .map_err(|_| ZkError::format_err(format!("invalid Fq decimal: {}", &s[..s.len().min(32)])))
 }
 
 fn parse_fr(s: &str) -> ZkResult<Fr> {
-    Fr::from_str(s.trim()).map_err(|_| {
-        ZkError::format_err(format!("invalid Fr decimal: {}", &s[..s.len().min(32)]))
-    })
+    Fr::from_str(s.trim())
+        .map_err(|_| ZkError::format_err(format!("invalid Fr decimal: {}", &s[..s.len().min(32)])))
 }
 
 fn g1_from_snarkjs(coords: &[String]) -> ZkResult<G1Affine> {
@@ -220,11 +218,15 @@ fn try_verify_pair(
 /// Verify snarkjs fixtures end-to-end with ark-groth16 (no CosmWasm).
 ///
 /// Tries G2 coordinate swap conventions until one verifies (snarkjs layout varies).
-pub fn verify_snarkjs_fixtures(vkey_json: &str, proof_json: &str, public_json: &str) -> ZkResult<()> {
-    let vkey: SnarkjsVerifyingKey = serde_json::from_str(vkey_json)
-        .map_err(|e| ZkError::format_err(format!("vkey: {e}")))?;
-    let proof: SnarkjsProof = serde_json::from_str(proof_json)
-        .map_err(|e| ZkError::format_err(format!("proof: {e}")))?;
+pub fn verify_snarkjs_fixtures(
+    vkey_json: &str,
+    proof_json: &str,
+    public_json: &str,
+) -> ZkResult<()> {
+    let vkey: SnarkjsVerifyingKey =
+        serde_json::from_str(vkey_json).map_err(|e| ZkError::format_err(format!("vkey: {e}")))?;
+    let proof: SnarkjsProof =
+        serde_json::from_str(proof_json).map_err(|e| ZkError::format_err(format!("proof: {e}")))?;
     let publics: Vec<String> = serde_json::from_str(public_json)
         .map_err(|e| ZkError::format_err(format!("public: {e}")))?;
     let inputs = snarkjs_publics_to_fr(&publics)?;

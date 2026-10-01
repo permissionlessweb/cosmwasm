@@ -25,14 +25,12 @@ pub struct CircuitAttributes {
 }
 
 /// Circuit type attribute values
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CircuitTypeAttr {
     /// Plonkish circuit type (halo2)
     #[default]
     Plonkish,
 }
-
 
 impl CircuitTypeAttr {
     /// Convert to u8 for serialization
@@ -100,7 +98,7 @@ impl syn::parse::Parse for CircuitAttributes {
                         Error::new_spanned(
                             &lit,
                             format!(
-                                "Unknown circuit_type '{}'. Valid types: Plonkish",
+                                "Unknown circuit_type '{}'. This macro is Halo2 Plonkish on Pasta only. Flock, Groth16, and Stwo use their curve types, not #[cosmwasm_circuit].",
                                 lit.value()
                             ),
                         )

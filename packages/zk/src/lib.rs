@@ -7,11 +7,20 @@ pub mod footer;
 pub mod errors;
 pub use errors::{ZkError, ZkResult};
 
+/// Placeholder: real Stwo/Flock hosts live in `zk-cosmwasm-hosts` (libwasmvm).
+/// This is a no-op so guest wasm32 and the CosmWasm workspace stay free of `stwo`.
+pub fn install_path_a_hosts() {}
+
 pub use {
     backend::{select_backend, CpuBackend, SelectedBackend, VerifierBackend, VerifyItem},
-    circuits::{AnyInstance, AnyVerifyingKey, CircuitType, CosmwasmCircuit, Proof, SerializedCircuitData},
-    curves::{StwoInstance, StwoVerifyingKey, ZkCurve, STWO_HOST_VERIFY},
-    footer::CircuitFooter,
+    circuits::{
+        AnyInstance, AnyVerifyingKey, CircuitType, CosmwasmCircuit, Proof, SerializedCircuitData,
+    },
+    curves::{
+        prove_flock, verify_flock_proof, CurveType, StwoInstance, StwoVerifyingKey, ZkCurve,
+        FLOCK_HOST_VERIFY, STWO_HOST_VERIFY,
+    },
+    footer::{CircuitFooter, COSMWASM_FOOTER_LENGTH},
 };
 
 #[cfg(feature = "gpu")]

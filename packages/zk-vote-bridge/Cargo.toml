@@ -9,7 +9,7 @@ description = "Bridges vote-sdk Halo2 circuits into the CosmWasm VM's proof_inst
 [dependencies]
 shielded-vote-circuits = { path = "../../../vote-sdk/circuits" }
 zk-cosmwasm = { workspace = true }
-halo2_proofs = { path = "../../../zcash/halo2/halo2_proofs" }
+halo2_proofs = { git = "https://github.com/permissionlessweb/halo2", rev = "362ca361477bea76e30507b6f731a3abd5e85303" }
 sha2 = "0.10"
 pasta_curves = "0.5"
 group = "0.13"

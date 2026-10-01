@@ -55,12 +55,14 @@ zk_vk/<36-byte-hex>.bin         # cs + vk (no footer)
 zk_circuit/<72-byte-hex>.bin    # full blob including footer
 ```
 
-Load prefers split files when both param and vk bodies exist; otherwise falls back to the monolithic circuit file. Every load re-checks both checksums.
+A circuit miss prefers the split files, then the monolithic blob. The param file is shared on disk. The deserialized verifying key stored for that circuit keeps its own copy of the params. Every load re-checks both checksums.
 
 ## Contract-facing instances
 
 - Encode public inputs as concatenated field elements (typically **32 bytes each**).
 - Host builds `AnyInstance` from **`curve_id` in the footer**, so a single `zkid` space can hold circuits on different curves without remapping ids to curve enums.
+
+Product mapping (Flock archives, Stwo lean, Groth16 JWT, vote-sdk, Pasta/Orchard-class): [Curve IDs And Terp Use Cases](./curve-use-cases.md).
 
 ## `#[cosmwasm_circuit]` macro (circuit authors)
 

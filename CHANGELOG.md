@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog], and this project adheres to [Semantic
 
 (empty)
 
+## [4.0.0-zk] - 2026-09-20
+
+### Changed
+
+- **Breaking:** Path A dummy Flock digest / DSTW Stwo proofs are rejected. Hosts are `zk-cosmwasm-hosts` (`verify_ligerito`, pinned Stwo).
+- **Breaking:** Pasta Halo2 is `zakura-halo2-*` (`permissionlessweb/common` `5364d3d`). VK artifacts omit selector matrices. Footer length is `zk_cosmwasm::COSMWASM_FOOTER_LENGTH`.
+- rust-version **1.91**. In-tree `packages/crypto-bn254`.
+
+### Added
+
+- `ConstraintSystem` / `VerifyingKey` / `ProvingKey` artifact codec via zakura-halo2-proofs (`read_with_cs` / `write`).
+- Penumbra poseidon377 vectors (rates 1–6) on the host import.
+
+### Fixed
+
+- Vendor `cosmwasm-crypto-bn254` at `packages/crypto-bn254` so CI never walks to `junoclaw/wasmvm-fork`. Exclude `zk-vote-bridge` from the workspace.
+
+## [3.1.0-zk] - 2026-09-20
+
+### Added
+
+- Penumbra poseidon377 host (`poseidon377_hash`) over BLS12-377 `decaf377::Fq`, with official rate-1…6 test vectors in crypto + VM imports.
+- Curve use-case mapping (Flock / Stwo / Groth16 / KZG / Pasta / vote-sdk) in the book.
+
+### Changed
+
+- Path A Stwo and Flock verify are fail-closed without the wasmvm host hook (no dummy DSTW / digest stub).
+- Flock host path is `verify_ligerito` (ids `prover_id=3`, `curve_id=7`).
+
 ## [3.0.8] - 2026-05-21
 
 ### Changed

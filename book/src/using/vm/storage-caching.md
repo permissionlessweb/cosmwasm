@@ -4,19 +4,26 @@ How the VM stores circuit material and serves hot verifying keys without re-dese
 
 Source: `ZK_STORAGE_AND_CACHING.md`.
 
+## What is actually shared
+
+Reusable Halo2 params are shared **on disk**, not as one in-memory object across circuits.
+
+- `zk_param/<36-hex>.bin` is content-addressed. Two circuits with the same param bytes and the same `(prover_id, curve_id, k)` write the same file.
+- `zk_vk/<36-hex>.bin` is that circuit's cs+vk only.
+- `zk_circuit/<72-hex>.bin` is the full blob, including another copy of the params. The split file is the shared copy. The monolithic blob is not.
+- A verify hit returns a `CachedCircuit` whose `AnyVerifyingKey` already contains its own deserialized params. Two circuits that share a param file still hold two deserialized copies.
+- `store_param` / `load_param` keep raw param bytes in the pinned map and the LRU. The verify loader does not call `load_param`. A circuit miss reads `zk_param` from disk and deserializes again.
+- `param_len = 0` (BN254 / Groth16) stores an empty param file and skips the Halo2 `k` header. There is no reusable param blob on that path.
+
 ## Why tiers exist
 
-Commitment parameters are large and **shared** across circuits with the same `k`. Pinning a full params copy next to every VK wastes memory. The cache therefore:
-
-- Stores **params** and **cs+vk** under separate content-addressed keys  
-- Keeps a **monolithic** circuit blob for integrity and fallback  
-- Serves **deserialized** VKs from pinned memory or a weight-bounded LRU  
+The tiers avoid re-reading a circuit that is already deserialized. They do not deduplicate deserialized params across circuit keys.
 
 ## Cache hierarchy
 
 | Tier | Key | Eviction | Persistence |
 |------|-----|----------|-------------|
-| Pinned memory | 72-byte circuit / 36-byte param | Manual pin/unpin only | Lost on process restart |
+| Pinned memory | 72-byte circuit / 36-byte param | Circuits: oldest-first once 100 circuits or 100 MiB. Params: none | Lost on process restart |
 | In-memory LRU | Unified `CacheKey` (module / partial / circuit) | Weight-based LRU | Lost on restart |
 | File system | Hex filenames under `zk_*` | Manual remove | Survives restart |
 
@@ -58,10 +65,11 @@ serialized [params|cs|vk|footer]
 ### Load
 
 ```
-pinned hit  → CachedCircuit        (~µs)
-LRU hit     → CachedCircuit
-FS hit      → deserialize, promote to LRU
-miss        → split param+vk load, or monolithic fallback
+pinned circuit hit  → clone that circuit's CachedCircuit
+LRU circuit hit     → clone that circuit's CachedCircuit
+FS circuit hit      → deserialize, promote to LRU
+miss                → read zk_param + zk_vk from disk (not the param LRU),
+                      or the monolithic zk_circuit blob
 ```
 
 ### Pin / unpin / remove
@@ -82,13 +90,13 @@ Exact semantics of unpin vs FS module removal are implementation-defined in the 
 | Pinned / LRU totals | Observability, optional limits |
 | Global pinned circuit memory | Optional host limits |
 
-Pinned circuits are **not** automatically evicted. Treat pin as a performance wire for production hot paths.
+Pinned circuits evict oldest-first at 100 entries or 100 MiB. Pinned param bytes do not. A pin is still the hot path, and it stores one deserialized VK per circuit key.
 
 ## Operator tips
 
 1. After restart, re-pin circuits that appear on every block.  
 2. Watch pinned hit rate vs FS loads (deserialization is expensive).  
-3. Prefer split layout so many circuits share param files for the same `k`.  
+3. The split `zk_param` file is what circuits with the same `k` share. Memory still holds one deserialized copy per circuit.
 4. Keep consensus `zkid` mappings correct; cache cannot invent missing registry entries.
 
 ## Metrics (illustrative)

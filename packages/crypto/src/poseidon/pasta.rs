@@ -79,7 +79,9 @@ where
     match fields.len() {
         1 => Ok(hash_constant_length::<F, 1>([fields[0]])),
         2 => Ok(hash_constant_length::<F, 2>([fields[0], fields[1]])),
-        3 => Ok(hash_constant_length::<F, 3>([fields[0], fields[1], fields[2]])),
+        3 => Ok(hash_constant_length::<F, 3>([
+            fields[0], fields[1], fields[2],
+        ])),
         4 => Ok(hash_constant_length::<F, 4>([
             fields[0], fields[1], fields[2], fields[3],
         ])),
@@ -93,42 +95,40 @@ where
             fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
         ])),
         8 => Ok(hash_constant_length::<F, 8>([
-            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
-            fields[7],
+            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], fields[7],
         ])),
         9 => Ok(hash_constant_length::<F, 9>([
-            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
-            fields[7], fields[8],
+            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], fields[7],
+            fields[8],
         ])),
         10 => Ok(hash_constant_length::<F, 10>([
-            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
-            fields[7], fields[8], fields[9],
+            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], fields[7],
+            fields[8], fields[9],
         ])),
         11 => Ok(hash_constant_length::<F, 11>([
-            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
-            fields[7], fields[8], fields[9], fields[10],
+            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], fields[7],
+            fields[8], fields[9], fields[10],
         ])),
         12 => Ok(hash_constant_length::<F, 12>([
-            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
-            fields[7], fields[8], fields[9], fields[10], fields[11],
+            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], fields[7],
+            fields[8], fields[9], fields[10], fields[11],
         ])),
         13 => Ok(hash_constant_length::<F, 13>([
-            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
-            fields[7], fields[8], fields[9], fields[10], fields[11], fields[12],
+            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], fields[7],
+            fields[8], fields[9], fields[10], fields[11], fields[12],
         ])),
         14 => Ok(hash_constant_length::<F, 14>([
-            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
-            fields[7], fields[8], fields[9], fields[10], fields[11], fields[12], fields[13],
+            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], fields[7],
+            fields[8], fields[9], fields[10], fields[11], fields[12], fields[13],
         ])),
         15 => Ok(hash_constant_length::<F, 15>([
-            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
-            fields[7], fields[8], fields[9], fields[10], fields[11], fields[12], fields[13],
-            fields[14],
+            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], fields[7],
+            fields[8], fields[9], fields[10], fields[11], fields[12], fields[13], fields[14],
         ])),
         16 => Ok(hash_constant_length::<F, 16>([
-            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
-            fields[7], fields[8], fields[9], fields[10], fields[11], fields[12], fields[13],
-            fields[14], fields[15],
+            fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], fields[7],
+            fields[8], fields[9], fields[10], fields[11], fields[12], fields[13], fields[14],
+            fields[15],
         ])),
         n => Err(CryptoError::generic_err(format!(
             "poseidon pasta arity must be 1..={PASTA_MAX_ARITY}, got {n}"
@@ -137,7 +137,9 @@ where
 }
 
 /// Poseidon-Hash over **Pallas base field** (Zcash Orchard / vote-sdk default).
-pub fn poseidon_hash_pallas(inputs: &[[u8; PASTA_FIELD_BYTES]]) -> CryptoResult<[u8; PASTA_FIELD_BYTES]> {
+pub fn poseidon_hash_pallas(
+    inputs: &[[u8; PASTA_FIELD_BYTES]],
+) -> CryptoResult<[u8; PASTA_FIELD_BYTES]> {
     let fields = parse_inputs::<PallasBase>(inputs)?;
     let out = hash_variable_arity(&fields)?;
     Ok(field_to_bytes(out))
@@ -151,7 +153,9 @@ pub fn poseidon_hash_pallas_bytes(inputs: &[u8]) -> CryptoResult<[u8; PASTA_FIEL
 }
 
 /// Poseidon-Hash over **Vesta base field** (Halo2 cycle dual of Pallas).
-pub fn poseidon_hash_vesta(inputs: &[[u8; PASTA_FIELD_BYTES]]) -> CryptoResult<[u8; PASTA_FIELD_BYTES]> {
+pub fn poseidon_hash_vesta(
+    inputs: &[[u8; PASTA_FIELD_BYTES]],
+) -> CryptoResult<[u8; PASTA_FIELD_BYTES]> {
     let fields = parse_inputs::<VestaBase>(inputs)?;
     let out = hash_variable_arity(&fields)?;
     Ok(field_to_bytes(out))
@@ -222,7 +226,8 @@ mod tests {
     #[test]
     fn length8_round_id_shape() {
         // vote-sdk derive_round_id uses ConstantLength<8> over pallas::Base.
-        let elems: [[u8; 32]; 8] = std::array::from_fn(|i| field_to_bytes(PallasBase::from(i as u64)));
+        let elems: [[u8; 32]; 8] =
+            std::array::from_fn(|i| field_to_bytes(PallasBase::from(i as u64)));
         let h = poseidon_hash_pallas(&elems).unwrap();
         assert_eq!(h.len(), 32);
         assert_ne!(h, [0u8; 32]);

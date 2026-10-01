@@ -15,12 +15,7 @@ use cosmwasm_vm::{
     InstanceOptions, Size, VmError,
 };
 
-#[cfg(feature = "zk")]
-use {
-    cosmwasm_vm::CachedCircuit,
-    zk_cosmwasm::CircuitFooter,
-    halo2_proofs::COSMWASM_FOOTER_LENGTH,
-};
+use {cosmwasm_vm::COSMWASM_FOOTER_LENGTH, zk_cosmwasm::CircuitFooter};
 
 // Instance
 const DEFAULT_MEMORY_LIMIT: Size = Size::mebi(64);
@@ -41,10 +36,7 @@ const CONTRACTS: u64 = 10;
 const DEFAULT_CAPABILITIES: &str = "cosmwasm_1_1,cosmwasm_1_2,cosmwasm_1_3,cosmwasm_1_4,cosmwasm_2_0,cosmwasm_2_1,cosmwasm_2_2,iterator,staking";
 static HACKATOM: &[u8] = include_bytes!("../testdata/hackatom.wasm");
 static CYBERPUNK: &[u8] = include_bytes!("../testdata/cyberpunk.wasm");
-
-#[cfg(feature = "zk")]
 static NORICK_CIRCUIT: &[u8] = include_bytes!("../testdata/norick_vk.bin");
-
 static BENCH_CONTRACTS: &[&str] = &[
     "cyberpunk_rust170.wasm",
     "cyberpunk.wasm",
@@ -525,16 +517,14 @@ fn bench_combined(c: &mut Criterion) {
 // Run with: cargo bench --features zk  (zk is in default features)
 // ============================================================================
 
-#[cfg(feature = "zk")]
 fn bench_zk_circuit_cache(c: &mut Criterion) {
     // ------------------------------------------------------------------
     // Parse the NORICK circuit footer once so we can derive keys for the
     // store-then-load benchmarks.
     // ------------------------------------------------------------------
-    let footer = CircuitFooter::from_bytes(
-        &NORICK_CIRCUIT[NORICK_CIRCUIT.len() - COSMWASM_FOOTER_LENGTH..],
-    )
-    .unwrap();
+    let footer =
+        CircuitFooter::from_bytes(&NORICK_CIRCUIT[NORICK_CIRCUIT.len() - COSMWASM_FOOTER_LENGTH..])
+            .unwrap();
     let circuit_key: [u8; 72] = footer.to_circuit_key();
 
     // ------------------------------------------------------------------
@@ -552,7 +542,7 @@ fn bench_zk_circuit_cache(c: &mut Criterion) {
         let seed_options = CacheOptions::new(
             storage_dir.path(),
             capabilities_from_csv(DEFAULT_CAPABILITIES),
-            Size::mebi(200),   // allow memory cache
+            Size::mebi(200), // allow memory cache
             DEFAULT_MEMORY_LIMIT,
         );
         let seed_cache: Cache<MockApi, MockStorage, MockQuerier> =
@@ -694,7 +684,7 @@ fn bench_zk_circuit_cache(c: &mut Criterion) {
         let options = CacheOptions::new(
             temp.path(),
             capabilities_from_csv(DEFAULT_CAPABILITIES),
-            Size::new(0),                // no LRU — force fs fallback
+            Size::new(0), // no LRU — force fs fallback
             DEFAULT_MEMORY_LIMIT,
         );
         let cache: Cache<MockApi, MockStorage, MockQuerier> =
@@ -801,7 +791,7 @@ criterion_group!(
         .configure_from_args();
     targets = bench_instance_threads
 );
-#[cfg(feature = "zk")]
+
 criterion_group!(
     name = zk_circuit;
     config = Criterion::default()
@@ -812,7 +802,10 @@ criterion_group!(
     targets = bench_zk_circuit_cache
 );
 
-#[cfg(feature = "zk")]
-criterion_main!(instance, cache, combined, multi_threaded_instance, zk_circuit);
-#[cfg(not(feature = "zk"))]
-criterion_main!(instance, cache, combined, multi_threaded_instance);
+criterion_main!(
+    instance,
+    cache,
+    combined,
+    multi_threaded_instance,
+    zk_circuit
+);

@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use wasmer::wasmparser::Import;
 use wasmer::wasmparser::TypeRef;
 
-use crate::capabilities::required_capabilities_from_module;
 use crate::config::WasmLimits;
 use crate::errors::{VmError, VmResult};
 use crate::limited::LimitedDisplay;
@@ -26,29 +25,17 @@ const SUPPORTED_IMPORTS: &[&str] = &[
     "env.bls12_381_pairing_equality",
     "env.bls12_381_hash_to_g1",
     "env.bls12_381_hash_to_g2",
-    #[cfg(feature = "bn254")]
     "env.bn254_add",
-    #[cfg(feature = "bn254")]
     "env.bn254_scalar_mul",
-    #[cfg(feature = "bn254")]
     "env.bn254_pairing_equality",
-    #[cfg(feature = "hash-blake")]
     "env.blake2b_256",
-    #[cfg(feature = "hash-blake")]
     "env.blake3_256",
-    #[cfg(feature = "hash-poseidon")]
     "env.poseidon_hash_pallas",
-    #[cfg(feature = "hash-poseidon")]
     "env.poseidon_hash_vesta",
-    #[cfg(feature = "hash-poseidon")]
     "env.poseidon377_hash",
-    #[cfg(feature = "redpallas")]
     "env.redpallas_spendauth_verify",
-    #[cfg(feature = "redpallas")]
     "env.redpallas_binding_verify",
-    #[cfg(feature = "redpallas")]
     "env.redjubjub_spendauth_verify",
-    #[cfg(feature = "redpallas")]
     "env.redjubjub_binding_verify",
     "env.secp256k1_verify",
     "env.secp256k1_recover_pubkey",
@@ -291,7 +278,8 @@ fn check_wasm_capabilities(
     available_capabilities: &HashSet<String>,
     logs: Logger,
 ) -> VmResult<()> {
-    let required_capabilities = crate::capabilities::required_capabilities_including_opcodes(module);
+    let required_capabilities =
+        crate::capabilities::required_capabilities_including_opcodes(module);
     logs.add(|| {
         format!(
             "Required capabilities: {}",

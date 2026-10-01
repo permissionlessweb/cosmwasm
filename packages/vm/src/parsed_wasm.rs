@@ -90,7 +90,6 @@ pub fn is_metered_bulk_memory_op(op: &wasmer::wasmparser::Operator<'_>) -> bool 
     )
 }
 
-
 impl<'a> ParsedWasm<'a> {
     pub fn parse(wasm: &'a [u8]) -> VmResult<Self> {
         let features = WasmFeatures::MUTABLE_GLOBAL
@@ -174,6 +173,9 @@ impl<'a> ParsedWasm<'a> {
                                     // ignoring these for now, as they are only available with the GC
                                     // proposal, and we explicitly disabled that above
                                 }
+                                CompositeInnerType::Cont(_) => {
+                                    // stack switching proposal disabled
+                                }
                             }
                         }
                     }
@@ -196,7 +198,7 @@ impl<'a> ParsedWasm<'a> {
                 }
                 Payload::Version { num, .. } => this.version = num,
                 Payload::ImportSection(i) => {
-                    this.imports = i.into_iter().collect::<Result<Vec<_>, _>>()?;
+                    this.imports = i.into_imports().collect::<Result<Vec<_>, _>>()?;
                 }
                 Payload::TableSection(t) => {
                     this.tables = t

@@ -6,6 +6,8 @@ description = "VM bindings to run CosmWasm contracts"
 repository = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
+# Wasmer 7.4.2 (CWA-2026-006) needs rustc 1.95+.
+rust-version = "1.95"
 
 [package.metadata.optimizer]
 standard-build = true
@@ -16,7 +18,7 @@ builds = [{ name = "cosmwasm-vm", default-features = true }]
 bench = false
 
 [features]
-default = ["iterator", "staking", "zk"]
+default = ["iterator", "staking", "zk", "bn254", "hash-blake", "hash-poseidon", "redpallas"]
 # iterator allows us to iterate over all DB items in a given range
 # this must be enabled to support CosmWasm contracts compiled with the 'iterator' feature
 # optional as some merkle stores (like tries) don't support this
@@ -31,17 +33,11 @@ dhat-heap = ["dep:dhat"]
 # ibc2 enables ibc2-dependent messages, entrypoints and queries
 ibc2 = ["cosmwasm-std/ibc2"]
 zk = ["cosmwasm-std/zk", "dep:zk-cosmwasm"]
-# BN254 (alt_bn128) curve host functions — EIP-196/197/1108
-# Also enables zk-cosmwasm BN254 / Groth16 AnyVerifyingKey dispatch when `zk` is on.
 bn254 = ["cosmwasm-crypto/bn254", "zk-cosmwasm?/bn254"]
-# Native deterministic BLAKE2b-256 / BLAKE3-256 host digests (CPU only).
+halo2-kzg = ["zk-cosmwasm?/halo2-kzg"]
 hash-blake = ["cosmwasm-crypto/hash-blake"]
-# Algebraic Poseidon hosts (Zcash Pasta + Penumbra poseidon377).
-hash-poseidon = ["cosmwasm-crypto/hash-poseidon"]
-# RedPallas (Orchard) + RedJubjub (Sapling) signature verify hosts.
+hash-poseidon = ["cosmwasm-crypto/hash-poseidon", "dep:poseidon377"]
 redpallas = ["cosmwasm-crypto/redpallas"]
-# Optional host GPU backend for eligible ZK verify ops (CPU-golden, scheduled gas).
-# Default OFF — zero new deps when disabled. Does NOT enable GPU for blake.
 # See docs/research/gpu-accel/DESIGN-G1-verifier-backend.md
 gpu = ["zk-cosmwasm?/gpu"]
 
@@ -53,6 +49,8 @@ clru = "0.6.1"
 # Uses the path when built locally; uses the given version from crates.io when published
 cosmwasm-core = { workspace = true }
 cosmwasm-crypto = { workspace = true }
+# Penumbra poseidon377 (BLS12-377 scalar) — test vectors + host import only.
+poseidon377 = { version = "1.2.0", optional = true, default-features = false, features = ["arkworks"] }
 cosmwasm-std = { workspace = true, features = ["std"] }
 cosmwasm-vm-derive = { workspace = true }
 crc32fast = "1.3.2"
@@ -69,11 +67,13 @@ sha2 = "0.10"
 strum = { version = "0.26.2", default-features = false, features = ["derive"] }
 thiserror = "1.0.26"
 # We pin wasmer to a specific version because the layout of cached modules can change between patch versions.
-wasmer = { version = "=5.0.6", default-features = false, features = ["singlepass"] }
-wasmer-middlewares = "=5.0.6"
-wasmer-types = "=5.0.6"
+# 7.4.2 is the CWA-2026-006 Singlepass fix (upstream cosmwasm v3.0.10). Cached module format changes with it.
+wasmer = { version = "=7.4.2", default-features = false, features = ["singlepass"] }
+wasmer-middlewares = "=7.4.2"
+wasmer-types = "=7.4.2"
+nam-wasm-instrument = { git = "https://github.com/permissionlessweb/nam-wasm-instrument", rev = "248ac2796903fe39977f31cb9bdef54c77ccf7a0", features = ["sign_ext", "bulk", "simd"] }
 
-halo2_proofs = { package = "halo2_proofs", path = "../../../zcash/halo2/halo2_proofs", default-features = false, features = ["batch"] }
+halo2_proofs = { package = "zakura-halo2-proofs", git = "https://github.com/permissionlessweb/common", rev = "5364d3d989640e5356351ee8c0d062ca18d4bfaa", default-features = false, features = ["batch"] }
 zk-cosmwasm  = { workspace = true, default-features = false, features = ["interface"], optional = true }
 
 tracing = "0.1.38"

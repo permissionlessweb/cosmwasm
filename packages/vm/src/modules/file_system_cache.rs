@@ -7,12 +7,13 @@ use std::panic::catch_unwind;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use thiserror::Error;
-use wasmer::{DeserializeError, Module, Target};
+use wasmer::{DeserializeError, Module};
+use wasmer_types::target::Target;
 
 use crate::errors::{VmError, VmResult};
 use crate::filesystem::mkdir_p;
 use crate::modules::current_wasmer_module_version;
-#[cfg(feature = "zk")]
+
 use crate::modules::CachedCircuit;
 use crate::wasm_backend::make_runtime_engine;
 use crate::wasm_backend::COST_FUNCTION_HASH;
@@ -69,7 +70,11 @@ use super::CachedModule;
 ///   Module compatibility between Wasmer versions is not guaranteed.
 /// - **v21**:<br>
 ///   New version because of additional gas charging for function locals.
-const MODULE_SERIALIZATION_VERSION: &str = "v22";
+/// - **v24**:<br>
+///   Stack-height limiter injected into the Wasm bytes before compile.
+/// - **v25**:<br>
+///   Wasmer 5.0.6 -> 7.4.2 (CWA-2026-006). Module bytes are not compatible.
+const MODULE_SERIALIZATION_VERSION: &str = "v25";
 
 /// Function that actually does the heavy lifting of creating the module version discriminator.
 ///
@@ -81,7 +86,7 @@ fn raw_module_version_discriminator() -> String {
     let mut hasher = Blake2b::<U5>::new();
 
     hasher.update(MODULE_SERIALIZATION_VERSION.as_bytes());
-    hasher.update(wasmer::VERSION.as_bytes());
+    hasher.update(wasmer_types::VERSION.as_bytes());
 
     for hash in hashes {
         hasher.update(hash);
@@ -262,7 +267,7 @@ impl FileSystemCache {
     }
 }
 
-#[cfg(feature = "zk")]
+
 impl FileSystemCache {
     /// Gets the circuit file path for a checksum.
     fn circuit_file(&self, circuit_file_key: &[u8; 72]) -> PathBuf {
@@ -450,7 +455,7 @@ mod tests {
             let result = add_one.call(&mut store, &[42.into()]).unwrap();
             assert_eq!(result[0].unwrap_i32(), 43);
         }
-        #[cfg(feature = "zk")]
+        
         {
             let zk = NORICK_CIRCUIT;
             let checksum_footer: &[u8; 32] = &zk[zk.len() - 32..].try_into().unwrap();
@@ -476,9 +481,10 @@ mod tests {
 
         let discriminator = raw_module_version_discriminator();
         let mut globber = glob::glob(&format!(
-            "{}/{}-wasmer8/**/{}.module",
+            "{}/{}-wasmer{}/**/{}.module",
             tmp_dir.path().to_string_lossy(),
             discriminator,
+            current_wasmer_module_version(),
             checksum
         ))
         .expect("Failed to read glob pattern");
@@ -522,20 +528,20 @@ mod tests {
 
     #[test]
     fn target_id_works() {
-        let triple = wasmer::Triple {
-            architecture: wasmer::Architecture::X86_64,
-            vendor: target_lexicon::Vendor::Nintendo,
-            operating_system: target_lexicon::OperatingSystem::Fuchsia,
-            environment: target_lexicon::Environment::Gnu,
-            binary_format: target_lexicon::BinaryFormat::Coff,
+        let triple = wasmer::sys::Triple {
+            architecture: wasmer::sys::Architecture::X86_64,
+            vendor: wasmer_types::target::Vendor::Nintendo,
+            operating_system: wasmer_types::target::OperatingSystem::Fuchsia,
+            environment: wasmer_types::target::Environment::Gnu,
+            binary_format: wasmer_types::target::BinaryFormat::Coff,
         };
-        let target = Target::new(triple.clone(), wasmer::CpuFeature::POPCNT.into());
+        let target = Target::new(triple.clone(), wasmer::sys::CpuFeature::POPCNT.into());
         let id = target_id(&target);
-        assert_eq!(id, "x86_64-nintendo-fuchsia-gnu-coff-719EEF18");
+        assert_eq!(id, "x86_64-nintendo-fuchsia-gnu-coff-305F9BA3");
         // Changing CPU features changes the hash part
-        let target = Target::new(triple, wasmer::CpuFeature::AVX512DQ.into());
+        let target = Target::new(triple, wasmer::sys::CpuFeature::AVX512DQ.into());
         let id = target_id(&target);
-        assert_eq!(id, "x86_64-nintendo-fuchsia-gnu-coff-E3770FA3");
+        assert_eq!(id, "x86_64-nintendo-fuchsia-gnu-coff-A2B67B18");
 
         // Works for direct target (hashing is deterministic);
         let target = Target::default();
@@ -547,14 +553,14 @@ mod tests {
     #[test]
     fn modules_path_works() {
         let base = PathBuf::from("modules");
-        let triple = wasmer::Triple {
-            architecture: wasmer::Architecture::X86_64,
-            vendor: target_lexicon::Vendor::Nintendo,
-            operating_system: target_lexicon::OperatingSystem::Fuchsia,
-            environment: target_lexicon::Environment::Gnu,
-            binary_format: target_lexicon::BinaryFormat::Coff,
+        let triple = wasmer::sys::Triple {
+            architecture: wasmer::sys::Architecture::X86_64,
+            vendor: wasmer_types::target::Vendor::Nintendo,
+            operating_system: wasmer_types::target::OperatingSystem::Fuchsia,
+            environment: wasmer_types::target::Environment::Gnu,
+            binary_format: wasmer_types::target::BinaryFormat::Coff,
         };
-        let target = Target::new(triple, wasmer::CpuFeature::POPCNT.into());
+        let target = Target::new(triple, wasmer::sys::CpuFeature::POPCNT.into());
         let p = modules_path(&base, 17, &target);
         let discriminator = raw_module_version_discriminator();
 
@@ -562,11 +568,11 @@ mod tests {
             p.as_os_str(),
             if cfg!(windows) {
                 format!(
-                    "modules\\{discriminator}-wasmer17\\x86_64-nintendo-fuchsia-gnu-coff-719EEF18"
+                    "modules\\{discriminator}-wasmer17\\x86_64-nintendo-fuchsia-gnu-coff-305F9BA3"
                 )
             } else {
                 format!(
-                    "modules/{discriminator}-wasmer17/x86_64-nintendo-fuchsia-gnu-coff-719EEF18"
+                    "modules/{discriminator}-wasmer17/x86_64-nintendo-fuchsia-gnu-coff-305F9BA3"
                 )
             }
             .as_str()
@@ -588,6 +594,6 @@ mod tests {
     #[test]
     fn module_version_static() {
         let version = raw_module_version_discriminator();
-        assert_eq!(version, "db9eb9f9ba");
+        assert_eq!(version, "90603cd33b");
     }
 }

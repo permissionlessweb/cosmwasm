@@ -1,0 +1,55 @@
+[package]
+name = "lean-stwo-dummy"
+version = "0.1.0"
+edition = "2021"
+description = "DummyStwo + optional real S-two M31 AIR (a,b)->hash. Default stays Dummy for Go."
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "lean_stwo_dummy"
+path = "src/lib.rs"
+
+[features]
+default = []
+# CPU only. Never enable GPU / CUDA for verify.
+gpu = []
+# Real Circle STARK (starkware-libs/stwo). Off by default so x/leanval Dummy still compiles.
+real-stwo = ["dep:stwo", "dep:stwo-constraint-framework", "dep:num-traits", "dep:itertools", "dep:bincode", "dep:serde", "dep:sha2"]
+
+[dependencies]
+# pinned CPU-only stwo @ 826591c6c371376810ca8213b5812d5daf6d5092 (no cuda/gpu)
+stwo = { git = "https://github.com/starkware-libs/stwo", rev = "826591c6c371376810ca8213b5812d5daf6d5092", package = "stwo", optional = true, default-features = false, features = ["prover"] }
+stwo-constraint-framework = { git = "https://github.com/starkware-libs/stwo", rev = "826591c6c371376810ca8213b5812d5daf6d5092", package = "stwo-constraint-framework", optional = true, default-features = false, features = ["prover"] }
+num-traits = { version = "0.2", optional = true }
+itertools = { version = "0.12", optional = true }
+bincode = { version = "1.3", optional = true }
+serde = { version = "1.0", optional = true, features = ["derive"] }
+sha2 = { version = "0.10", optional = true }
+
+[dev-dependencies]
+
+[[bin]]
+name = "lean-valset-air"
+path = "src/bin/valset_air.rs"
+required-features = ["real-stwo"]
+
+[[bin]]
+name = "lean-stwo-fold"
+path = "src/bin/fold_air.rs"
+required-features = ["real-stwo"]
+
+[[bin]]
+name = "lean-ssle"
+path = "src/bin/ssle_air.rs"
+required-features = ["real-stwo"]
+
+[[bin]]
+name = "lean-daily-keys"
+path = "src/bin/daily_air.rs"
+required-features = ["real-stwo"]
+
+[[bin]]
+name = "lean-withdraw"
+path = "src/bin/withdraw_air.rs"
+required-features = ["real-stwo"]

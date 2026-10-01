@@ -1,15 +1,17 @@
-use crate::{
-    curves::{FlockInstance, FlockVerifyingKey, StwoInstance, StwoVerifyingKey, VestaInstance, VestaVerifyingKey, VoteInstance, VoteVerifyingKey, ZkCurve},
-    CircuitFooter, ZkError, ZkResult,
-};
 #[cfg(feature = "bn254")]
 use crate::curves::{Bn254Instance, Bn254VerifyingKey};
 #[cfg(feature = "halo2-kzg")]
 use crate::curves::{Halo2KzgInstance, Halo2KzgVerifyingKey};
+use crate::{
+    curves::{
+        FlockInstance, FlockVerifyingKey, StwoInstance, StwoVerifyingKey, VestaInstance,
+        VestaVerifyingKey, VoteInstance, VoteVerifyingKey, ZkCurve,
+    },
+    CircuitFooter, COSMWASM_FOOTER_LENGTH, ZkError, ZkResult,
+};
 use halo2_proofs::{
     circuit::Layouter,
     plonk::{self, Circuit, ConstraintSystem},
-    COSMWASM_FOOTER_LENGTH,
 };
 use std::cell::RefCell;
 
@@ -67,7 +69,7 @@ pub struct CwCircuitParam<C: ZkCurve> {
 /// The circuit constraint system
 #[derive(Debug)]
 pub struct CwConstraintSystem<C: ZkCurve> {
-    pub(crate) cs: C::ConstraintSystem,
+    pub(crate) _cs: C::ConstraintSystem,
 }
 
 /// A verifying key for any supported curve/circuit.
@@ -111,14 +113,22 @@ impl TryFrom<&[u8]> for AnyVerifyingKey {
         // Dispatch on curve_id as the sole routing key.
         // curve_id is self-describing — each distinct circuit/curve has its own ID.
         match footer.curve_id {
-            0 => Ok(AnyVerifyingKey::Vesta(Box::new(VestaVerifyingKey::try_from(bytes)?))),
-            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(Box::new(VoteVerifyingKey::try_from(bytes)?))),
+            0 => Ok(AnyVerifyingKey::Vesta(Box::new(
+                VestaVerifyingKey::try_from(bytes)?,
+            ))),
+            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(Box::new(VoteVerifyingKey::try_from(
+                bytes,
+            )?))),
             #[cfg(feature = "bn254")]
-            4 => Ok(AnyVerifyingKey::Bn254(Box::new(Bn254VerifyingKey::try_from(bytes)?))),
+            4 => Ok(AnyVerifyingKey::Bn254(Box::new(
+                Bn254VerifyingKey::try_from(bytes)?,
+            ))),
             5 => Ok(AnyVerifyingKey::Stwo(StwoVerifyingKey::try_from(bytes)?)),
             7 => Ok(AnyVerifyingKey::Flock(FlockVerifyingKey::try_from(bytes)?)),
             #[cfg(feature = "halo2-kzg")]
-            6 => Ok(AnyVerifyingKey::Halo2Kzg(Box::new(Halo2KzgVerifyingKey::try_from(bytes)?))),
+            6 => Ok(AnyVerifyingKey::Halo2Kzg(Box::new(
+                Halo2KzgVerifyingKey::try_from(bytes)?,
+            ))),
             _ => Err(ZkError::UnsupportedCurve(footer.appstate_key())),
         }
     }
@@ -224,9 +234,9 @@ impl AnyVerifyingKey {
             0 => Ok(AnyVerifyingKey::Vesta(Box::new(
                 VestaVerifyingKey::from_bytes_with_params(bytes)?,
             ))),
-            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(Box::new(
-                VoteVerifyingKey::try_from(bytes)?,
-            ))),
+            1 | 2 | 3 => Ok(AnyVerifyingKey::Vote(Box::new(VoteVerifyingKey::try_from(
+                bytes,
+            )?))),
             #[cfg(feature = "bn254")]
             4 => Ok(AnyVerifyingKey::Bn254(Box::new(
                 Bn254VerifyingKey::try_from(bytes)?,
@@ -445,6 +455,31 @@ pub struct CsBlueprint {
     pub num_instance_columns: u8,
     pub num_selectors: u32,
     pub permutation_columns: Vec<plonk::Column<plonk::Any>>,
+}
+
+impl CsBlueprint {
+    /// Fail closed if a column count does not fit the stored widths (`u8` / `u32`).
+    pub fn from_cs<F: halo2_proofs::arithmetic::Field>(
+        cs: &plonk::ConstraintSystem<F>,
+    ) -> ZkResult<Self> {
+        fn u8_count(n: usize, what: &str) -> ZkResult<u8> {
+            u8::try_from(n).map_err(|_| {
+                ZkError::format_err(format!("{what} count {n} exceeds u8 (255)"))
+            })
+        }
+        Ok(Self {
+            num_fixed_columns: u8_count(cs.num_fixed_columns(), "fixed")?,
+            num_advice_columns: u8_count(cs.num_advice_columns(), "advice")?,
+            num_instance_columns: u8_count(cs.num_instance_columns(), "instance")?,
+            num_selectors: u32::try_from(cs.num_selectors()).map_err(|_| {
+                ZkError::format_err(format!(
+                    "selector count {} exceeds u32",
+                    cs.num_selectors()
+                ))
+            })?,
+            permutation_columns: cs.permutation_columns(),
+        })
+    }
 }
 
 #[derive(Clone, Debug)]

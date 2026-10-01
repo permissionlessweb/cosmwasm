@@ -106,7 +106,7 @@ pub use crate::query::{
     StakingQuery, SupplyResponse, Validator, ValidatorMetadata, ValidatorResponse, WasmQuery,
 };
 
-#[cfg(feature = "zk")]
+
 pub use crate::query::{CircuitInfoResponse, CircuitResponse};
 
 #[cfg(all(feature = "stargate", feature = "cosmwasm_1_2"))]

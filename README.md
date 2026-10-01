@@ -637,3 +637,7 @@ cd book && mdbook serve --open
 
 - **Part I** — using the VM, light clients, libraries, demos
 - **Part II** — community program (audit / hackathon), separate from usage docs
+
+## Folded into terp-core
+
+This tree is commit `ede49ae37` of [permissionlessweb/cosmwasm](https://github.com/permissionlessweb/cosmwasm), already at `crates/cosmwasm`. See `VERSION`. When this fold is accepted, that GitHub repository should be archived public and read-only. This review checkout is not committed.

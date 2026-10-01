@@ -7,6 +7,9 @@
 //!
 //! For more information, see: <https://cosmwasm.cosmos.network>
 
+// digest 0.10 GenericArray deprecations via k256/p256 until those crates move to 1.x
+#![allow(deprecated)]
+
 extern crate alloc;
 
 mod backtrace;
@@ -17,16 +20,11 @@ mod errors;
 mod identity_digest;
 mod secp256k1;
 mod secp256r1;
-
-// Multi-curve / multi-hash libraries (feature-gated).
-#[cfg(feature = "hash-blake")]
-pub mod blake;
-#[cfg(feature = "hash-poseidon")]
-pub mod poseidon;
-#[cfg(feature = "redpallas")]
-pub mod redpallas;
+mod blake;
 #[cfg(feature = "bn254")]
 mod bn254;
+mod poseidon;
+mod redpallas;
 
 #[doc(hidden)]
 pub use crate::bls12_381::{
@@ -50,7 +48,6 @@ pub use crate::secp256k1::{secp256k1_recover_pubkey, secp256k1_verify};
 #[doc(hidden)]
 pub use crate::secp256r1::{secp256r1_recover_pubkey, secp256r1_verify};
 
-// Optional BN254 (Groth16 / EIP-196/197 layout) — multi-curve showcase.
 #[cfg(feature = "bn254")]
 #[doc(hidden)]
 pub use crate::bn254::{
@@ -67,9 +64,9 @@ pub use crate::blake::{blake2b_256, blake2b_512, blake3_256};
 #[cfg(feature = "hash-poseidon")]
 #[doc(hidden)]
 pub use crate::poseidon::{
-    poseidon_hash_pallas, poseidon_hash_pallas_bytes, poseidon_hash_vesta,
-    poseidon_hash_vesta_bytes, poseidon377_hash, poseidon377_hash_bytes, PASTA_FIELD_BYTES,
-    PASTA_MAX_ARITY, POSEIDON377_FIELD_BYTES, POSEIDON377_MAX_ARITY, POSEIDON377_MIN_ARITY,
+    poseidon377_hash, poseidon377_hash_bytes, poseidon_hash_pallas, poseidon_hash_pallas_bytes,
+    poseidon_hash_vesta, poseidon_hash_vesta_bytes, PASTA_FIELD_BYTES, PASTA_MAX_ARITY,
+    POSEIDON377_FIELD_BYTES, POSEIDON377_MAX_ARITY, POSEIDON377_MIN_ARITY,
 };
 
 // RedPallas (Orchard) + RedJubjub (Sapling) signature verification.

@@ -4,8 +4,6 @@ use crate::conversion::{ref_to_u32, to_u32};
 pub use crate::environment::DebugInfo;
 use crate::environment::Environment;
 use crate::errors::{CommunicationError, VmError, VmResult};
-#[cfg(feature = "zk")]
-use crate::imports::{do_proof_instance_batch_verify, do_proof_instance_verify};
 use crate::imports::{
     do_abort, do_addr_canonicalize, do_addr_humanize, do_addr_validate, do_bls12_381_aggregate_g1,
     do_bls12_381_aggregate_g2, do_bls12_381_hash_to_g1, do_bls12_381_hash_to_g2,
@@ -13,19 +11,21 @@ use crate::imports::{
     do_ed25519_batch_verify, do_ed25519_verify, do_query_chain, do_secp256k1_recover_pubkey,
     do_secp256k1_verify, do_secp256r1_recover_pubkey, do_secp256r1_verify,
 };
-#[cfg(feature = "bn254")]
-use crate::imports::{do_bn254_add, do_bn254_pairing_equality, do_bn254_scalar_mul};
 #[cfg(feature = "hash-blake")]
 use crate::imports::{do_blake2b_256, do_blake3_256};
+#[cfg(feature = "bn254")]
+use crate::imports::{do_bn254_add, do_bn254_pairing_equality, do_bn254_scalar_mul};
+#[cfg(feature = "iterator")]
+use crate::imports::{do_db_next, do_db_next_key, do_db_next_value, do_db_scan};
 #[cfg(feature = "hash-poseidon")]
-use crate::imports::{do_poseidon_hash_pallas, do_poseidon_hash_vesta, do_poseidon377_hash};
+use crate::imports::{do_poseidon377_hash, do_poseidon_hash_pallas, do_poseidon_hash_vesta};
+
+use crate::imports::{do_proof_instance_batch_verify, do_proof_instance_verify};
 #[cfg(feature = "redpallas")]
 use crate::imports::{
     do_redjubjub_binding_verify, do_redjubjub_spendauth_verify, do_redpallas_binding_verify,
     do_redpallas_spendauth_verify,
 };
-#[cfg(feature = "iterator")]
-use crate::imports::{do_db_next, do_db_next_key, do_db_next_value, do_db_scan};
 use crate::internals::compile_module;
 use crate::memory::{read_region, write_region};
 use crate::size::Size;
@@ -91,7 +91,7 @@ where
             options.gas_limit,
             None,
             None,
-            #[cfg(feature = "zk")]
+            
             None,
         )
     }
@@ -104,10 +104,10 @@ where
         gas_limit: u64,
         extra_imports: Option<HashMap<&str, Exports>>,
         instantiation_lock: Option<&Mutex<()>>,
-        #[cfg(feature = "zk")] circuit_loader: Option<crate::environment::CircuitLoader>,
+         circuit_loader: Option<crate::environment::CircuitLoader>,
     ) -> VmResult<Self> {
         let env = Environment::new(backend.api, gas_limit);
-        #[cfg(feature = "zk")]
+        
         env.set_circuit_loader(circuit_loader);
         let fe = FunctionEnv::new(&mut store, env);
 
@@ -330,7 +330,7 @@ where
             Function::new_typed_with_env(&mut store, &fe, do_ed25519_batch_verify),
         );
 
-        #[cfg(feature = "zk")]
+        
         env_imports.insert(
             "proof_instance_verify",
             Function::new_typed_with_env(&mut store, &fe, do_proof_instance_verify),
@@ -338,7 +338,7 @@ where
 
         // Batch Path A verify (section-encoded zkids/proofs/instances). Gas scheduled
         // before backend; CPU golden / optional GPU via select_backend().batch_verify.
-        #[cfg(feature = "zk")]
+        
         env_imports.insert(
             "proof_instance_batch_verify",
             Function::new_typed_with_env(&mut store, &fe, do_proof_instance_batch_verify),
@@ -646,7 +646,7 @@ where
         gas_limit,
         extra_imports,
         None,
-        #[cfg(feature = "zk")]
+        
         None,
     )
 }
@@ -813,7 +813,7 @@ mod tests {
             instance_options.gas_limit,
             Some(extra_imports),
             None,
-            #[cfg(feature = "zk")]
+            
             None,
         )
         .unwrap();
@@ -1045,7 +1045,7 @@ mod tests {
 
         let report2 = instance.create_gas_report();
         assert_eq!(report2.used_externally, 251);
-        assert_eq!(report2.used_internally, 18034325);
+        assert_eq!(report2.used_internally, 21331867);
         assert_eq!(report2.limit, LIMIT);
         assert_eq!(
             report2.remaining,
@@ -1212,7 +1212,7 @@ mod tests {
             .unwrap();
 
         let init_used = orig_gas - instance.get_gas_left();
-        assert_eq!(init_used, 18034576);
+        assert_eq!(init_used, 21332118);
     }
 
     #[test]
@@ -1237,7 +1237,8 @@ mod tests {
             .unwrap();
 
         let execute_used = gas_before_execute - instance.get_gas_left();
-        assert_eq!(execute_used, 24624366);
+        // Wasmer 7.4.2 meters 15300 more flat ops (115 gas) on this execute.
+        assert_eq!(execute_used, 26383866);
     }
 
     #[test]
@@ -1280,6 +1281,7 @@ mod tests {
         );
 
         let query_used = gas_before_query - instance.get_gas_left();
-        assert_eq!(query_used, 11105566);
+        // Wasmer 7.4.2 meters 5978 more flat ops (115 gas) on this query.
+        assert_eq!(query_used, 11793036);
     }
 }

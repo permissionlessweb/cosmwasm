@@ -1,0 +1,33 @@
+[package]
+name = "recurse"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+description = "Regression contract: caller-controlled Wasm recursion, capped by the VM call-depth limit"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+library = []
+
+[dependencies]
+cosmwasm-schema = { path = "../../packages/schema" }
+cosmwasm-std = { path = "../../packages/std", default-features = false, features = ["cosmwasm_2_2", "exports", "std"] }
+serde = { version = "1.0.103", default-features = false, features = ["derive"] }
+thiserror = "1.0.26"
+
+[dev-dependencies]
+cosmwasm-std = { path = "../../packages/std", default-features = false, features = ["cosmwasm_2_2", "exports", "std"] }
+
+[profile.release]
+opt-level = "s"
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+codegen-units = 1
+panic = "abort"
+incremental = false
+overflow-checks = true

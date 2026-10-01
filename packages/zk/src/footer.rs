@@ -1,8 +1,9 @@
-use halo2_proofs::COSMWASM_FOOTER_LENGTH;
+/// Trailer length on Path A circuit blobs (not part of halo2).
+pub const COSMWASM_FOOTER_LENGTH: usize = 80;
 
+use crate::circuits::CircuitType;
 use crate::curves::CurveType;
 use crate::errors::{ZkError, ZkResult};
-use crate::circuits::CircuitType;
 
 /// Circuit footer metadata - [[COSMWASM_FOOTER_LENGTH]] bytes containing complete constraint system specification.
 /// V2 CS-inclusive format: enables generic deserialization via DynamicCircuit
@@ -20,6 +21,12 @@ use crate::circuits::CircuitType;
 ///
 /// Blob layout remains `[params | cs+vk | footer]` with a zero-length params
 /// prefix. Split storage still writes an empty `zk_param/{param_key}.bin`.
+///
+/// Flock is not this convention. Its param bytes are canonical `PcsParams`
+/// (`param_len` > 0). `vk_len` is 0, or 32 when the body ends in
+/// `Registry::digest`. That digest is a circuit id, not a Halo2 verifying key.
+/// The param file key still uses this footer's `prover_id` and `curve_id`, so
+/// it does not share a Halo2 param file for the same `k`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CircuitFooter {
     /// Circuit proving type identifier (`CircuitType`: Plonkish=0, Groth16=1)

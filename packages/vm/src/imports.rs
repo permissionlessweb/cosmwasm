@@ -13,19 +13,19 @@ use crate::sections::encode_sections;
 use crate::serde::to_vec;
 use crate::GasInfo;
 use cosmwasm_core::{BLS12_381_G1_POINT_LEN, BLS12_381_G2_POINT_LEN};
+#[cfg(feature = "bn254")]
+use cosmwasm_crypto::gas;
 use cosmwasm_crypto::{
     bls12_381_aggregate_g1, bls12_381_aggregate_g2, bls12_381_hash_to_g1, bls12_381_hash_to_g2,
     bls12_381_pairing_equality, ed25519_batch_verify, ed25519_verify, secp256k1_recover_pubkey,
     secp256k1_verify, secp256r1_recover_pubkey, secp256r1_verify, CryptoError, HashFunction,
 };
-use cosmwasm_crypto::{
-    ECDSA_PUBKEY_MAX_LEN, ECDSA_SIGNATURE_LEN, EDDSA_PUBKEY_LEN, MESSAGE_HASH_MAX_LEN,
-};
-#[cfg(feature = "bn254")]
-use cosmwasm_crypto::gas;
 #[cfg(feature = "bn254")]
 use cosmwasm_crypto::{
     bn254_add, bn254_pairing_equality, bn254_scalar_mul, Bn254Error, G1_BYTES, G2_BYTES,
+};
+use cosmwasm_crypto::{
+    ECDSA_PUBKEY_MAX_LEN, ECDSA_SIGNATURE_LEN, EDDSA_PUBKEY_LEN, MESSAGE_HASH_MAX_LEN,
 };
 #[cfg(feature = "iterator")]
 use cosmwasm_std::Order;
@@ -71,7 +71,7 @@ const MAX_LENGTH_PROOF: usize = MI;
 const MAX_LENGTH_INSTANCES: usize = MI;
 /// Max number of items in one `proof_instance_batch_verify` call.
 /// Arbitrary bound for memory / DoS (each item is a full ZK verify).
-#[cfg(feature = "zk")]
+
 const MAX_COUNT_PROOF_INSTANCE_BATCH: usize = 32;
 
 #[inline(always)]
@@ -513,7 +513,7 @@ pub fn do_bls12_381_hash_to_g2<
 }
 
 // ── BN254 host functions (feature "bn254") ────────────────────────────────
-// EIP-196 / EIP-197 / EIP-1108 gas schedule from cosmwasm_crypto_bn254::gas.
+// EIP-196 / EIP-197 / EIP-1108 gas schedule from cosmwasm_crypto::gas.
 
 #[cfg(feature = "bn254")]
 /// Return code (error code) for a valid BN254 pairing
@@ -545,11 +545,7 @@ fn bn254_error_code(err: &Bn254Error) -> u32 {
 }
 
 #[cfg(feature = "bn254")]
-pub fn do_bn254_add<
-    A: BackendApi + 'static,
-    S: Storage + 'static,
-    Q: Querier + 'static,
->(
+pub fn do_bn254_add<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
     mut env: FunctionEnvMut<Environment<A, S, Q>>,
     input_ptr: u32,
     out_ptr: u32,
@@ -573,11 +569,7 @@ pub fn do_bn254_add<
 }
 
 #[cfg(feature = "bn254")]
-pub fn do_bn254_scalar_mul<
-    A: BackendApi + 'static,
-    S: Storage + 'static,
-    Q: Querier + 'static,
->(
+pub fn do_bn254_scalar_mul<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
     mut env: FunctionEnvMut<Environment<A, S, Q>>,
     input_ptr: u32,
     out_ptr: u32,
@@ -649,11 +641,7 @@ const BLAKE_PER_BYTE_COST: u64 = 1;
 const BLAKE_MAX_INPUT_SIZE: usize = 1 * MI;
 
 #[cfg(feature = "hash-blake")]
-pub fn do_blake2b_256<
-    A: BackendApi + 'static,
-    S: Storage + 'static,
-    Q: Querier + 'static,
->(
+pub fn do_blake2b_256<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
     mut env: FunctionEnvMut<Environment<A, S, Q>>,
     input_ptr: u32,
     out_ptr: u32,
@@ -673,11 +661,7 @@ pub fn do_blake2b_256<
 }
 
 #[cfg(feature = "hash-blake")]
-pub fn do_blake3_256<
-    A: BackendApi + 'static,
-    S: Storage + 'static,
-    Q: Querier + 'static,
->(
+pub fn do_blake3_256<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
     mut env: FunctionEnvMut<Environment<A, S, Q>>,
     input_ptr: u32,
     out_ptr: u32,
@@ -702,7 +686,7 @@ pub fn do_blake3_256<
 
 #[cfg(feature = "hash-poseidon")]
 use cosmwasm_crypto::{
-    poseidon_hash_pallas_bytes, poseidon_hash_vesta_bytes, poseidon377_hash_bytes,
+    poseidon377_hash_bytes, poseidon_hash_pallas_bytes, poseidon_hash_vesta_bytes,
     PASTA_FIELD_BYTES, POSEIDON377_FIELD_BYTES,
 };
 
@@ -796,11 +780,7 @@ pub fn do_poseidon_hash_vesta<
 /// `out_ptr` → 32-byte LE Fq.
 /// Returns 0 on success, 1 on invalid encoding/length.
 #[cfg(feature = "hash-poseidon")]
-pub fn do_poseidon377_hash<
-    A: BackendApi + 'static,
-    S: Storage + 'static,
-    Q: Querier + 'static,
->(
+pub fn do_poseidon377_hash<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
     mut env: FunctionEnvMut<Environment<A, S, Q>>,
     domain_ptr: u32,
     inputs_ptr: u32,
@@ -1304,7 +1284,7 @@ pub fn do_ed25519_batch_verify<
 
 /// Scheduled gas units for one Path A verify item (see docs/ZK-VERIFY-GAS.md).
 /// `units = 1 + max(1, ceil(proof/1024)) + ceil(instances/32)`.
-#[cfg(feature = "zk")]
+
 fn proof_instance_verify_gas_units(proof_len: usize, instances_len: usize) -> u64 {
     let proof_kib = (proof_len as u64).div_ceil(1024).max(1);
     let pi_limbs = (instances_len as u64).div_ceil(32);
@@ -1313,7 +1293,7 @@ fn proof_instance_verify_gas_units(proof_len: usize, instances_len: usize) -> u6
 
 /// Path A: resolve `zkid` → `AnyVerifyingKey` via CircuitInfo + host cache / cold Circuit.
 /// Never reads the contract's sandboxed KVStore for circuit data. Pin/LRU unchanged.
-#[cfg(feature = "zk")]
+
 fn load_verifying_key_for_zkid<
     A: BackendApi + 'static,
     S: Storage + 'static,
@@ -1323,9 +1303,7 @@ fn load_verifying_key_for_zkid<
     store: &mut impl wasmer::AsStoreMut,
     zkid: u64,
 ) -> VmResult<zk_cosmwasm::AnyVerifyingKey> {
-    use cosmwasm_std::{
-        from_json, ContractResult, Empty, QueryRequest, SystemResult, WasmQuery,
-    };
+    use cosmwasm_std::{from_json, ContractResult, Empty, QueryRequest, SystemResult, WasmQuery};
     use cosmwasm_std::{CircuitInfoResponse, CircuitResponse};
 
     // ── Step 1: resolve zkid → circuit_key via CircuitInfo (metadata only) ──
@@ -1333,7 +1311,9 @@ fn load_verifying_key_for_zkid<
     let info_raw = match query_raw(data, store, &info_req)? {
         SystemResult::Ok(ContractResult::Ok(bin)) => bin,
         SystemResult::Ok(ContractResult::Err(e)) => {
-            return Err(VmError::generic_err(format!("CircuitInfo query error: {e}")));
+            return Err(VmError::generic_err(format!(
+                "CircuitInfo query error: {e}"
+            )));
         }
         SystemResult::Err(e) => {
             return Err(VmError::generic_err(format!(
@@ -1393,7 +1373,7 @@ fn load_verifying_key_for_zkid<
 }
 
 /// Build + arity-check public instances for a VK (footer.curve_id routing, H-05).
-#[cfg(feature = "zk")]
+
 fn prepare_instances_for_vk(
     vk: &zk_cosmwasm::AnyVerifyingKey,
     instances_bytes: &[u8],
@@ -1426,7 +1406,7 @@ fn prepare_instances_for_vk(
 /// scheduled `halo2_proof_instance_verify_cost` below — never wall-time.
 /// Blake hosts never use GPU. Pin/LRU unchanged (load ≠ pin).
 /// See docs/research/gpu-accel/DESIGN-G1-verifier-backend.md
-#[cfg(feature = "zk")]
+
 pub fn do_proof_instance_verify<
     A: BackendApi + 'static,
     S: Storage + 'static,
@@ -1500,7 +1480,7 @@ pub fn do_proof_instance_verify<
 ///
 /// Dispatches to `select_backend().batch_verify(...)` (`CpuBackend` golden; `GpuBackend` stub OK).
 /// See docs/research/gpu-accel/DESIGN-G1-verifier-backend.md §5 / §8.
-#[cfg(feature = "zk")]
+
 pub fn do_proof_instance_batch_verify<
     A: BackendApi + 'static,
     S: Storage + 'static,
@@ -1562,9 +1542,7 @@ pub fn do_proof_instance_batch_verify<
         for (proof, inst) in proof_secs.iter().zip(instance_secs.iter()) {
             let units = proof_instance_verify_gas_units(proof.len(), inst.len());
             let item = gas_cost.total_cost(units)?;
-            total = total
-                .checked_add(item)
-                .ok_or_else(VmError::gas_depletion)?;
+            total = total.checked_add(item).ok_or_else(VmError::gas_depletion)?;
         }
         process_gas_info(data, &mut store, GasInfo::with_cost(total))?;
     }
@@ -1604,10 +1582,8 @@ pub fn do_proof_instance_batch_verify<
     }
 
     // One-element slices per item (VerifyItem wants &[AnyInstance]).
-    let instance_slices: Vec<[zk_cosmwasm::AnyInstance; 1]> = instances
-        .into_iter()
-        .map(|i| [i])
-        .collect();
+    let instance_slices: Vec<[zk_cosmwasm::AnyInstance; 1]> =
+        instances.into_iter().map(|i| [i]).collect();
 
     let items: Vec<zk_cosmwasm::VerifyItem<'_>> = vks
         .iter()
@@ -1629,7 +1605,7 @@ pub fn do_proof_instance_batch_verify<
 }
 
 /// Canonical zkid section: 8-byte little-endian `u64`. Also accepts 4-byte LE `u32`.
-#[cfg(feature = "zk")]
+
 fn parse_batch_zkid_section(sec: &[u8]) -> VmResult<u64> {
     match sec.len() {
         8 => {
@@ -1649,7 +1625,7 @@ fn parse_batch_zkid_section(sec: &[u8]) -> VmResult<u64> {
 }
 
 /// Count public-input field limbs for H-05 arity check.
-#[cfg(feature = "zk")]
+
 fn instance_public_input_count(i: &zk_cosmwasm::AnyInstance) -> usize {
     match i {
         zk_cosmwasm::AnyInstance::Vesta(v) => v.get_size(),
@@ -1658,11 +1634,13 @@ fn instance_public_input_count(i: &zk_cosmwasm::AnyInstance) -> usize {
         zk_cosmwasm::AnyInstance::Bn254(v) => v.i.len(),
         zk_cosmwasm::AnyInstance::Stwo(v) => v.public_input_count(),
         zk_cosmwasm::AnyInstance::Flock(v) => v.public_input_count(),
+        #[cfg(feature = "halo2-kzg")]
+        zk_cosmwasm::AnyInstance::Halo2Kzg(v) => v.scalars.len(),
     }
 }
 
 /// Helper: run a cosmwasm query through the instance querier and return the system result.
-#[cfg(feature = "zk")]
+
 fn query_raw<A: BackendApi + 'static, S: Storage + 'static, Q: Querier + 'static>(
     data: &Environment<A, S, Q>,
     store: &mut impl wasmer::AsStoreMut,
@@ -3569,6 +3547,68 @@ mod tests {
         );
     }
 
+    /// Penumbra poseidon377 (BLS12-377 `decaf377::Fq`, not BLS12-381) rates 1..=6.
+    /// Domain = LE Fq of `b"Penumbra_TestVec"`; inputs/outputs from the official testvec chain.
+    #[test]
+    #[cfg(feature = "hash-poseidon")]
+    fn do_poseidon377_hash_penumbra_testvecs_rate_1_through_6() {
+        use core::str::FromStr;
+        use poseidon377::Fq;
+
+        const CHAIN: &[&str] = &[
+            "7553885614632219548127688026174585776320152166623257619763178041781456016062",
+            "2337838243217876174544784248400816541933405738836087430664765452605435675740",
+            "4318449279293553393006719276941638490334729643330833590842693275258805886300",
+            "2884734248868891876687246055367204388444877057000108043377667455104051576315",
+            "5235431038142849831913898188189800916077016298531443239266169457588889298166",
+            "66948599770858083122195578203282720327054804952637730715402418442993895152",
+            "6797655301930638258044003960605211404784492298673033525596396177265014216269",
+        ];
+
+        let api = MockApi::default();
+        let (fe, mut store, instance) = make_instance(api);
+        let mut fe_mut = fe.into_mut(&mut store);
+
+        let domain = Fq::from_le_bytes_mod_order(b"Penumbra_TestVec").to_bytes();
+        let domain_ptr = write_data(&mut fe_mut, &domain);
+
+        for rate in 1..=6 {
+            let mut msg = Vec::new();
+            for s in &CHAIN[..rate] {
+                msg.extend_from_slice(&Fq::from_str(s).unwrap().to_bytes());
+            }
+            let expected = Fq::from_str(CHAIN[rate]).unwrap().to_bytes();
+            let inputs_ptr = write_data(&mut fe_mut, &msg);
+            let out_ptr = create_empty(&instance, &mut fe_mut, 32);
+            assert_eq!(
+                do_poseidon377_hash(fe_mut.as_mut(), domain_ptr, inputs_ptr, out_ptr).unwrap(),
+                0,
+                "host poseidon377 rate {rate} must succeed"
+            );
+            assert_eq!(
+                force_read(&mut fe_mut, out_ptr),
+                expected.as_slice(),
+                "host poseidon377 rate {rate} must match Penumbra testvec"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "hash-poseidon")]
+    fn do_poseidon377_hash_bad_arity_returns_1() {
+        let api = MockApi::default();
+        let (fe, mut store, instance) = make_instance(api);
+        let mut fe_mut = fe.into_mut(&mut store);
+        let domain_ptr = write_data(&mut fe_mut, &[0u8; 32]);
+        // Host caps message at 7*32; empty payload is a soft-fail (code 1), not RegionLengthTooBig.
+        let inputs_ptr = write_data(&mut fe_mut, &[]);
+        let out_ptr = create_empty(&instance, &mut fe_mut, 32);
+        assert_eq!(
+            do_poseidon377_hash(fe_mut.as_mut(), domain_ptr, inputs_ptr, out_ptr).unwrap(),
+            1
+        );
+    }
+
     /// RedPallas SpendAuth: reddsa sign → host verify returns 0.
     #[test]
     #[cfg(feature = "redpallas")]
@@ -3994,8 +4034,8 @@ mod tests {
     #[cfg(all(feature = "zk", feature = "bn254"))]
     fn proof_instance_verify_bn254_zkid_42_cold_path() {
         use cosmwasm_std::{
-            to_json_binary, Addr, CircuitInfoResponse, CircuitResponse, ContractResult, SystemResult,
-            WasmQuery,
+            to_json_binary, Addr, CircuitInfoResponse, CircuitResponse, ContractResult,
+            SystemResult, WasmQuery,
         };
 
         static SQUARE_BLOB: &[u8] = include_bytes!("../../zk/testdata/square_vk.bin");
@@ -4030,8 +4070,7 @@ mod tests {
                 SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
             }
             WasmQuery::Circuit { zk_id } if *zk_id == 42 => {
-                let response =
-                    CircuitResponse::new(cosmwasm_std::Binary::from(blob.clone()));
+                let response = CircuitResponse::new(cosmwasm_std::Binary::from(blob.clone()));
                 SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
             }
             WasmQuery::CircuitInfo { zk_id } | WasmQuery::Circuit { zk_id } => {
@@ -4078,7 +4117,7 @@ mod tests {
             SQUARE_PUBLIC.len() as u32,
         );
         match bad_res {
-            Ok(1) => {} // crypto false
+            Ok(1) => {}  // crypto false
             Err(_) => {} // format error on corrupt proof
             Ok(0) => panic!("bit-flipped proof must not verify"),
             Ok(other) => panic!("unexpected code {other}"),
@@ -4102,12 +4141,12 @@ mod tests {
     #[test]
     #[cfg(all(feature = "zk", feature = "bn254"))]
     fn proof_instance_verify_bn254_loader_hit() {
-        use cosmwasm_std::{
-            to_json_binary, Addr, CircuitInfoResponse, ContractResult, SystemResult, WasmQuery,
-        };
         use crate::cache::Cache;
         use crate::config::CacheOptions;
         use crate::size::Size;
+        use cosmwasm_std::{
+            to_json_binary, Addr, CircuitInfoResponse, ContractResult, SystemResult, WasmQuery,
+        };
         use std::collections::HashSet;
         use tempfile::TempDir;
 
@@ -4118,15 +4157,11 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let opts = CacheOptions {
             base_dir: temp.path().into(),
-            available_capabilities: HashSet::from([
-                "cosmwasm_1_1".into(),
-                "cosmwasm_2_0".into(),
-            ]),
+            available_capabilities: HashSet::from(["cosmwasm_1_1".into(), "cosmwasm_2_0".into()]),
             memory_cache_size_bytes: Size::mebi(32),
             instance_memory_limit_bytes: Size::mebi(16),
         };
-        let cache: Cache<MockApi, MockStorage, MockQuerier> =
-            unsafe { Cache::new(opts).unwrap() };
+        let cache: Cache<MockApi, MockStorage, MockQuerier> = unsafe { Cache::new(opts).unwrap() };
         let circuit_key = cache.store_circuit(SQUARE_BLOB, true).unwrap();
         let loader = cache.circuit_loader();
 
@@ -4179,9 +4214,9 @@ mod tests {
 
     /// Missing CircuitInfo/Circuit for zkid → host Err (not process panic, not Ok(0)).
     #[test]
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_verify_missing_circuit_is_err_not_panic() {
-        use cosmwasm_std::{ContractResult, SystemResult, WasmQuery};
+        use cosmwasm_std::{SystemResult, WasmQuery};
 
         let api = MockApi::default();
         let (fe, mut store, _instance) =
@@ -4222,17 +4257,19 @@ mod tests {
             )
         }));
         let inner = res.expect("VM must not panic on missing circuit");
-        assert!(inner.is_err(), "missing circuit must be host Err, not Ok(0)");
+        assert!(
+            inner.is_err(),
+            "missing circuit must be host Err, not Ok(0)"
+        );
     }
 
-    /// Circle STWO through the same Path A `proof_instance_verify` as other circuits.
-    /// Dummy DSTW (no STWO_HOST_VERIFY in this crate) + bitflip / missing zkid.
+    /// Circle STWO through Path A. Without STWO_HOST_VERIFY, dummy DSTW is rejected.
     #[test]
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_verify_stwo_ok_bad_proof_missing_not_panic() {
         use cosmwasm_std::{
-            to_json_binary, Addr, CircuitInfoResponse, CircuitResponse, ContractResult, SystemResult,
-            WasmQuery,
+            to_json_binary, Addr, CircuitInfoResponse, CircuitResponse, ContractResult,
+            SystemResult, WasmQuery,
         };
 
         let vk = zk_cosmwasm::StwoVerifyingKey::lean_default();
@@ -4272,8 +4309,7 @@ mod tests {
                 SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
             }
             WasmQuery::Circuit { zk_id } if *zk_id == 7 => {
-                let response =
-                    CircuitResponse::new(cosmwasm_std::Binary::from(blob_c.clone()));
+                let response = CircuitResponse::new(cosmwasm_std::Binary::from(blob_c.clone()));
                 SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
             }
             WasmQuery::CircuitInfo { zk_id } | WasmQuery::Circuit { zk_id } => {
@@ -4302,21 +4338,19 @@ mod tests {
                 0,
             )
         }))
-        .expect("no panic on valid DSTW");
-        assert_eq!(ok.expect("format ok"), 0, "valid dummy STWO/DSTW must Ok(0)");
+        .expect("no panic on dummy DSTW");
+        match ok {
+            Ok(1) => {}
+            Err(_) => {}
+            Ok(0) => panic!("dummy DSTW must not Ok(0) without host verifier"),
+            Ok(other) => panic!("unexpected code {other}"),
+        }
 
         let mut bad = dstw.clone();
         bad[14] ^= 1;
         let bad_ptr = write_data(&mut fe_mut, &bad);
         let bad_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            do_proof_instance_verify(
-                fe_mut.as_mut(),
-                7,
-                bad_ptr,
-                bad.len() as u32,
-                inst_ptr,
-                0,
-            )
+            do_proof_instance_verify(fe_mut.as_mut(), 7, bad_ptr, bad.len() as u32, inst_ptr, 0)
         }))
         .expect("no panic on bad proof");
         match bad_res {
@@ -4344,7 +4378,7 @@ mod tests {
 
     /// Empty batch: section-empty inputs → Ok(0), gas charged (base only).
     #[test]
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_batch_verify_empty_ok() {
         let api = MockApi::default();
         let (fe, mut store, _instance) = make_instance(api);
@@ -4356,13 +4390,9 @@ mod tests {
         let proofs_ptr = write_data(&mut fe_mut, &[]);
         let instances_ptr = write_data(&mut fe_mut, &[]);
 
-        let code = do_proof_instance_batch_verify(
-            fe_mut.as_mut(),
-            zkids_ptr,
-            proofs_ptr,
-            instances_ptr,
-        )
-        .expect("empty batch");
+        let code =
+            do_proof_instance_batch_verify(fe_mut.as_mut(), zkids_ptr, proofs_ptr, instances_ptr)
+                .expect("empty batch");
         assert_eq!(code, 0, "empty batch is vacuously valid");
     }
 
@@ -4373,7 +4403,7 @@ mod tests {
 
     /// Length mismatch between section lists → host Err (before verify).
     #[test]
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_batch_verify_length_mismatch_err() {
         let api = MockApi::default();
         let (fe, mut store, _instance) = make_instance(api);
@@ -4386,12 +4416,8 @@ mod tests {
         let proofs_ptr = write_data(&mut fe_mut, &[]);
         let instances_ptr = write_data(&mut fe_mut, &[]);
 
-        let res = do_proof_instance_batch_verify(
-            fe_mut.as_mut(),
-            zkids_ptr,
-            proofs_ptr,
-            instances_ptr,
-        );
+        let res =
+            do_proof_instance_batch_verify(fe_mut.as_mut(), zkids_ptr, proofs_ptr, instances_ptr);
         assert!(res.is_err(), "mismatched section counts must error");
     }
 
@@ -4400,8 +4426,8 @@ mod tests {
     #[cfg(all(feature = "zk", feature = "bn254"))]
     fn proof_instance_batch_verify_bn254_small_batch() {
         use cosmwasm_std::{
-            to_json_binary, Addr, CircuitInfoResponse, CircuitResponse, ContractResult, SystemResult,
-            WasmQuery,
+            to_json_binary, Addr, CircuitInfoResponse, CircuitResponse, ContractResult,
+            SystemResult, WasmQuery,
         };
 
         static SQUARE_BLOB: &[u8] = include_bytes!("../../zk/testdata/square_vk.bin");
@@ -4433,8 +4459,7 @@ mod tests {
                 SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
             }
             WasmQuery::Circuit { zk_id } if *zk_id == 42 => {
-                let response =
-                    CircuitResponse::new(cosmwasm_std::Binary::from(blob.clone()));
+                let response = CircuitResponse::new(cosmwasm_std::Binary::from(blob.clone()));
                 SystemResult::Ok(ContractResult::Ok(to_json_binary(&response).unwrap()))
             }
             WasmQuery::CircuitInfo { zk_id } | WasmQuery::Circuit { zk_id } => {
@@ -4454,22 +4479,15 @@ mod tests {
         let zkid_a = 42u64.to_le_bytes().to_vec();
         let zkid_b = 42u64.to_le_bytes().to_vec();
         let zkids_enc = encode_sections(&[zkid_a, zkid_b]).unwrap();
-        let proofs_enc =
-            encode_sections(&[SQUARE_PROOF.to_vec(), SQUARE_PROOF.to_vec()]).unwrap();
-        let inst_enc =
-            encode_sections(&[SQUARE_PUBLIC.to_vec(), SQUARE_PUBLIC.to_vec()]).unwrap();
+        let proofs_enc = encode_sections(&[SQUARE_PROOF.to_vec(), SQUARE_PROOF.to_vec()]).unwrap();
+        let inst_enc = encode_sections(&[SQUARE_PUBLIC.to_vec(), SQUARE_PUBLIC.to_vec()]).unwrap();
 
         let zkids_ptr = write_data(&mut fe_mut, &zkids_enc);
         let proofs_ptr = write_data(&mut fe_mut, &proofs_enc);
         let inst_ptr = write_data(&mut fe_mut, &inst_enc);
 
-        let code = do_proof_instance_batch_verify(
-            fe_mut.as_mut(),
-            zkids_ptr,
-            proofs_ptr,
-            inst_ptr,
-        )
-        .expect("batch format ok");
+        let code = do_proof_instance_batch_verify(fe_mut.as_mut(), zkids_ptr, proofs_ptr, inst_ptr)
+            .expect("batch format ok");
         assert_eq!(code, 0, "batch of two goldens must verify");
 
         // One valid + one bit-flipped → non-success.
@@ -4477,20 +4495,15 @@ mod tests {
         if let Some(b) = bad.last_mut() {
             *b ^= 0xff;
         }
-        let zkids_enc2 = encode_sections(&[42u64.to_le_bytes().to_vec(), 42u64.to_le_bytes().to_vec()])
-            .unwrap();
+        let zkids_enc2 =
+            encode_sections(&[42u64.to_le_bytes().to_vec(), 42u64.to_le_bytes().to_vec()]).unwrap();
         let proofs_enc2 = encode_sections(&[SQUARE_PROOF.to_vec(), bad]).unwrap();
-        let inst_enc2 =
-            encode_sections(&[SQUARE_PUBLIC.to_vec(), SQUARE_PUBLIC.to_vec()]).unwrap();
+        let inst_enc2 = encode_sections(&[SQUARE_PUBLIC.to_vec(), SQUARE_PUBLIC.to_vec()]).unwrap();
         let zkids_ptr2 = write_data(&mut fe_mut, &zkids_enc2);
         let proofs_ptr2 = write_data(&mut fe_mut, &proofs_enc2);
         let inst_ptr2 = write_data(&mut fe_mut, &inst_enc2);
-        let bad_res = do_proof_instance_batch_verify(
-            fe_mut.as_mut(),
-            zkids_ptr2,
-            proofs_ptr2,
-            inst_ptr2,
-        );
+        let bad_res =
+            do_proof_instance_batch_verify(fe_mut.as_mut(), zkids_ptr2, proofs_ptr2, inst_ptr2);
         match bad_res {
             Ok(1) => {}
             Err(_) => {}

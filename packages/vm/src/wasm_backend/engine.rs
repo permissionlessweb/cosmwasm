@@ -6,9 +6,10 @@ use crate::size::Size;
 use crate::wasm_backend::metering::MeteringCoefficients;
 use cosmwasm_vm_derive::hash_function;
 use std::sync::Arc;
-use wasmer::NativeEngineExt;
 use wasmer::{
-    sys::BaseTunables, wasmparser::Operator, CompilerConfig, Engine, Pages, Target, WASM_PAGE_SIZE,
+    sys::{BaseTunables, CompilerConfig, NativeEngineExt},
+    wasmparser::Operator,
+    Engine, Pages, WASM_PAGE_SIZE,
 };
 
 /// WebAssembly linear memory objects have sizes measured in pages. Each page
@@ -41,13 +42,13 @@ fn cost(operator: &Operator) -> MeteringCoefficients {
 }
 
 pub fn make_compiler_config() -> impl CompilerConfig + Into<Engine> {
-    wasmer::Singlepass::new()
+    wasmer::sys::Singlepass::new()
 }
 
 pub fn make_runtime_engine(memory_limit: Option<Size>) -> Engine {
     let mut engine = Engine::headless();
     if let Some(limit) = memory_limit {
-        let base = BaseTunables::for_target(&Target::default());
+        let base = BaseTunables::new();
         let tunables = LimitingTunables::new(base, limit_to_pages(limit));
         engine.set_tunables(tunables);
     }
@@ -58,7 +59,14 @@ pub fn make_compiling_engine(
     memory_limit: Option<Size>,
     parsed_wasm: Option<ParsedWasm>,
 ) -> Engine {
-    let gas_limit = 0;
+    compiling_engine(0, memory_limit, parsed_wasm)
+}
+
+fn compiling_engine(
+    gas_limit: u64,
+    memory_limit: Option<Size>,
+    parsed_wasm: Option<ParsedWasm>,
+) -> Engine {
     let deterministic = Arc::new(Gatekeeper::default());
     let metering = Arc::new(Metering::new(gas_limit, cost, parsed_wasm));
 
@@ -68,11 +76,16 @@ pub fn make_compiling_engine(
     compiler.push_middleware(metering);
     let mut engine: Engine = compiler.into();
     if let Some(limit) = memory_limit {
-        let base = BaseTunables::for_target(&Target::default());
+        let base = BaseTunables::new();
         let tunables = LimitingTunables::new(base, limit_to_pages(limit));
         engine.set_tunables(tunables);
     }
     engine
+}
+
+#[cfg(test)]
+pub fn make_compiling_engine_with_gas(gas_limit: u64) -> Engine {
+    compiling_engine(gas_limit, None, None)
 }
 
 fn limit_to_pages(limit: Size) -> Pages {
@@ -266,11 +279,8 @@ mod tests {
         let budget = 20_000_000i64;
         set_remaining_points(&mut store, &instance, budget);
         let copy = instance.exports.get_function("copy").unwrap();
-        copy.call(
-            &mut store,
-            &[Value::I32(8), Value::I32(0), Value::I32(4)],
-        )
-        .unwrap();
+        copy.call(&mut store, &[Value::I32(8), Value::I32(0), Value::I32(4)])
+            .unwrap();
         assert!(!exhausted(&mut store, &instance));
         let left = remaining_points(&mut store, &instance);
         assert!(left < budget, "small copy must consume gas (left={left})");
@@ -330,7 +340,11 @@ mod tests {
             .view(&store)
             .read(0, &mut still)
             .unwrap();
-        assert_eq!(still, [0xAA, 0xBB, 0xCC, 0xDD], "copy must not mutate memory after gas trap");
+        assert_eq!(
+            still,
+            [0xAA, 0xBB, 0xCC, 0xDD],
+            "copy must not mutate memory after gas trap"
+        );
     }
 
     #[test]

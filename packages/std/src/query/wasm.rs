@@ -67,10 +67,10 @@ pub enum WasmQuery {
     },
     /// Returns a [`CircuitInfoResponse`] with metadata of the code
     // #[cfg(feature = "cosmwasm_3_0")]
-    #[cfg(feature = "zk")]
+    
     CircuitInfo { zk_id: u64 },
     /// Returns a [`CircuitResponse`] with metadata of the code
-    #[cfg(feature = "zk")]
+    
     Circuit { zk_id: u64 },
 }
 
@@ -159,9 +159,9 @@ impl_hidden_constructor!(
 
 impl QueryResponseType for CodeInfoResponse {}
 
-#[cfg(feature = "zk")]
+
 pub use zk::{CircuitInfoResponse, CircuitResponse};
-#[cfg(feature = "zk")]
+
 pub mod zk {
     use super::*;
     /// The essential data from wasmd's [Circuit]/[CircuitResponse].
@@ -294,7 +294,7 @@ mod tests {
     }
     #[test]
     #[cfg(feature = "cosmwasm_3_0")]
-    #[cfg(feature = "zk")]
+    
     fn circuit_info_response_serialization() {
         let key = Binary::from(vec![0x11; 72]);
         let response = CircuitInfoResponse {

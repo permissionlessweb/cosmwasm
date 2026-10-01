@@ -80,7 +80,7 @@ thread_local! {
 /// // ... run Authenticate ...
 /// clear_test_circuits();
 /// ```
-#[cfg(feature = "zk")]
+
 pub fn register_test_circuit(zkid: u64, circuit_name: &str, verifier: CircuitVerifier) {
     ZK_CIRCUIT_REGISTRY.with(|registry| {
         registry
@@ -90,7 +90,7 @@ pub fn register_test_circuit(zkid: u64, circuit_name: &str, verifier: CircuitVer
 }
 
 /// Clear all registered test circuits. Useful for test isolation.
-#[cfg(feature = "zk")]
+
 pub fn clear_test_circuits() {
     ZK_CIRCUIT_REGISTRY.with(|registry| {
         registry.borrow_mut().clear();
@@ -196,7 +196,7 @@ impl Api for MockApi {
         cosmwasm_crypto::bls12_381_aggregate_g2(g2s).map_err(Into::into)
     }
 
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_verify(
         &self,
         zkid: u64,
@@ -214,7 +214,7 @@ impl Api for MockApi {
         })
     }
 
-    #[cfg(feature = "zk")]
+    
     fn proof_instance_batch_verify(
         &self,
         zkids: &[u64],
@@ -1119,14 +1119,10 @@ impl Default for WasmQuerier {
                 WasmQuery::RawRange { contract_addr, .. } => SystemError::NoSuchContract {
                     addr: contract_addr.clone(),
                 },
-                #[cfg(feature = "zk")]
-                WasmQuery::CircuitInfo { zk_id } => SystemError::NoSuchCircuit {
-                    zk_id: *zk_id,
-                },
-                #[cfg(feature = "zk")]
-                WasmQuery::Circuit { zk_id } => SystemError::NoSuchCircuit {
-                    zk_id: *zk_id,
-                },
+                
+                WasmQuery::CircuitInfo { zk_id } => SystemError::NoSuchCircuit { zk_id: *zk_id },
+                
+                WasmQuery::Circuit { zk_id } => SystemError::NoSuchCircuit { zk_id: *zk_id },
             };
             SystemResult::Err(err)
         });
@@ -3062,7 +3058,7 @@ mod tests {
                         })
                     }
                 }
-                #[cfg(feature = "zk")]
+                
                 WasmQuery::CircuitInfo { zk_id } => {
                     if zk_id == &4 {
                         use crate::CircuitInfoResponse;
@@ -3077,7 +3073,7 @@ mod tests {
                         SystemResult::Err(SystemError::NoSuchCircuit { zk_id: *zk_id })
                     }
                 }
-                #[cfg(feature = "zk")]
+                
                 WasmQuery::Circuit { zk_id } => {
                     if zk_id == &4 {
                         use crate::CircuitResponse;

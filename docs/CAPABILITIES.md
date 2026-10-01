@@ -108,3 +108,53 @@ contract is stored.
 
 [wasmvm]: https://github.com/CosmWasm/wasmvm
 [#1299]: https://github.com/CosmWasm/cosmwasm/pull/1299
+
+
+## Built-in capabilities
+
+Since capabilities can be created between contract and environment, we don't
+know them all in the VM. This is a list of all built-in capabilities, but chains
+might define others.
+
+- `iterator` is for storage backends that allow range queries. Not all types of
+  databases do that. There are trees that don't allow it and Secret Network does
+  not support iterators for other technical reasons.
+- `stargate` is for messages and queries that came with the Cosmos SDK upgrade
+  "Stargate". It primarily includes protobuf messages and IBC support.
+- `staking` is for chains with the Cosmos SDK staking module. There are Cosmos
+  chains that don't use this (e.g. Tgrade).
+- `ibc2` is for messages and queries that came with the Cosmos SDK upgrade
+  "Ibc2".
+- `cosmwasm_1_1` enables the `BankQuery::Supply` query. Only chains running
+  CosmWasm `1.1.0` or higher support this.
+- `cosmwasm_1_2` enables the `GovMsg::VoteWeighted` and `WasmMsg::Instantiate2`
+  messages. Only chains running CosmWasm `1.2.0` or higher support this.
+- `cosmwasm_1_3` enables the `BankQuery::AllDenomMetadata`,
+  `BankQuery::DenomMetadata` and `DistributionQuery::DelegatorWithdrawAddress`
+  queries, as well as `DistributionMsg::FundCommunityPool`. Only chains running
+  CosmWasm `1.3.0` or higher support this.
+- `cosmwasm_1_4` enables the `DistributionQuery::DelegationRewards`,
+  `DistributionQuery::DelegationTotalRewards` and
+  `DistributionQuery::DelegatorValidators` queries. Only chains running CosmWasm
+  `1.4.0` or higher support this.
+- `cosmwasm_2_0` enables `CosmosMsg::Any` and `QueryRequest::Grpc`. Only chains
+  running CosmWasm `2.0.0` or higher support this.
+- `cosmwasm_2_1` enables `IbcMsg::WriteAcknowledgement`. Only chains running
+  CosmWasm `2.1.0` or higher support this.
+- `cosmwasm_2_2` enables an optional additional `MigrateInfo` parameter for the
+  `migrate` entrypoint, as well as IBC Fees support with `IbcMsg::PayPacketFee`,
+  `IbcMsg::PayPacketFeeAsync` and `IbcQuery::FeeEnabledChannel`. Only chains
+  running CosmWasm `2.2.0` or higher support this.
+- `cosmwasm_3_0` enables `WasmQuery::RawRange`. Only chains running CosmWasm
+  `3.0.0` or higher support this.
+- `bn254` is the BN256 / alt_bn128 host: `bn254_add`, `bn254_scalar_mul`,
+  `bn254_pairing_equality`. It is a default feature of this VM, and
+  `wasmkeeper.BuiltInCapabilities` advertises it.
+- `hash_blake` is BLAKE2b-256 and BLAKE3-256 (`blake2b_256`, `blake3_256`).
+  It is a default feature of this VM. The capability name is `hash_blake`,
+  with an underscore.
+- `hash_poseidon` is Poseidon on Pasta (`poseidon_hash_pallas`,
+  `poseidon_hash_vesta`) and `poseidon377_hash`. It is a default feature of
+  this VM.
+- `redpallas` is RedPallas and RedJubjub spend-auth and binding verify. It is
+  a default feature of this VM.
