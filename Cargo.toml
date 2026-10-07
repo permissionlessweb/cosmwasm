@@ -1,6 +1,6 @@
 [workspace]
-members = ["packages/*"]
-exclude = ["contracts", "packages/zk-hosts", "packages/zk-vote-bridge"]
+members = ["packages/*", "packages/zk/vendor/lean-stwo-dummy"]
+exclude = ["contracts", "packages/zk-vote-bridge"]
 
 resolver = "2"
 
