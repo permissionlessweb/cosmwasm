@@ -73,7 +73,7 @@ wasmer-middlewares = "=7.4.2"
 wasmer-types = "=7.4.2"
 nam-wasm-instrument = { git = "https://github.com/permissionlessweb/nam-wasm-instrument", rev = "248ac2796903fe39977f31cb9bdef54c77ccf7a0", features = ["sign_ext", "bulk", "simd"] }
 
-halo2_proofs = { package = "zakura-halo2-proofs", git = "https://github.com/permissionlessweb/common", rev = "5364d3d989640e5356351ee8c0d062ca18d4bfaa", default-features = false, features = ["batch"] }
+halo2_proofs = { package = "zakura-halo2-proofs", git = "https://github.com/permissionlessweb/common", rev = "798a3178a6d20d2df08cfe7141065bfb59e4c7a2", default-features = false, features = ["batch"] }
 zk-cosmwasm  = { workspace = true, default-features = false, features = ["interface"], optional = true }
 
 tracing = "0.1.38"
