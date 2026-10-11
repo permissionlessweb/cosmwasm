@@ -375,7 +375,17 @@ pub trait Api: Any {
     // ── Multi-curve host Api (feature-gated; default OFF) ─────────────────
     // Mirrors Wasmer hosts in cosmwasm-vm. Never GPU for blake/poseidon.
 
-    /// BLAKE2b-256 digest (CPU only; never GPU on consensus path).
+    /// BLAKE2b-256 of `input` only (CPU, never GPU). Feature `hash-blake`.
+    ///
+    /// This runs in the host, so it is outside the guest wasm SIMD ban
+    /// (opcode `0xFD`, rustc `-C target-feature=-simd128`). The host
+    /// implementation is `blake2b_simd`: AVX2 or SSE4.1 chosen at runtime on
+    /// x86_64, portable on other CPUs. The digest is RFC 7693 BLAKE2b-256.
+    ///
+    /// The import does not take a BLAKE2 personalization block. ZAP1 leaf
+    /// (`NordicShield_`) and node (`NordicShield_MRK`) hashes cannot use
+    /// this method. A personalized import is an ABI change and is not part
+    /// of this host.
     #[cfg(feature = "hash-blake")]
     #[allow(unused_variables)]
     fn blake2b_256(&self, input: &[u8]) -> [u8; 32] {

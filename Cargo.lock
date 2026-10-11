@@ -1157,6 +1157,7 @@ dependencies = [
  "base64 0.22.1",
  "base64-serde",
  "blake2",
+ "blake2b_simd",
  "blake3",
  "cosmwasm-core",
  "criterion",
