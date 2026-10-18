@@ -76,6 +76,10 @@ pub use crate::serde::{from_slice, to_vec};
 pub use crate::size::Size;
 
 pub use zk_cosmwasm::COSMWASM_FOOTER_LENGTH;
+pub use crate::environment::{CircuitLoader, Environment};
+pub use crate::imports::do_proof_instance_verify;
+pub use crate::memory::write_region;
+pub use crate::wasm_backend::compile_module;
 
 pub mod internals {
     #![doc(hidden)]
