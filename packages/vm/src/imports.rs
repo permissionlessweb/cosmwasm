@@ -3613,14 +3613,14 @@ mod tests {
     #[test]
     #[cfg(feature = "redpallas")]
     fn do_redpallas_spendauth_verify_valid() {
-        use rand_core::OsRng;
+        use rand_chacha_010::{rand_core::SeedableRng, ChaCha20Rng};
         use reddsa::{orchard as reddsa_orchard, SigningKey, VerificationKey};
 
         let api = MockApi::default();
         let (fe, mut store, _instance) = make_instance(api);
         let mut fe_mut = fe.into_mut(&mut store);
 
-        let mut rng = OsRng;
+        let mut rng = ChaCha20Rng::seed_from_u64(1);
         let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut rng);
         let vk = VerificationKey::from(&sk);
         let msg = b"terp-host-redpallas-roundtrip";
@@ -3642,14 +3642,14 @@ mod tests {
     #[test]
     #[cfg(feature = "redpallas")]
     fn do_redpallas_spendauth_verify_invalid() {
-        use rand_core::OsRng;
+        use rand_chacha_010::{rand_core::SeedableRng, ChaCha20Rng};
         use reddsa::{orchard as reddsa_orchard, SigningKey, VerificationKey};
 
         let api = MockApi::default();
         let (fe, mut store, _instance) = make_instance(api);
         let mut fe_mut = fe.into_mut(&mut store);
 
-        let mut rng = OsRng;
+        let mut rng = ChaCha20Rng::seed_from_u64(2);
         let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut rng);
         let vk = VerificationKey::from(&sk);
         let msg = b"terp-host-redpallas-roundtrip";

@@ -136,12 +136,13 @@ pub fn verify_spend_auth_sig(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand_core::OsRng;
+    // zakura-reddsa uses rand_core 0.10; deterministic ChaCha keeps tests reproducible.
+    use rand_chacha_010::{rand_core::SeedableRng, ChaCha20Rng};
     use reddsa::{orchard as reddsa_orchard, SigningKey};
 
     #[test]
     fn redpallas_spendauth_roundtrip() {
-        let mut rng = OsRng;
+        let mut rng = ChaCha20Rng::seed_from_u64(1);
         let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut rng);
         let vk = VerificationKey::from(&sk);
         let msg = b"terp-redpallas-test-message";
@@ -155,7 +156,7 @@ mod tests {
 
     #[test]
     fn redpallas_binding_roundtrip() {
-        let mut rng = OsRng;
+        let mut rng = ChaCha20Rng::seed_from_u64(2);
         let sk = SigningKey::<reddsa_orchard::Binding>::new(&mut rng);
         let vk = VerificationKey::from(&sk);
         let msg = [7u8; 32];
@@ -168,7 +169,7 @@ mod tests {
 
     #[test]
     fn redjubjub_spendauth_roundtrip() {
-        let mut rng = OsRng;
+        let mut rng = ChaCha20Rng::seed_from_u64(3);
         let sk = SigningKey::<sapling::SpendAuth>::new(&mut rng);
         let vk = VerificationKey::from(&sk);
         let msg = b"sapling-redjubjub";
@@ -187,7 +188,7 @@ mod tests {
 
     #[test]
     fn vote_sdk_alias() {
-        let mut rng = OsRng;
+        let mut rng = ChaCha20Rng::seed_from_u64(4);
         let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut rng);
         let vk = VerificationKey::from(&sk);
         let msg = [1u8; 32];
