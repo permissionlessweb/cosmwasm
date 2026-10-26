@@ -28,3 +28,12 @@ serde = { version = "1.0.192", default-features = false, features = ["alloc", "d
 serde_json = "1.0.140"
 thiserror = "1.0.26"
 zk-cosmwasm = { path = "packages/zk" }
+
+[patch.crates-io]
+
+
+zakura-halo2-gadgets = { path = "../zakura-common/crates/halo2_gadgets" }
+zakura-halo2-poseidon = { path = "../zakura-common/crates/halo2_poseidon" }
+zakura-halo2-proofs = { path = "../zakura-common/crates/halo2_proofs" }
+zakura-pasta-curves = { path = "../zakura-common/crates/pasta_curves" }
+zakura-reddsa = { path = "../zakura-common/crates/reddsa" }
