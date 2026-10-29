@@ -90,7 +90,7 @@ hex-literal = "0.4.1"
 leb128 = "0.2"
 rand = "0.8"
 # Signing only for redpallas host round-trip tests (feature-gated usage).
-reddsa = { package = "zakura-reddsa", version = "=5.0.0", features = ["std"] }
+reddsa = { package = "zakura-reddsa", version = "=5.0.0", features = ["std", "pallas-pasta"] }
 target-lexicon = "0.12"
 tempfile = "3.1.0"
 time = { version = "0.3.35", features = ["formatting"] }
