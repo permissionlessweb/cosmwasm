@@ -2,7 +2,7 @@
 //! (bitfield || deposit || EB). Trace limbs reconstruct those roots;
 //! the same bytes are mixed into Fiat-Shamir. Not Dummy-N / DSTW.
 
-use itertools::Itertools;
+use itertools012::Itertools;
 use num_traits::Zero;
 use stwo::core::channel::{Blake2sChannel, Channel};
 use stwo::core::fields::m31::{BaseField, M31 as StwoM31};

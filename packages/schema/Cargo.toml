@@ -12,7 +12,7 @@ license = { workspace = true }
 
 [package.metadata.optimizer]
 standard-build = true
-builds = [  { name = "cosmwasm-schema", default-features = true }]
+builds = [{ name = "cosmwasm-schema", default-features = true }]
 
 [dependencies]
 cosmwasm-schema-derive = { workspace = true }
@@ -23,7 +23,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-anyhow = "1.0.57"
-insta = { version = "1.41.1", features = ["json"] }
-semver = "1"
-tempfile = "3"
+anyhow = { workspace = true }
+insta = { workspace = true, features = ["json"] }
+semver = { workspace = true }
+tempfile = { workspace = true }

@@ -1,7 +1,7 @@
 //! Phase 1B daily-balance AIR: public (period, weight) and witness fine == weight.
 //! CPU / Blake2s. Feature-gated with real-stwo.
 
-use itertools::Itertools;
+use itertools012::Itertools;
 use num_traits::Zero;
 use stwo::core::channel::{Blake2sChannel, Channel};
 use stwo::core::fields::m31::{BaseField, M31 as StwoM31};

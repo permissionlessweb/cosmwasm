@@ -18,7 +18,15 @@ builds = [{ name = "cosmwasm-vm", default-features = true }]
 bench = false
 
 [features]
-default = ["iterator", "staking", "zk", "bn254", "hash-blake", "hash-poseidon", "redpallas"]
+default = [
+    "iterator",
+    "staking",
+    "zk",
+    "bn254",
+    "hash-blake",
+    "hash-poseidon",
+    "redpallas",
+]
 # iterator allows us to iterate over all DB items in a given range
 # this must be enabled to support CosmWasm contracts compiled with the 'iterator' feature
 # optional as some merkle stores (like tries) don't support this
@@ -42,60 +50,56 @@ redpallas = ["cosmwasm-crypto/redpallas"]
 gpu = ["zk-cosmwasm?/gpu"]
 
 [dependencies]
-bech32 = "0.11.0"
-blake2 = "0.10.6"
-blake3 = "1.5"
-clru = "0.6.1"
-# Uses the path when built locally; uses the given version from crates.io when published
+bech32 = { workspace = true }
+blake2 = { workspace = true, default-features = true }
+blake3 = { workspace = true, default-features = true }
+clru = { workspace = true }
+corez = { workspace = true }
 cosmwasm-core = { workspace = true }
 cosmwasm-crypto = { workspace = true }
-# Penumbra poseidon377 (BLS12-377 scalar) — test vectors + host import only.
-poseidon377 = { version = "1.2.0", optional = true, default-features = false, features = ["arkworks"] }
 cosmwasm-std = { workspace = true, features = ["std"] }
 cosmwasm-vm-derive = { workspace = true }
-crc32fast = "1.3.2"
-derive_more = { version = "1.0.0", default-features = false, features = ["debug"] }
+crc32fast = { workspace = true }
+derive_more1 = { workspace = true, features = ["debug"] }
 # For heap profiling. Only used in the "heap_profiling" example. This has to be a non-dev dependency
 # because cargo currently does not support optional dev-dependencies.
-dhat = { version = "0.3.3", optional = true }
-hex = "0.4"
-rand = "0.8"
-rand_chacha_010 = { package = "rand_chacha", version = "0.10" }
-rand_core = { version = "0.6", features = ["getrandom"] }
+dhat = { workspace = true, optional = true }
+
+halo2_proofs = { workspace = true, features = ["batch"] }
+hex = { workspace = true }
+nam-wasm-instrument = { workspace = true, features = ["sign_ext", "bulk", "simd"] }
+poseidon377 = { workspace = true, optional = true, features = ["arkworks"] }
+rand = { workspace = true }
+rand_chacha_010 = { workspace = true }
+rand_core = { workspace = true, features = ["getrandom"] }
 serde = { workspace = true }
-serde_json = "1.0.140"
-sha2 = "0.10"
-strum = { version = "0.26.2", default-features = false, features = ["derive"] }
-thiserror = "1.0.26"
-# We pin wasmer to a specific version because the layout of cached modules can change between patch versions.
-# 7.5.0 matches permissionlessweb/wasmer terp-singlepass-far-1 (AArch64 i64.div_u far branch).
-wasmer = { version = "=7.5.0", default-features = false, features = ["singlepass"] }
-wasmer-middlewares = "=7.5.0"
-wasmer-types = "=7.5.0"
-nam-wasm-instrument = { git = "https://github.com/permissionlessweb/nam-wasm-instrument", rev = "fa6735f54d543326faa2e8ae58119e97be9e11bc", features = ["sign_ext", "bulk", "simd"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+strum = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
 
-halo2_proofs = { package = "zakura-halo2-proofs", version = "=5.0.0", default-features = false, features = ["batch"] }
-zk-cosmwasm  = { workspace = true, default-features = false, features = ["interface"], optional = true }
-
-tracing = "0.1.38"
-tracing-profile = "0.10.11"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
-corez = "0.1.1"
+tracing = { workspace = true }
+tracing-profile = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+wasmer = { workspace = true, features = ["singlepass"] }
+wasmer-middlewares = { workspace = true }
+wasmer-types = { workspace = true }
+zk-cosmwasm = { workspace = true, features = ["interface"], optional = true }
 
 [dev-dependencies]
-clap = "4"
-criterion = { version = "0.5.1", features = ["html_reports"] }
-glob = "0.3.1"
-hex-literal = "0.4.1"
-leb128 = "0.2"
-rand = "0.8"
+clap = { workspace = true }
+criterion = { workspace = true, features = ["html_reports"] }
+glob = { workspace = true }
+hex-literal = { workspace = true }
+leb128 = { workspace = true }
+rand = { workspace = true }
 # Signing only for redpallas host round-trip tests (feature-gated usage).
-reddsa = { package = "zakura-reddsa", version = "=5.0.0", features = ["std", "pallas-pasta"] }
-target-lexicon = "0.12"
-tempfile = "3.1.0"
-time = { version = "0.3.35", features = ["formatting"] }
-wasm-encoder = "0.205.0"
-wat = "1.0"
+reddsa = { workspace = true, default-features = true, features = ["std", "pallas-pasta"] }
+target-lexicon = { workspace = true }
+tempfile = { workspace = true }
+time = { workspace = true, features = ["formatting"] }
+wasm-encoder = { workspace = true }
+wat = { workspace = true }
 
 [[bench]]
 name = "main"

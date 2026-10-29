@@ -8,13 +8,13 @@ edition = { workspace = true }
 license = { workspace = true }
 
 [dependencies]
-anyhow = "1.0.57"
-clap = "4"
-colored = "2.1.0"
-cosmwasm-vm = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+colored = { workspace = true }
 cosmwasm-std = { workspace = true, default-features = true }
+cosmwasm-vm = { workspace = true }
 
 [dev-dependencies]
-assert_cmd = "2.1.2"
-predicates = "3"
-tempfile = "3.1.0"
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+tempfile = { workspace = true }

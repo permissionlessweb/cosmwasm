@@ -9,22 +9,22 @@ license = { workspace = true }
 
 [package.metadata.optimizer]
 standard-build = true
-builds = [  { name = "cw-schema", default-features = true }]
-
-[dependencies]
-cw-schema-derive = { workspace = true }
-indexmap = { version = "2.3.0", default-features = false }
-schemars = { version = "1.0.4", optional = true }
-serde = { version = "1.0.204", features = ["derive"] }
-serde_with = { version = "3.17.0", default-features = false, features = ["macros"] }
-siphasher = { version = "1.0.1", default-features = false }
-typeid = "1.0.3"
-
-[dev-dependencies]
-insta = { version = "1.39.0", features = ["json"] }
-pretty_assertions = "1.4.0"
-serde_json = "1.0.120"
+builds = [{ name = "cw-schema", default-features = true }]
 
 [features]
 default = ["std"]
-std = ["dep:schemars"]
+std = ["dep:schemars1"]
+
+[dependencies]
+cw-schema-derive = { workspace = true }
+indexmap = { workspace = true }
+schemars1 = { workspace = true, optional = true }
+serde = { workspace = true, default-features = true, features = ["derive"] }
+serde_with = { workspace = true, features = ["macros"] }
+siphasher = { workspace = true }
+typeid = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true, features = ["json"] }
+pretty_assertions = { workspace = true }
+serde_json = { workspace = true }

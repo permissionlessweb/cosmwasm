@@ -1,7 +1,7 @@
 //! Phase 1A valset AIR (LEAN-3): 5-byte deposit index + 1-byte EB.
 //! Real Stwo (CPU / Blake2s). Not DummyStwo / DSTW.
 
-use itertools::Itertools;
+use itertools012::Itertools;
 use num_traits::Zero;
 use stwo::core::channel::{Blake2sChannel, Channel};
 use stwo::core::fields::m31::{BaseField, M31 as StwoM31};

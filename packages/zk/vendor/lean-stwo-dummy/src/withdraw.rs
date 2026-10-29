@@ -3,7 +3,7 @@
 //! Partial withdraw is a *separate* proof (kind PWDW). Dummy DSTW is rejected.
 //! BondedSet/bitfield remains power SoT; JOIN/LEAV stay LNPR subjects.
 
-use itertools::Itertools;
+use itertools012::Itertools;
 use num_traits::Zero;
 use sha2::{Digest, Sha256};
 use stwo::core::channel::{Blake2sChannel, Channel};

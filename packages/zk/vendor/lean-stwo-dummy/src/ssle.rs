@@ -3,7 +3,7 @@
 //! that reveals it. Trace limbs reconstruct the ticket object; FS mixes the
 //! same bytes. Dummy-N / DSTW is rejected.
 
-use itertools::Itertools;
+use itertools012::Itertools;
 use num_traits::Zero;
 use sha2::{Digest, Sha256};
 use stwo::core::channel::{Blake2sChannel, Channel};

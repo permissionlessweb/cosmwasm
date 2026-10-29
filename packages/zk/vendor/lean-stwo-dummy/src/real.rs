@@ -1,7 +1,7 @@
 //! Smallest real S-two AIR: public `(a, b)` and `c = dummy_m31_hash(a, b)` over M31.
 //! CPU / Blake2s only. Feature-gated so default crate stays Dummy for Go.
 
-use itertools::Itertools;
+use itertools012::Itertools;
 use num_traits::Zero;
 use stwo::core::channel::{Blake2sChannel, Channel};
 use stwo::core::fields::m31::{BaseField, M31 as StwoM31};

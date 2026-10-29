@@ -2,7 +2,7 @@
 //! Day key is not the persistent JOIN/LEAV subject. BondedSet/bitfield stays power SoT.
 //! Dummy DSTW is rejected.
 
-use itertools::Itertools;
+use itertools012::Itertools;
 use num_traits::Zero;
 use sha2::{Digest, Sha256};
 use stwo::core::channel::{Blake2sChannel, Channel};

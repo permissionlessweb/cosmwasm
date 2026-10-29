@@ -10,7 +10,7 @@ license = { workspace = true }
 proc-macro = true
 
 [dependencies]
-blake2 = "0.10.6"
-proc-macro2 = "1.0.86"
-quote = "1.0.37"
-syn = { version = "2.0.77", features = ["extra-traits", "full"] }
+blake2 = { workspace = true, default-features = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["extra-traits", "full"] }

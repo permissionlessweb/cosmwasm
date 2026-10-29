@@ -4,7 +4,12 @@ The format is based on [Keep a Changelog], and this project adheres to [Semantic
 
 ## [Unreleased]
 
-(empty)
+## [4.1.0] - 2026-10-28
+
+### Changed
+
+- Crate version is 4.1.0. Workspace members inherit dependency versions from the workspace root.
+- Wasmer stays 7.5.0. Singlepass stays `e1edbf4ff55b0e0ccb61015ee1015d8283689fd5`.
 
 ## [4.0.0-zk] - 2026-09-20
 
