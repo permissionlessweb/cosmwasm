@@ -13,12 +13,12 @@ builds = [{ name = "cw-schema", default-features = true }]
 
 [features]
 default = ["std"]
-std = ["dep:schemars1"]
+std = ["dep:schemars"]
 
 [dependencies]
 cw-schema-derive = { workspace = true }
 indexmap = { workspace = true }
-schemars1 = { workspace = true, optional = true }
+schemars = { version = "1.0.4", optional = true }
 serde = { workspace = true, default-features = true, features = ["derive"] }
 serde_with = { workspace = true, features = ["macros"] }
 siphasher = { workspace = true }

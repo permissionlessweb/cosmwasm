@@ -25,7 +25,7 @@ mod default_impls;
 
 #[skip_serializing_none]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-#[cfg_attr(feature = "std", derive(schemars1::JsonSchema))]
+#[cfg_attr(feature = "std", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct StructProperty {
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
@@ -36,7 +36,7 @@ pub struct StructProperty {
 
 #[skip_serializing_none]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-#[cfg_attr(feature = "std", derive(schemars1::JsonSchema))]
+#[cfg_attr(feature = "std", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum StructType {
     Unit,
@@ -50,7 +50,7 @@ pub enum StructType {
 
 #[skip_serializing_none]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-#[cfg_attr(feature = "std", derive(schemars1::JsonSchema))]
+#[cfg_attr(feature = "std", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct EnumCase {
     pub description: Option<Cow<'static, str>>,
@@ -60,7 +60,7 @@ pub struct EnumCase {
 
 #[skip_serializing_none]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-#[cfg_attr(feature = "std", derive(schemars1::JsonSchema))]
+#[cfg_attr(feature = "std", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum EnumValue {
     Unit,
@@ -73,7 +73,7 @@ pub enum EnumValue {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-#[cfg_attr(feature = "std", derive(schemars1::JsonSchema))]
+#[cfg_attr(feature = "std", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub enum MapKind {
@@ -83,7 +83,7 @@ pub enum MapKind {
 
 #[skip_serializing_none]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-#[cfg_attr(feature = "std", derive(schemars1::JsonSchema))]
+#[cfg_attr(feature = "std", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum NodeType {
     // Floating point numbers
@@ -139,7 +139,7 @@ pub enum NodeType {
 
 #[skip_serializing_none]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-#[cfg_attr(feature = "std", derive(schemars1::JsonSchema))]
+#[cfg_attr(feature = "std", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Node {
     pub name: Cow<'static, str>,
@@ -150,7 +150,7 @@ pub struct Node {
 
 #[skip_serializing_none]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-#[cfg_attr(feature = "std", derive(schemars1::JsonSchema))]
+#[cfg_attr(feature = "std", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SchemaV1 {
     pub root: DefinitionReference,
@@ -159,7 +159,7 @@ pub struct SchemaV1 {
 
 #[skip_serializing_none]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-#[cfg_attr(feature = "std", derive(schemars1::JsonSchema))]
+#[cfg_attr(feature = "std", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", tag = "type")]
 #[non_exhaustive]
 pub enum Schema {

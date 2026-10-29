@@ -8,6 +8,6 @@ fn can_decode_example() {
 
 #[test]
 fn snapshot_jsonschema() {
-    let schema = schemars1::schema_for!(Schema);
+    let schema = schemars::schema_for!(Schema);
     insta::assert_json_snapshot!(schema);
 }
