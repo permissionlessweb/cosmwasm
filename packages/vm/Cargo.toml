@@ -60,7 +60,9 @@ cosmwasm-crypto = { workspace = true }
 cosmwasm-std = { workspace = true, features = ["std"] }
 cosmwasm-vm-derive = { workspace = true }
 crc32fast = { workspace = true }
-derive_more1 = { workspace = true, features = ["debug"] }
+# derive_more 1's Debug derive emits ::derive_more::. std uses workspace
+# derive_more 2 under that crate name, so vm keeps 1.0.0 directly.
+derive_more = { version = "1.0.0", default-features = false, features = ["debug"] }
 # For heap profiling. Only used in the "heap_profiling" example. This has to be a non-dev dependency
 # because cargo currently does not support optional dev-dependencies.
 dhat = { workspace = true, optional = true }

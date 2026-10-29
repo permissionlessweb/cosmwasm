@@ -6,7 +6,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
-use derive_more1::Debug;
+use derive_more::Debug;
 use wasmer::{AsStoreMut, Instance as WasmerInstance, Memory, MemoryView, Value};
 use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 
