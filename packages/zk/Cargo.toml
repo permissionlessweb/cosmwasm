@@ -78,9 +78,9 @@ blake3 = "1"
 # Target-gate so `cw-headstash` can compile to wasm32 (BridgeMintNote / ict_local_funded).
 # Pin versions: wasmer module layout can change between patch versions.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wasmer = { version = "=7.4.2", default-features = false, features = ["singlepass"] }
-wasmer-middlewares = "=7.4.2"
-wasmer-types = "=7.4.2"
+wasmer = { version = "=7.5.0", default-features = false, features = ["singlepass"] }
+wasmer-middlewares = "=7.5.0"
+wasmer-types = "=7.5.0"
 
 
 [dev-dependencies]
