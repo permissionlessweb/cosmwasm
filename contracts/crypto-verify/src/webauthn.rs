@@ -2,8 +2,8 @@
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use cosmwasm_std::{Api, StdResult};
-use p256::{ecdsa::Signature, elliptic_curve::sec1::FromEncodedPoint, EncodedPoint, PublicKey};
-use sha2::{digest::generic_array::GenericArray, Digest, Sha256};
+use p256::{ecdsa::Signature, FieldBytes, PublicKey};
+use sha2::{Digest, Sha256};
 
 #[allow(clippy::too_many_arguments)]
 pub fn verify(
@@ -25,11 +25,13 @@ pub fn verify(
     // - the signature could actually exist like this for a secp256r1 ECDSA key
     //
     // In production this should have proper error handling
-    let point = EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
-    let public_key = PublicKey::from_encoded_point(&point).unwrap();
+    let mut sec1 = vec![0x04];
+    sec1.extend_from_slice(x);
+    sec1.extend_from_slice(y);
+    let public_key = PublicKey::from_sec1_bytes(&sec1).unwrap();
     let signature = Signature::from_scalars(
-        GenericArray::clone_from_slice(r),
-        GenericArray::clone_from_slice(s),
+        FieldBytes::try_from(r).unwrap(),
+        FieldBytes::try_from(s).unwrap(),
     )
     .unwrap();
 

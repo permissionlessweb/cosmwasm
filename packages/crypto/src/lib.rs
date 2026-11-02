@@ -17,7 +17,6 @@ mod bls12_381;
 mod ecdsa;
 mod ed25519;
 mod errors;
-mod identity_digest;
 mod secp256k1;
 mod secp256r1;
 mod blake;

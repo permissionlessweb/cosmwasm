@@ -1,14 +1,10 @@
 use alloc::{string::ToString, vec::Vec};
-use digest::{Digest, Update}; // trait
 use ecdsa::RecoveryId;
-use p256::{
-    ecdsa::signature::DigestVerifier, // traits
-    ecdsa::{Signature, VerifyingKey}, // type aliases
-};
+use p256::ecdsa::signature::hazmat::PrehashVerifier;
+use p256::ecdsa::{Signature, VerifyingKey};
 
 use crate::ecdsa::{ECDSA_COMPRESSED_PUBKEY_LEN, ECDSA_UNCOMPRESSED_PUBKEY_LEN};
 use crate::errors::{CryptoError, CryptoResult};
-use crate::identity_digest::Identity256;
 
 /// ECDSA secp256r1 implementation.
 ///
@@ -29,23 +25,18 @@ pub fn secp256r1_verify(
     let signature = read_signature(signature)?;
     check_pubkey(public_key)?;
 
-    // Already hashed, just build Digest container
-    let message_digest = Identity256::new().chain(message_hash);
-
-    let mut signature = Signature::from_bytes(&signature.into())
+    let signature = Signature::from_slice(&signature)
         .map_err(|e| CryptoError::generic_err(e.to_string()))?;
 
     // High-S signatures require normalization since our verification implementation
     // rejects them by default. If we had a verifier that does not restrict to
     // low-S only, this step was not needed.
-    if let Some(normalized) = signature.normalize_s() {
-        signature = normalized;
-    }
+    let signature = signature.normalize_s();
 
     let public_key = VerifyingKey::from_sec1_bytes(public_key)
         .map_err(|e| CryptoError::generic_err(e.to_string()))?;
 
-    match public_key.verify_digest(message_digest, &signature) {
+    match public_key.verify_prehash(&message_hash, &signature) {
         Ok(()) => Ok(true),
         Err(_) => Ok(false),
     }
@@ -77,15 +68,12 @@ pub fn secp256r1_recover_pubkey(
         return Err(CryptoError::invalid_recovery_param());
     };
 
-    // Compose extended signature
-    let signature = p256::ecdsa::Signature::from_bytes(&signature.into())
+    let signature = p256::ecdsa::Signature::from_slice(&signature)
         .map_err(|e| CryptoError::generic_err(e.to_string()))?;
 
-    // Recover
-    let message_digest = Identity256::new().chain(message_hash);
-    let pubkey = p256::ecdsa::VerifyingKey::recover_from_digest(message_digest, &signature, id)
+    let pubkey = p256::ecdsa::VerifyingKey::recover_from_prehash(&message_hash, &signature, id)
         .map_err(|e| CryptoError::generic_err(e.to_string()))?;
-    let encoded: Vec<u8> = pubkey.to_encoded_point(false).as_bytes().into();
+    let encoded: Vec<u8> = pubkey.to_sec1_point(false).as_bytes().to_vec();
     Ok(encoded)
 }
 
@@ -148,9 +136,9 @@ mod tests {
     use crate::secp256r1_recover_pubkey;
     use alloc::string::String;
     use ecdsa::RecoveryId;
-    use p256::{
-        ecdsa::signature::DigestSigner, ecdsa::SigningKey, elliptic_curve::rand_core::OsRng,
-    };
+    use digest::Digest;
+    use hex_literal::hex;
+    use p256::{ecdsa::signature::hazmat::PrehashSigner, ecdsa::SigningKey};
     use serde::Deserialize;
     use sha2::Sha256;
 
@@ -186,26 +174,28 @@ mod tests {
 
     #[test]
     fn test_secp256r1_verify() {
-        // Explicit / external hashing
-        let message_digest = Sha256::new().chain(MSG);
-        let message_hash = message_digest.clone().finalize();
+        let message_hash = Sha256::digest(MSG);
 
-        // Signing
-        let secret_key = SigningKey::random(&mut OsRng); // Serialize with `::to_bytes()`
+        // Signing. A fixed scalar avoids pulling rand_core 0.10 into the wasm guest.
+        let secret_key = SigningKey::from_slice(&hex!(
+            "0000000000000000000000000000000000000000000000000000000000000001"
+        ))
+        .expect("secret");
 
         // Note: the signature type must be annotated or otherwise inferable as
         // `Signer` has many impls of the `Signer` trait (for both regular and
         // recoverable signature types).
-        let (signature, _recovery_id): (Signature, RecoveryId) =
-            secret_key.sign_digest(message_digest);
+        let (signature, _recovery_id): (Signature, RecoveryId) = secret_key
+            .sign_prehash(&message_hash)
+            .expect("sign");
 
-        let public_key = VerifyingKey::from(&secret_key); // Serialize with `::to_encoded_point()`
+        let public_key = secret_key.verifying_key();
 
         // Verification (uncompressed public key)
         assert!(secp256r1_verify(
             &message_hash,
             signature.to_bytes().as_slice(),
-            public_key.to_encoded_point(false).as_bytes()
+            public_key.to_sec1_point(false).as_bytes()
         )
         .unwrap());
 
@@ -213,26 +203,29 @@ mod tests {
         assert!(secp256r1_verify(
             &message_hash,
             signature.to_bytes().as_slice(),
-            public_key.to_encoded_point(true).as_bytes()
+            public_key.to_sec1_point(true).as_bytes()
         )
         .unwrap());
 
         // Wrong message fails
-        let bad_message_hash = Sha256::new().chain(MSG).chain("\0").finalize();
+        let bad_message_hash = Sha256::digest(format!("{MSG}\0"));
         assert!(!secp256r1_verify(
             &bad_message_hash,
             signature.to_bytes().as_slice(),
-            public_key.to_encoded_point(false).as_bytes()
+            public_key.to_sec1_point(false).as_bytes()
         )
         .unwrap());
 
         // Other pubkey fails
-        let other_secret_key = SigningKey::random(&mut OsRng);
-        let other_public_key = VerifyingKey::from(&other_secret_key);
+        let other_secret_key = SigningKey::from_slice(&hex!(
+            "0000000000000000000000000000000000000000000000000000000000000002"
+        ))
+        .expect("other secret");
+        let other_public_key = other_secret_key.verifying_key();
         assert!(!secp256r1_verify(
             &message_hash,
             signature.to_bytes().as_slice(),
-            other_public_key.to_encoded_point(false).as_bytes()
+            other_public_key.to_sec1_point(false).as_bytes()
         )
         .unwrap());
     }

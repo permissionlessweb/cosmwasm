@@ -263,10 +263,10 @@ fn bench_crypto(c: &mut Criterion) {
         let r_s = hex!("99e71a99cb2270b8cac5254f9e99b6210c6c10224a1579cf389ef88b20a1abe9129ff05af364204442bdb53ab6f18a99ab48acc9326fa689f228040429e3ca66");
         let recovery_param: u8 = 0;
 
-        let expected = SigningKey::from_bytes(&private_key.into())
+        let expected = SigningKey::from_slice(&private_key)
             .unwrap()
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()
             .to_vec();
 
