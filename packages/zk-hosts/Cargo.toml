@@ -3,14 +3,14 @@ name = "zk-cosmwasm-hosts"
 version = "4.1.0"
 edition = "2021"
 publish = false
-description = "Host-only Stwo/Flock Path A verifiers for zk-cosmwasm. Workspace member so a git rev can name this crate. Stwo stays on lean-stwo-dummy/real-stwo, not a zk-cosmwasm feature."
+description = "Host-only Stwo/Flock Path A verifiers for zk-cosmwasm. Not a CosmWasm workspace member: real-stwo pulls starknet-crypto and crypto-bigint 0.5.5."
 license = "Apache-2.0"
 
 [dependencies]
-bincode = { workspace = true }
-blake3 = { workspace = true, default-features = true }
-flock-core = { workspace = true }
-lean-stwo-dummy = { workspace = true, features = ["real-stwo"] }
-serde = { workspace = true, default-features = true, features = ["derive"] }
-sha2 = { workspace = true }
-zk-cosmwasm = { workspace = true }
+bincode = "1.3"
+blake3 = "1.5"
+flock-core = { git = "https://github.com/succinctlabs/flock", rev = "b684b1258e4b1f202bec24afd660ace851b09e5e" }
+lean-stwo-dummy = { path = "../zk/vendor/lean-stwo-dummy", features = ["real-stwo"] }
+serde = { version = "1.0.192", features = ["derive"] }
+sha2 = "0.10"
+zk-cosmwasm = { path = "../zk", default-features = false }

@@ -1,6 +1,6 @@
 [workspace]
-members = ["packages/*", "packages/zk/vendor/lean-stwo-dummy"]
-exclude = ["contracts", "packages/zk-vote-bridge"]
+members = ["packages/*"]
+exclude = ["contracts", "packages/zk-vote-bridge", "packages/zk-hosts"]
 
 resolver = "2"
 
@@ -74,7 +74,6 @@ insta = "1.41.1"
 itertools = { version = "0.13.0", default-features = false }
 itertools012 = { package = "itertools", version = "0.12" }
 k256 = { version = "0.14", default-features = false }
-lean-stwo-dummy = { path = "packages/zk/vendor/lean-stwo-dummy", default-features = false }
 leb128 = "0.2"
 nam-wasm-instrument = { git = "https://github.com/permissionlessweb/nam-wasm-instrument", rev = "fa6735f54d543326faa2e8ae58119e97be9e11bc" }
 num-bigint = { version = "0.4.2", default-features = false }
@@ -106,8 +105,6 @@ sha3 = "0.10"
 siphasher = { version = "1.0.1", default-features = false }
 static_assertions = "1.1.0"
 strum = { version = "0.26.2", default-features = false }
-stwo = { package = "stwo", git = "https://github.com/starkware-libs/stwo", rev = "826591c6c371376810ca8213b5812d5daf6d5092", default-features = false }
-stwo-constraint-framework = { package = "stwo-constraint-framework", git = "https://github.com/starkware-libs/stwo", rev = "826591c6c371376810ca8213b5812d5daf6d5092", default-features = false }
 syn = "2"
 target-lexicon = "0.12"
 tempfile = "3.1.0"
